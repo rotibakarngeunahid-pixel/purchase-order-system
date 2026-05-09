@@ -22,6 +22,7 @@ export default function OrderEntry() {
   const [rotiLoading, setRotiLoading] = useState(false);
   const [rotiError, setRotiError] = useState(null);
   const [rotiDetail, setRotiDetail] = useState(null);
+  const [rotiStockMap, setRotiStockMap] = useState({});
   const [outletOpen, setOutletOpen] = useState({});
   const [outletDays, setOutletDays] = useState({});
   const saveTimers = useRef({});
@@ -174,9 +175,9 @@ export default function OrderEntry() {
     try {
       const result = await previewRotiOrder(orderDate);
 
-      // Isi matrix per outlet berdasarkan need per cabang (Opsi A)
       const newMatrix = { ...matrix };
       const savePromises = [];
+      const stockMap = {};
 
       result.branches.forEach((branch) => {
         const outlet = outlets.find(
@@ -190,6 +191,7 @@ export default function OrderEntry() {
         const qty = !isOpen ? 0 : days === 1 ? Math.ceil(branch.need / 2) : branch.need;
 
         newMatrix[key] = qty;
+        stockMap[outlet.id] = { current_stock: branch.current_stock, min_stock: branch.min_stock };
 
         if (saveTimers.current[key]) {
           clearTimeout(saveTimers.current[key]);
@@ -209,6 +211,7 @@ export default function OrderEntry() {
 
       setMatrix(newMatrix);
       setRotiDetail(result);
+      setRotiStockMap(stockMap);
 
       if (savePromises.length > 0) {
         setSaving(true);
@@ -365,6 +368,9 @@ export default function OrderEntry() {
                     {outlets.map((outlet) => {
                       const key = `${outlet.id}_${mat.id}`;
                       const val = matrix[key];
+                      const isRoti = mat.name.toLowerCase().includes('roti tawar');
+                      const stockInfo = isRoti ? rotiStockMap[outlet.id] : null;
+                      const stockLow = stockInfo && stockInfo.current_stock < stockInfo.min_stock;
                       return (
                         <td key={outlet.id} className="px-2 py-1.5 text-center border-r border-gray-100">
                           <input
@@ -376,6 +382,12 @@ export default function OrderEntry() {
                             className="w-full text-center border border-gray-200 rounded-md px-1 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red focus:border-brand-red disabled:bg-gray-100 disabled:text-gray-400"
                             placeholder="0"
                           />
+                          {stockInfo && (
+                            <div className={`mt-0.5 text-xs leading-tight ${stockLow ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>
+                              Stok: {stockInfo.current_stock}
+                              <span className="text-gray-300"> / {stockInfo.min_stock}</span>
+                            </div>
+                          )}
                         </td>
                       );
                     })}
