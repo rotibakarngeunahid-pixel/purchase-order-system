@@ -207,7 +207,13 @@ export default function PurchaseRecord() {
   const handleResetPO = async (po) => {
     setResetting(true);
     try {
-      await api.put(`/api/purchase/${po.id}/reset`);
+      if (po.status === 'pending' || po.status === 'confirmed') {
+        // Pending PO: hapus saja dari sistem
+        await api.delete(`/api/purchase/${po.id}`);
+      } else {
+        // Received PO: reset kembali ke pending
+        await api.put(`/api/purchase/${po.id}/reset`);
+      }
       setConfirmReset(null);
       loadPOs();
     } catch (err) {
@@ -244,14 +250,29 @@ export default function PurchaseRecord() {
       {confirmReset && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Reset Data Penerimaan?</h3>
-            <p className="text-sm text-gray-500 mb-1">
-              PO <strong>{confirmReset.supplier?.name}</strong> akan dikembalikan ke status{' '}
-              <strong>Pending</strong>.
-            </p>
-            <p className="text-sm text-orange-600 mb-6">
-              Semua data qty diterima dan harga aktual akan dihapus dan harus diisi ulang.
-            </p>
+            {confirmReset.status === 'pending' || confirmReset.status === 'confirmed' ? (
+              <>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Hapus PO ini?</h3>
+                <p className="text-sm text-gray-500 mb-1">
+                  PO <strong>{confirmReset.supplier?.name}</strong> (
+                  {formatDateID(confirmReset.session?.order_date)}) akan dihapus dari daftar.
+                </p>
+                <p className="text-sm text-red-600 mb-6">
+                  Tindakan ini tidak dapat dibatalkan.
+                </p>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">Reset Data Penerimaan?</h3>
+                <p className="text-sm text-gray-500 mb-1">
+                  PO <strong>{confirmReset.supplier?.name}</strong> akan dikembalikan ke status{' '}
+                  <strong>Pending</strong>.
+                </p>
+                <p className="text-sm text-orange-600 mb-6">
+                  Semua data qty diterima dan harga aktual akan dihapus dan harus diisi ulang.
+                </p>
+              </>
+            )}
             <div className="flex gap-3 justify-end">
               <button onClick={() => setConfirmReset(null)} className="btn-outline text-sm">
                 Batal
@@ -261,7 +282,7 @@ export default function PurchaseRecord() {
                 disabled={resetting}
                 className="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600 disabled:opacity-50"
               >
-                {resetting ? 'Mereset...' : 'Ya, Reset'}
+                {resetting ? 'Memproses...' : 'Ya, Lanjutkan'}
               </button>
             </div>
           </div>
@@ -327,9 +348,18 @@ export default function PurchaseRecord() {
                   {statusLabel[po.status] || po.status}
                 </span>
                 {po.status === 'pending' || po.status === 'confirmed' ? (
-                  <button onClick={() => openModal(po)} className="btn-primary text-sm">
-                    Catat Penerimaan
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => openModal(po)} className="btn-primary text-sm">
+                      Catat Penerimaan
+                    </button>
+                    <button
+                      onClick={() => setConfirmReset(po)}
+                      title="Hapus PO ini dari daftar"
+                      className="px-3 py-2 rounded-lg text-sm font-medium text-red-500 border border-red-300 hover:bg-red-50"
+                    >
+                      Reset
+                    </button>
+                  </div>
                 ) : (
                   <div className="flex gap-2">
                     <button onClick={() => openModal(po)} className="btn-outline text-sm">

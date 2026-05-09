@@ -134,6 +134,40 @@ router.put('/:po_id/receive', async (req, res) => {
   res.json({ ...po, has_discrepancy: hasDiscrepancy });
 });
 
+// DELETE hapus PO yang masih pending (belum dicatat penerimaan)
+router.delete('/:po_id', async (req, res) => {
+  const { po_id } = req.params;
+
+  const { data: po, error: fetchError } = await supabase
+    .from('purchase_orders')
+    .select('id, status, session_id')
+    .eq('id', po_id)
+    .single();
+
+  if (fetchError || !po) return res.status(404).json({ error: 'PO tidak ditemukan' });
+  if (po.status !== 'pending' && po.status !== 'confirmed') {
+    return res.status(400).json({ error: 'Hanya PO berstatus Pending atau Dikonfirmasi yang dapat dihapus' });
+  }
+
+  const { error: deleteError } = await supabase
+    .from('purchase_orders')
+    .delete()
+    .eq('id', po_id);
+
+  if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+  // Kembalikan sesi ke "sent" jika sebelumnya completed
+  if (po.session_id) {
+    await supabase
+      .from('order_sessions')
+      .update({ status: 'sent' })
+      .eq('id', po.session_id)
+      .eq('status', 'completed');
+  }
+
+  res.json({ success: true });
+});
+
 // PUT reset PO ke status pending (hapus data penerimaan)
 router.put('/:po_id/reset', async (req, res) => {
   const { po_id } = req.params;
