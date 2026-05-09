@@ -1,6 +1,12 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const supabase = require('./supabase');
 const { formatDate, formatRupiah } = require('./waLink');
+
+function getResend() {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error('RESEND_API_KEY belum diatur di environment variables.');
+  return new Resend(apiKey);
+}
 
 async function getAdminSettings() {
   const { data, error } = await supabase
@@ -15,24 +21,6 @@ async function getAdminSettings() {
     settings[row.key] = row.value;
   });
   return settings;
-}
-
-function createTransporter() {
-  const host = process.env.SMTP_HOST;
-  const port = parseInt(process.env.SMTP_PORT || '587');
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-
-  if (!host || !user || !pass) {
-    throw new Error('Konfigurasi SMTP (SMTP_HOST, SMTP_USER, SMTP_PASS) belum diatur di environment variables.');
-  }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
-  });
 }
 
 function buildEmailHTML(pos, orderDate, businessName) {
@@ -109,35 +97,33 @@ function buildEmailHTML(pos, orderDate, businessName) {
 }
 
 async function sendOrderEmail(pos, orderDate) {
+  const resend = getResend();
   const settings = await getAdminSettings();
 
   const adminEmail = settings.admin_email || 'rotibakarngeunahid@gmail.com';
   const businessName = settings.business_name || 'Roti Bakar Ngeunah';
-
-  const transporter = createTransporter();
   const html = buildEmailHTML(pos, orderDate, businessName);
   const dateStr = formatDate(orderDate);
-  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
 
-  await transporter.sendMail({
-    from: `"${businessName}" <${fromEmail}>`,
+  const { error } = await resend.emails.send({
+    from: 'Roti Bakar Ngeunah <onboarding@resend.dev>',
     to: adminEmail,
     subject: `Purchase Order ${dateStr} — ${businessName}`,
     html,
   });
+
+  if (error) throw new Error('Gagal mengirim email: ' + error.message);
 }
 
 async function sendTestEmail() {
+  const resend = getResend();
   const settings = await getAdminSettings();
 
   const adminEmail = settings.admin_email || 'rotibakarngeunahid@gmail.com';
   const businessName = settings.business_name || 'Roti Bakar Ngeunah';
-  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
 
-  const transporter = createTransporter();
-
-  await transporter.sendMail({
-    from: `"${businessName}" <${fromEmail}>`,
+  const { error } = await resend.emails.send({
+    from: 'Roti Bakar Ngeunah <onboarding@resend.dev>',
     to: adminEmail,
     subject: `Test Email — ${businessName}`,
     html: `<div style="font-family:Arial,sans-serif;max-width:400px;margin:20px auto;padding:20px;border:1px solid #e0e0e0;border-radius:8px;">
@@ -146,6 +132,8 @@ async function sendTestEmail() {
       <p style="color:#999;font-size:12px;">Dikirim pada: ${new Date().toLocaleString('id-ID')}</p>
     </div>`,
   });
+
+  if (error) throw new Error('Gagal mengirim email test: ' + error.message);
 }
 
 module.exports = { sendOrderEmail, sendTestEmail };
