@@ -5,6 +5,7 @@ const navItems = [
   { to: '/order', label: 'Input Order', icon: '📝' },
   { to: '/purchase', label: 'Catat Penerimaan', icon: '📦' },
   { to: '/reports', label: 'Laporan', icon: '📊' },
+  { to: '/analytics', label: 'Analitik', icon: '📈' },
   { to: '/master', label: 'Master Data', icon: '🗂️' },
   { to: '/settings', label: 'Pengaturan', icon: '⚙️' },
 ];

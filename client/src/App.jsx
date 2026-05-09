@@ -6,6 +6,7 @@ import OrderEntry from './pages/OrderEntry';
 import OrderReview from './pages/OrderReview';
 import PurchaseRecord from './pages/PurchaseRecord';
 import Reports from './pages/Reports';
+import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import MasterData from './pages/MasterData';
 import Sidebar from './components/Sidebar';
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/order/:sessionId/review" element={<ProtectedRoute loggedIn={loggedIn}><OrderReview /></ProtectedRoute>} />
         <Route path="/purchase" element={<ProtectedRoute loggedIn={loggedIn}><PurchaseRecord /></ProtectedRoute>} />
         <Route path="/reports" element={<ProtectedRoute loggedIn={loggedIn}><Reports /></ProtectedRoute>} />
+        <Route path="/analytics" element={<ProtectedRoute loggedIn={loggedIn}><Analytics /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute loggedIn={loggedIn}><Settings /></ProtectedRoute>} />
         <Route path="/master" element={<ProtectedRoute loggedIn={loggedIn}><MasterData /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />

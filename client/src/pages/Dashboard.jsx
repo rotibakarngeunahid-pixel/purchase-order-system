@@ -25,8 +25,15 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
   useEffect(() => {
+    loadData();
+  }, []);
+
+  async function loadData() {
+    setLoading(true);
     Promise.all([
       api.get('/api/reports/stats'),
       api.get('/api/orders/sessions?limit=10'),
@@ -34,7 +41,20 @@ export default function Dashboard() {
       setStats(statsRes.data);
       setSessions(sessionsRes.data?.data || []);
     }).catch(console.error).finally(() => setLoading(false));
-  }, []);
+  }
+
+  async function handleDeleteDraft(session) {
+    setDeletingId(session.id);
+    try {
+      await api.delete(`/api/orders/session/${session.id}`);
+      setSessions((prev) => prev.filter((s) => s.id !== session.id));
+      setConfirmDelete(null);
+    } catch (err) {
+      alert(err.response?.data?.error || 'Gagal menghapus draft');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   const handleNewOrder = async () => {
     const today = new Date().toISOString().split('T')[0];
@@ -52,6 +72,33 @@ export default function Dashboard() {
         <div className="text-center">
           <div className="w-10 h-10 border-4 border-brand-red border-t-transparent rounded-full animate-spin mx-auto mb-3" />
           <p className="text-gray-500 text-sm">Memuat dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Konfirmasi hapus draft modal
+  if (confirmDelete) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Hapus Draft?</h3>
+          <p className="text-sm text-gray-500 mb-6">
+            Anda yakin ingin menghapus draft order tanggal{' '}
+            <strong>{formatDateID(confirmDelete.order_date)}</strong>? Tindakan ini tidak dapat dibatalkan.
+          </p>
+          <div className="flex gap-3 justify-end">
+            <button onClick={() => setConfirmDelete(null)} className="btn-outline text-sm">
+              Batal
+            </button>
+            <button
+              onClick={() => handleDeleteDraft(confirmDelete)}
+              disabled={deletingId === confirmDelete.id}
+              className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+            >
+              {deletingId === confirmDelete.id ? 'Menghapus...' : 'Ya, Hapus'}
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -156,12 +203,20 @@ export default function Dashboard() {
                       </td>
                       <td className="px-5 py-3.5 text-center">
                         {session.status === 'draft' ? (
-                          <button
-                            onClick={() => navigate(`/order?sessionId=${session.id}`)}
-                            className="text-brand-orange text-xs font-medium hover:underline"
-                          >
-                            Lanjutkan
-                          </button>
+                          <div className="flex items-center justify-center gap-3">
+                            <button
+                              onClick={() => navigate(`/order?sessionId=${session.id}`)}
+                              className="text-brand-orange text-xs font-medium hover:underline"
+                            >
+                              Lanjutkan
+                            </button>
+                            <button
+                              onClick={() => setConfirmDelete(session)}
+                              className="text-red-500 text-xs font-medium hover:underline"
+                            >
+                              Hapus
+                            </button>
+                          </div>
                         ) : (
                           <button
                             onClick={() => navigate(`/order/${session.id}/review`)}

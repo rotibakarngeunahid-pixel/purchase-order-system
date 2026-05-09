@@ -88,6 +88,34 @@ router.post('/session/:id/request', async (req, res) => {
   res.json(data);
 });
 
+// Hapus sesi order berstatus draft
+router.delete('/session/:id', async (req, res) => {
+  const { id } = req.params;
+
+  const { data: session, error: sessionError } = await supabase
+    .from('order_sessions')
+    .select('id, status')
+    .eq('id', id)
+    .single();
+
+  if (sessionError || !session) {
+    return res.status(404).json({ error: 'Sesi tidak ditemukan' });
+  }
+
+  if (session.status !== 'draft') {
+    return res.status(400).json({ error: 'Hanya sesi berstatus Draft yang dapat dihapus' });
+  }
+
+  const { error: deleteError } = await supabase
+    .from('order_sessions')
+    .delete()
+    .eq('id', id);
+
+  if (deleteError) return res.status(500).json({ error: deleteError.message });
+
+  res.json({ success: true, message: 'Draft berhasil dihapus' });
+});
+
 // Hitung PO per supplier
 router.post('/session/:id/calculate', async (req, res) => {
   const { id } = req.params;

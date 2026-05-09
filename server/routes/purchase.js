@@ -78,24 +78,52 @@ router.put('/:po_id/receive', async (req, res) => {
     return sum + (Number(item.qty_received || 0) * Number(item.price_actual || 0));
   }, 0);
 
+  // Cek discrepancy: item yang qty_received < qty_ordered atau = 0
+  const { data: allItems } = await supabase
+    .from('purchase_order_items')
+    .select('qty_ordered, qty_received, material:materials(name)')
+    .eq('po_id', po_id);
+
+  const discrepancies = (allItems || []).filter(
+    (item) => Number(item.qty_received ?? item.qty_ordered) < Number(item.qty_ordered)
+  );
+
+  const hasDiscrepancy = discrepancies.length > 0;
+  const poStatus = hasDiscrepancy ? 'received_partial' : 'received';
+
+  // Buat catatan discrepancy otomatis
+  let autoNotes = notes || '';
+  if (hasDiscrepancy) {
+    const discLines = discrepancies.map(
+      (item) =>
+        `${item.material?.name}: dipesan ${item.qty_ordered}, diterima ${item.qty_received ?? 0}`
+    );
+    autoNotes = [autoNotes, `[Selisih Penerimaan] ${discLines.join('; ')}`]
+      .filter(Boolean)
+      .join('\n');
+  }
+
   // Update PO
   const { data: po, error: poError } = await supabase
     .from('purchase_orders')
-    .update({ status: 'received', total_actual: totalActual, notes: notes || null })
+    .update({ status: poStatus, total_actual: totalActual, notes: autoNotes || null })
     .eq('id', po_id)
     .select('*, supplier:suppliers(id, name)')
     .single();
 
   if (poError) return res.status(500).json({ error: poError.message });
 
-  // Cek apakah semua PO dalam sesi sudah received
+  // Cek apakah semua PO dalam sesi sudah received/received_partial
   if (po.session_id) {
     const { data: allPOs } = await supabase
       .from('purchase_orders')
       .select('status')
       .eq('session_id', po.session_id);
 
-    if (allPOs && allPOs.every((p) => p.status === 'received')) {
+    const allDone = allPOs && allPOs.every(
+      (p) => p.status === 'received' || p.status === 'received_partial'
+    );
+    if (allDone) {
       await supabase
         .from('order_sessions')
         .update({ status: 'completed' })
@@ -103,7 +131,7 @@ router.put('/:po_id/receive', async (req, res) => {
     }
   }
 
-  res.json(po);
+  res.json({ ...po, has_discrepancy: hasDiscrepancy });
 });
 
 module.exports = router;

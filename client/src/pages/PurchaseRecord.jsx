@@ -74,36 +74,44 @@ function ReceiveModal({ po, onClose, onSaved }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {items.map((item, idx) => (
-                <tr key={item.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2.5 font-medium text-gray-800">
-                    {item.material?.name}
-                    <span className="text-xs text-gray-400 ml-1">{item.material?.purchase_unit}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-center text-gray-500">{item.qty_ordered}</td>
-                  <td className="px-3 py-2.5">
-                    <input
-                      type="number"
-                      min="0"
-                      value={item.qty_received}
-                      onChange={(e) => updateItem(idx, 'qty_received', e.target.value)}
-                      className="w-20 text-center border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red"
-                    />
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <input
-                      type="number"
-                      min="0"
-                      value={item.price_actual}
-                      onChange={(e) => updateItem(idx, 'price_actual', e.target.value)}
-                      className="w-28 text-right border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red"
-                    />
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-medium text-gray-800">
-                    {formatRupiah(Number(item.qty_received || 0) * Number(item.price_actual || 0))}
-                  </td>
-                </tr>
-              ))}
+              {items.map((item, idx) => {
+                const hasGap = Number(item.qty_received ?? item.qty_ordered) < Number(item.qty_ordered);
+                return (
+                  <tr key={item.id} className={hasGap ? 'bg-orange-50' : 'hover:bg-gray-50'}>
+                    <td className="px-3 py-2.5 font-medium text-gray-800">
+                      {item.material?.name}
+                      <span className="text-xs text-gray-400 ml-1">{item.material?.purchase_unit}</span>
+                      {hasGap && (
+                        <span className="ml-2 text-xs text-orange-600 font-semibold">Selisih</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2.5 text-center text-gray-500">{item.qty_ordered}</td>
+                    <td className="px-3 py-2.5">
+                      <input
+                        type="number"
+                        min="0"
+                        value={item.qty_received}
+                        onChange={(e) => updateItem(idx, 'qty_received', e.target.value)}
+                        className={`w-20 text-center border rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red ${
+                          hasGap ? 'border-orange-400 bg-orange-50' : 'border-gray-300'
+                        }`}
+                      />
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <input
+                        type="number"
+                        min="0"
+                        value={item.price_actual}
+                        onChange={(e) => updateItem(idx, 'price_actual', e.target.value)}
+                        className="w-28 text-right border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red"
+                      />
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-medium text-gray-800">
+                      {formatRupiah(Number(item.qty_received || 0) * Number(item.price_actual || 0))}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot>
               <tr className="bg-orange-50 border-t border-orange-100">
@@ -179,8 +187,18 @@ export default function PurchaseRecord() {
     }
   };
 
-  const statusLabel = { pending: 'Pending', confirmed: 'Dikonfirmasi', received: 'Diterima' };
-  const statusClass = { pending: 'badge-pending', confirmed: 'badge-sent', received: 'badge-received' };
+  const statusLabel = {
+    pending: 'Pending',
+    confirmed: 'Dikonfirmasi',
+    received: 'Diterima',
+    received_partial: 'Diterima Sebagian',
+  };
+  const statusClass = {
+    pending: 'badge-pending',
+    confirmed: 'badge-sent',
+    received: 'badge-received',
+    received_partial: 'badge-pending',
+  };
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -207,6 +225,7 @@ export default function PurchaseRecord() {
           <option value="pending">Pending</option>
           <option value="confirmed">Dikonfirmasi</option>
           <option value="received">Diterima</option>
+          <option value="received_partial">Diterima Sebagian</option>
         </select>
       </div>
 
@@ -249,19 +268,13 @@ export default function PurchaseRecord() {
                 <span className={statusClass[po.status] || 'badge-pending'}>
                   {statusLabel[po.status] || po.status}
                 </span>
-                {po.status !== 'received' ? (
-                  <button
-                    onClick={() => openModal(po)}
-                    className="btn-primary text-sm"
-                  >
-                    📥 Catat Penerimaan
+                {po.status === 'pending' || po.status === 'confirmed' ? (
+                  <button onClick={() => openModal(po)} className="btn-primary text-sm">
+                    Catat Penerimaan
                   </button>
                 ) : (
-                  <button
-                    onClick={() => openModal(po)}
-                    className="btn-outline text-sm"
-                  >
-                    ✏️ Edit
+                  <button onClick={() => openModal(po)} className="btn-outline text-sm">
+                    Edit
                   </button>
                 )}
               </div>
