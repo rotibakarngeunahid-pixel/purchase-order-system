@@ -45,7 +45,6 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [toast, setToast] = useState(null);
-  const [showSmtpPass, setShowSmtpPass] = useState(false);
 
   useEffect(() => {
     api.get('/api/settings').then((res) => {
@@ -73,12 +72,11 @@ export default function Settings() {
     }
   };
 
-  const handleTestSMTP = async () => {
+  const handleTestEmail = async () => {
     setTesting(true);
-    // Save first
     try {
       await api.put('/api/settings', settings);
-      const res = await api.post('/api/settings/test-smtp');
+      const res = await api.post('/api/settings/test-email');
       showToast(res.data.message || 'Email test berhasil dikirim!');
     } catch (err) {
       showToast(err.response?.data?.error || err.message, 'error');
@@ -125,73 +123,18 @@ export default function Settings() {
           placeholder="Roti Bakar Ngeunah"
         />
         <Field
-          label="Email Admin (penerima notifikasi)"
+          label="Email Tujuan (penerima laporan purchase order)"
           id="admin_email"
           type="email"
           value={settings.admin_email}
           onChange={(e) => set('admin_email', e.target.value)}
-          placeholder="admin@rotibakarngeunah.com"
-        />
-      </Section>
-
-      {/* SMTP */}
-      <Section title="📧 Konfigurasi SMTP">
-        <div className="grid grid-cols-2 gap-4">
-          <Field
-            label="SMTP Host"
-            id="smtp_host"
-            value={settings.smtp_host}
-            onChange={(e) => set('smtp_host', e.target.value)}
-            placeholder="mail.rotibakarngeunah.my.id"
-          />
-          <Field
-            label="SMTP Port"
-            id="smtp_port"
-            type="number"
-            value={settings.smtp_port}
-            onChange={(e) => set('smtp_port', e.target.value)}
-            placeholder="587"
-          />
-        </div>
-        <Field
-          label="Username SMTP"
-          id="smtp_user"
-          value={settings.smtp_user}
-          onChange={(e) => set('smtp_user', e.target.value)}
-          placeholder="noreply@rotibakarngeunah.my.id"
-        />
-        <div className="mb-4">
-          <label htmlFor="smtp_pass" className="label">Password SMTP</label>
-          <div className="relative">
-            <input
-              id="smtp_pass"
-              type={showSmtpPass ? 'text' : 'password'}
-              className="input pr-16"
-              value={settings.smtp_pass || ''}
-              onChange={(e) => set('smtp_pass', e.target.value)}
-              placeholder="••••••••"
-            />
-            <button
-              type="button"
-              onClick={() => setShowSmtpPass(!showSmtpPass)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400 hover:text-gray-600"
-            >
-              {showSmtpPass ? 'Sembunyikan' : 'Tampilkan'}
-            </button>
-          </div>
-        </div>
-        <Field
-          label="Email Pengirim (From)"
-          id="smtp_from"
-          type="email"
-          value={settings.smtp_from}
-          onChange={(e) => set('smtp_from', e.target.value)}
-          placeholder="noreply@rotibakarngeunah.my.id"
+          placeholder="rotibakarngeunahid@gmail.com"
+          hint="Email ini akan menerima laporan purchase order setiap kali order dikirim."
         />
         <button
-          onClick={handleTestSMTP}
+          onClick={handleTestEmail}
           disabled={testing}
-          className="btn-secondary text-sm mt-2"
+          className="btn-secondary text-sm"
         >
           {testing ? (
             <span className="flex items-center gap-2">
@@ -199,12 +142,9 @@ export default function Settings() {
               Mengirim test email...
             </span>
           ) : (
-            '📨 Kirim Email Test'
+            '📨 Kirim Email Test ke Alamat Ini'
           )}
         </button>
-        <p className="text-xs text-gray-400 mt-2">
-          Pastikan semua field SMTP diisi sebelum klik test. Email test akan dikirim ke alamat admin.
-        </p>
       </Section>
 
       {/* WhatsApp */}

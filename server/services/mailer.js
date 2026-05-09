@@ -2,13 +2,13 @@ const nodemailer = require('nodemailer');
 const supabase = require('./supabase');
 const { formatDate, formatRupiah } = require('./waLink');
 
-async function getSmtpSettings() {
+async function getAdminSettings() {
   const { data, error } = await supabase
     .from('app_settings')
     .select('key, value')
-    .in('key', ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_pass', 'smtp_from', 'admin_email', 'business_name']);
+    .in('key', ['admin_email', 'business_name']);
 
-  if (error) throw new Error('Gagal membaca konfigurasi SMTP: ' + error.message);
+  if (error) throw new Error('Gagal membaca pengaturan: ' + error.message);
 
   const settings = {};
   (data || []).forEach((row) => {
@@ -17,15 +17,21 @@ async function getSmtpSettings() {
   return settings;
 }
 
-function createTransporter(settings) {
+function createTransporter() {
+  const host = process.env.SMTP_HOST;
+  const port = parseInt(process.env.SMTP_PORT || '587');
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  if (!host || !user || !pass) {
+    throw new Error('Konfigurasi SMTP (SMTP_HOST, SMTP_USER, SMTP_PASS) belum diatur di environment variables.');
+  }
+
   return nodemailer.createTransport({
-    host: settings.smtp_host,
-    port: parseInt(settings.smtp_port || '587'),
-    secure: parseInt(settings.smtp_port || '587') === 465,
-    auth: {
-      user: settings.smtp_user,
-      pass: settings.smtp_pass,
-    },
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
   });
 }
 
@@ -103,48 +109,40 @@ function buildEmailHTML(pos, orderDate, businessName) {
 }
 
 async function sendOrderEmail(pos, orderDate) {
-  const settings = await getSmtpSettings();
+  const settings = await getAdminSettings();
 
-  if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
-    throw new Error('Konfigurasi SMTP belum diatur. Silakan atur di halaman Pengaturan.');
-  }
-  if (!settings.admin_email) {
-    throw new Error('Email admin belum diatur. Silakan atur di halaman Pengaturan.');
-  }
-
+  const adminEmail = settings.admin_email || 'rotibakarngeunahid@gmail.com';
   const businessName = settings.business_name || 'Roti Bakar Ngeunah';
-  const transporter = createTransporter(settings);
+
+  const transporter = createTransporter();
   const html = buildEmailHTML(pos, orderDate, businessName);
   const dateStr = formatDate(orderDate);
+  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
 
   await transporter.sendMail({
-    from: `"${businessName}" <${settings.smtp_from || settings.smtp_user}>`,
-    to: settings.admin_email,
+    from: `"${businessName}" <${fromEmail}>`,
+    to: adminEmail,
     subject: `Purchase Order ${dateStr} — ${businessName}`,
     html,
   });
 }
 
 async function sendTestEmail() {
-  const settings = await getSmtpSettings();
+  const settings = await getAdminSettings();
 
-  if (!settings.smtp_host || !settings.smtp_user || !settings.smtp_pass) {
-    throw new Error('Konfigurasi SMTP belum diatur.');
-  }
-  if (!settings.admin_email) {
-    throw new Error('Email admin belum diatur.');
-  }
-
+  const adminEmail = settings.admin_email || 'rotibakarngeunahid@gmail.com';
   const businessName = settings.business_name || 'Roti Bakar Ngeunah';
-  const transporter = createTransporter(settings);
+  const fromEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+
+  const transporter = createTransporter();
 
   await transporter.sendMail({
-    from: `"${businessName}" <${settings.smtp_from || settings.smtp_user}>`,
-    to: settings.admin_email,
+    from: `"${businessName}" <${fromEmail}>`,
+    to: adminEmail,
     subject: `Test Email — ${businessName}`,
     html: `<div style="font-family:Arial,sans-serif;max-width:400px;margin:20px auto;padding:20px;border:1px solid #e0e0e0;border-radius:8px;">
       <h2 style="color:#D32F2F;">${businessName}</h2>
-      <p>✅ Konfigurasi SMTP berhasil! Email ini dikirim sebagai test dari sistem order ${businessName}.</p>
+      <p>✅ Konfigurasi email berhasil! Email ini dikirim sebagai test dari sistem order ${businessName}.</p>
       <p style="color:#999;font-size:12px;">Dikirim pada: ${new Date().toLocaleString('id-ID')}</p>
     </div>`,
   });

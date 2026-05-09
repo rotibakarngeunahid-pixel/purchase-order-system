@@ -35,8 +35,8 @@ router.put('/', async (req, res) => {
   res.json({ success: true, updated: upsertData.length });
 });
 
-// POST test SMTP
-router.post('/test-smtp', async (req, res) => {
+// POST test email
+router.post('/test-email', async (req, res) => {
   try {
     await sendTestEmail();
     res.json({ success: true, message: 'Email test berhasil dikirim! Cek inbox Anda.' });

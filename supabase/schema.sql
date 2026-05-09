@@ -128,12 +128,7 @@ CREATE POLICY "auth_all" ON app_settings FOR ALL TO authenticated USING (true) W
 -- Default settings
 INSERT INTO app_settings (key, value) VALUES
   ('business_name', 'Roti Bakar Ngeunah'),
-  ('admin_email', ''),
-  ('smtp_host', ''),
-  ('smtp_port', '587'),
-  ('smtp_user', ''),
-  ('smtp_pass', ''),
-  ('smtp_from', ''),
+  ('admin_email', 'rotibakarngeunahid@gmail.com'),
   ('wa_greeting_text', 'Mohon konfirmasi ketersediaan. Terima kasih 🙏')
 ON CONFLICT (key) DO NOTHING;
 
