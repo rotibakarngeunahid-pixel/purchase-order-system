@@ -14,7 +14,7 @@ router.get('/:po_id', async (req, res) => {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, qty_ordered, qty_received, price_actual, subtotal_actual,
-        material:materials(id, code, name, purchase_unit, package_qty, package_unit)
+        material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit)
       )
     `)
     .eq('id', po_id)
@@ -132,6 +132,53 @@ router.put('/:po_id/receive', async (req, res) => {
   }
 
   res.json({ ...po, has_discrepancy: hasDiscrepancy });
+});
+
+// PUT reset PO ke status pending (hapus data penerimaan)
+router.put('/:po_id/reset', async (req, res) => {
+  const { po_id } = req.params;
+
+  const { data: po, error: fetchError } = await supabase
+    .from('purchase_orders')
+    .select('id, status, session_id')
+    .eq('id', po_id)
+    .single();
+
+  if (fetchError || !po) return res.status(404).json({ error: 'PO tidak ditemukan' });
+
+  // Reset semua item: qty_received dan price_actual kembali ke null
+  const { data: items } = await supabase
+    .from('purchase_order_items')
+    .select('id')
+    .eq('po_id', po_id);
+
+  for (const item of (items || [])) {
+    await supabase
+      .from('purchase_order_items')
+      .update({ qty_received: null, price_actual: null })
+      .eq('id', item.id);
+  }
+
+  // Reset PO ke pending
+  const { data: updated, error: updateError } = await supabase
+    .from('purchase_orders')
+    .update({ status: 'pending', total_actual: null, notes: null })
+    .eq('id', po_id)
+    .select('*, supplier:suppliers(id, name)')
+    .single();
+
+  if (updateError) return res.status(500).json({ error: updateError.message });
+
+  // Jika sesi sudah completed, kembalikan ke sent
+  if (po.session_id) {
+    await supabase
+      .from('order_sessions')
+      .update({ status: 'sent' })
+      .eq('id', po.session_id)
+      .eq('status', 'completed');
+  }
+
+  res.json(updated);
 });
 
 module.exports = router;

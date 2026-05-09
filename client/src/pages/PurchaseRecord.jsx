@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react';
 import api, { formatRupiah, formatDateID } from '../lib/api';
 
+function buildInitialItems(poItems) {
+  return (poItems || []).map((item) => ({
+    ...item,
+    qty_received: item.qty_received ?? item.qty_ordered,
+    price_actual: item.price_actual ?? item.material?.price_per_purchase_unit ?? 0,
+  }));
+}
+
 function ReceiveModal({ po, onClose, onSaved }) {
-  const [items, setItems] = useState(
-    (po.items || []).map((item) => ({
-      ...item,
-      qty_received: item.qty_received ?? item.qty_ordered,
-      price_actual: item.price_actual ?? item.material?.price_per_purchase_unit ?? 0,
-    }))
-  );
+  const [items, setItems] = useState(() => buildInitialItems(po.items));
   const [notes, setNotes] = useState(po.notes || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -19,6 +21,12 @@ function ReceiveModal({ po, onClose, onSaved }) {
       next[idx] = { ...next[idx], [field]: value };
       return next;
     });
+  };
+
+  const handleResetForm = () => {
+    setItems(buildInitialItems(po.items));
+    setNotes('');
+    setError('');
   };
 
   const totalActual = items.reduce(
@@ -143,10 +151,17 @@ function ReceiveModal({ po, onClose, onSaved }) {
             Est: <span className="font-medium">{formatRupiah(po.total_estimated)}</span>
             {' → '}Aktual: <span className="font-bold text-brand-red">{formatRupiah(totalActual)}</span>
           </p>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
+            <button
+              onClick={handleResetForm}
+              title="Reset form ke nilai awal (qty = dipesan, harga = database)"
+              className="px-3 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-300 hover:bg-gray-50"
+            >
+              Reset Form
+            </button>
             <button onClick={onClose} className="btn-outline text-sm">Batal</button>
             <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
-              {saving ? 'Menyimpan...' : '✅ Simpan Penerimaan'}
+              {saving ? 'Menyimpan...' : 'Simpan Penerimaan'}
             </button>
           </div>
         </div>
@@ -160,6 +175,8 @@ export default function PurchaseRecord() {
   const [loading, setLoading] = useState(true);
   const [selectedPO, setSelectedPO] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [confirmReset, setConfirmReset] = useState(null);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     loadPOs();
@@ -187,6 +204,19 @@ export default function PurchaseRecord() {
     }
   };
 
+  const handleResetPO = async (po) => {
+    setResetting(true);
+    try {
+      await api.put(`/api/purchase/${po.id}/reset`);
+      setConfirmReset(null);
+      loadPOs();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Gagal mereset PO');
+    } finally {
+      setResetting(false);
+    }
+  };
+
   const statusLabel = {
     pending: 'Pending',
     confirmed: 'Dikonfirmasi',
@@ -208,6 +238,34 @@ export default function PurchaseRecord() {
           onClose={() => setSelectedPO(null)}
           onSaved={loadPOs}
         />
+      )}
+
+      {/* Modal konfirmasi reset PO */}
+      {confirmReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Reset Data Penerimaan?</h3>
+            <p className="text-sm text-gray-500 mb-1">
+              PO <strong>{confirmReset.supplier?.name}</strong> akan dikembalikan ke status{' '}
+              <strong>Pending</strong>.
+            </p>
+            <p className="text-sm text-orange-600 mb-6">
+              Semua data qty diterima dan harga aktual akan dihapus dan harus diisi ulang.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setConfirmReset(null)} className="btn-outline text-sm">
+                Batal
+              </button>
+              <button
+                onClick={() => handleResetPO(confirmReset)}
+                disabled={resetting}
+                className="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600 disabled:opacity-50"
+              >
+                {resetting ? 'Mereset...' : 'Ya, Reset'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Header */}
@@ -254,17 +312,17 @@ export default function PurchaseRecord() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-6 flex-wrap">
+              <div className="flex items-center gap-4 flex-wrap">
                 <div className="text-center">
                   <p className="text-xs text-gray-500">Est. Total</p>
                   <p className="font-semibold text-gray-800">{formatRupiah(po.total_estimated)}</p>
                 </div>
-                {po.total_actual && (
+                {po.total_actual ? (
                   <div className="text-center">
                     <p className="text-xs text-gray-500">Aktual</p>
                     <p className="font-semibold text-brand-red">{formatRupiah(po.total_actual)}</p>
                   </div>
-                )}
+                ) : null}
                 <span className={statusClass[po.status] || 'badge-pending'}>
                   {statusLabel[po.status] || po.status}
                 </span>
@@ -273,9 +331,18 @@ export default function PurchaseRecord() {
                     Catat Penerimaan
                   </button>
                 ) : (
-                  <button onClick={() => openModal(po)} className="btn-outline text-sm">
-                    Edit
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => openModal(po)} className="btn-outline text-sm">
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setConfirmReset(po)}
+                      title="Reset data penerimaan ke Pending"
+                      className="px-3 py-2 rounded-lg text-sm font-medium text-orange-600 border border-orange-300 hover:bg-orange-50"
+                    >
+                      Reset
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
