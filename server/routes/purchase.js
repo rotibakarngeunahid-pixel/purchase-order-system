@@ -13,8 +13,9 @@ router.get('/:po_id', async (req, res) => {
       supplier:suppliers(id, name, wa_number),
       session:order_sessions(id, order_date),
       items:purchase_order_items(
-        id, qty_ordered, qty_received, price_actual, subtotal_actual,
-        material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit)
+        id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
+        material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit),
+        variant:material_variants(id, brand, price_per_purchase_unit)
       )
     `)
     .eq('id', po_id)
@@ -52,14 +53,17 @@ router.put('/:po_id/receive', async (req, res) => {
     return res.status(400).json({ error: 'items wajib berupa array' });
   }
 
-  // Update setiap item
+  // Update setiap item (termasuk variant_id jika dipilih)
   for (const item of items) {
-    const { id, qty_received, price_actual } = item;
+    const { id, qty_received, price_actual, variant_id } = item;
     if (!id) continue;
+
+    const updatePayload = { qty_received, price_actual };
+    if (variant_id !== undefined) updatePayload.variant_id = variant_id || null;
 
     const { error: itemError } = await supabase
       .from('purchase_order_items')
-      .update({ qty_received, price_actual })
+      .update(updatePayload)
       .eq('id', id)
       .eq('po_id', po_id);
 

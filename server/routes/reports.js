@@ -109,7 +109,8 @@ router.get('/analytics/materials', async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  let filtered = (data || []).filter((item) => item.session?.status !== 'draft');
+  // Hanya sesi yang sudah selesai semua PO-nya (completed)
+  let filtered = (data || []).filter((item) => item.session?.status === 'completed');
   if (date_from || date_to) {
     filtered = filtered.filter((item) => {
       const d = item.session?.order_date;
@@ -161,7 +162,8 @@ router.get('/analytics/outlets', async (req, res) => {
 
   if (itemsError) return res.status(500).json({ error: itemsError.message });
 
-  let filtered = (items || []).filter((item) => item.session?.status !== 'draft');
+  // Hanya sesi yang sudah selesai semua PO-nya (completed)
+  let filtered = (items || []).filter((item) => item.session?.status === 'completed');
   if (date_from || date_to) {
     filtered = filtered.filter((item) => {
       const d = item.session?.order_date;

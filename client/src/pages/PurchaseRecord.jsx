@@ -5,7 +5,8 @@ function buildInitialItems(poItems) {
   return (poItems || []).map((item) => ({
     ...item,
     qty_received: item.qty_received ?? item.qty_ordered,
-    price_actual: item.price_actual ?? item.material?.price_per_purchase_unit ?? 0,
+    price_actual: item.price_actual ?? item.variant?.price_per_purchase_unit ?? item.material?.price_per_purchase_unit ?? 0,
+    variant_id: item.variant_id ?? null,
   }));
 }
 
@@ -14,11 +15,46 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [notes, setNotes] = useState(po.notes || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [variantsMap, setVariantsMap] = useState({}); // material_id -> variant[]
+
+  // Ambil varian untuk setiap bahan dalam PO ini
+  useEffect(() => {
+    const materialIds = [...new Set((po.items || []).map((i) => i.material_id).filter(Boolean))];
+    if (materialIds.length === 0) return;
+    Promise.all(
+      materialIds.map((mid) =>
+        api.get(`/api/materials/${mid}/variants`).then((r) => ({ mid, variants: r.data || [] }))
+      )
+    ).then((results) => {
+      const map = {};
+      results.forEach(({ mid, variants }) => {
+        map[mid] = variants.filter((v) => v.is_active);
+      });
+      setVariantsMap(map);
+    }).catch(console.error);
+  }, [po.id]);
 
   const updateItem = (idx, field, value) => {
     setItems((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: value };
+      return next;
+    });
+  };
+
+  const handleSelectVariant = (idx, variantId) => {
+    const item = items[idx];
+    const variants = variantsMap[item.material_id] || [];
+    const chosen = variants.find((v) => v.id === variantId);
+    setItems((prev) => {
+      const next = [...prev];
+      next[idx] = {
+        ...next[idx],
+        variant_id: variantId || null,
+        price_actual: chosen
+          ? chosen.price_per_purchase_unit
+          : item.material?.price_per_purchase_unit ?? 0,
+      };
       return next;
     });
   };
@@ -42,6 +78,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
           id: item.id,
           qty_received: Number(item.qty_received || 0),
           price_actual: Number(item.price_actual || 0),
+          variant_id: item.variant_id || null,
         })),
         notes,
       });
@@ -75,6 +112,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
             <thead>
               <tr className="bg-gray-50 border-b">
                 <th className="px-3 py-2 text-left text-gray-600 font-medium">Bahan</th>
+                <th className="px-3 py-2 text-left text-gray-600 font-medium">Merk</th>
                 <th className="px-3 py-2 text-center text-gray-600 font-medium">Dipesan</th>
                 <th className="px-3 py-2 text-center text-gray-600 font-medium">Diterima</th>
                 <th className="px-3 py-2 text-center text-gray-600 font-medium">Harga/Sat (Rp)</th>
@@ -84,13 +122,28 @@ function ReceiveModal({ po, onClose, onSaved }) {
             <tbody className="divide-y divide-gray-50">
               {items.map((item, idx) => {
                 const hasGap = Number(item.qty_received ?? item.qty_ordered) < Number(item.qty_ordered);
+                const variants = variantsMap[item.material_id] || [];
                 return (
                   <tr key={item.id} className={hasGap ? 'bg-orange-50' : 'hover:bg-gray-50'}>
                     <td className="px-3 py-2.5 font-medium text-gray-800">
                       {item.material?.name}
                       <span className="text-xs text-gray-400 ml-1">{item.material?.purchase_unit}</span>
-                      {hasGap && (
-                        <span className="ml-2 text-xs text-orange-600 font-semibold">Selisih</span>
+                      {hasGap && <span className="ml-2 text-xs text-orange-600 font-semibold">Selisih</span>}
+                    </td>
+                    <td className="px-3 py-2.5">
+                      {variants.length > 0 ? (
+                        <select
+                          value={item.variant_id || ''}
+                          onChange={(e) => handleSelectVariant(idx, e.target.value)}
+                          className="border border-gray-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-36"
+                        >
+                          <option value="">— Default —</option>
+                          {variants.map((v) => (
+                            <option key={v.id} value={v.id}>{v.brand}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-xs text-gray-400">{item.material?.brand || '—'}</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-center text-gray-500">{item.qty_ordered}</td>

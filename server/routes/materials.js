@@ -55,4 +55,63 @@ router.delete('/:id', async (req, res) => {
   res.json(data);
 });
 
+// ─── Variant Routes ──────────────────────────────────────────────────────────
+
+// GET /api/materials/:id/variants
+router.get('/:id/variants', async (req, res) => {
+  const { data, error } = await supabase
+    .from('material_variants')
+    .select('*, supplier:suppliers(id, name)')
+    .eq('material_id', req.params.id)
+    .order('created_at');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+// POST /api/materials/:id/variants
+router.post('/:id/variants', async (req, res) => {
+  const { brand, supplier_id, price_per_purchase_unit } = req.body;
+  if (!brand?.trim()) return res.status(400).json({ error: 'Nama merk wajib diisi' });
+  const { data, error } = await supabase
+    .from('material_variants')
+    .insert({
+      material_id: req.params.id,
+      brand: brand.trim(),
+      supplier_id: supplier_id || null,
+      price_per_purchase_unit: Number(price_per_purchase_unit) || 0,
+    })
+    .select('*, supplier:suppliers(id, name)')
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.status(201).json(data);
+});
+
+// PUT /api/materials/:mid/variants/:vid
+router.put('/:mid/variants/:vid', async (req, res) => {
+  const allowed = ['brand', 'supplier_id', 'price_per_purchase_unit', 'is_active'];
+  const updates = {};
+  allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
+  if (updates.supplier_id === '') updates.supplier_id = null;
+  const { data, error } = await supabase
+    .from('material_variants')
+    .update(updates)
+    .eq('id', req.params.vid)
+    .eq('material_id', req.params.mid)
+    .select('*, supplier:suppliers(id, name)')
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// DELETE /api/materials/:mid/variants/:vid
+router.delete('/:mid/variants/:vid', async (req, res) => {
+  const { error } = await supabase
+    .from('material_variants')
+    .delete()
+    .eq('id', req.params.vid)
+    .eq('material_id', req.params.mid);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
 module.exports = router;
