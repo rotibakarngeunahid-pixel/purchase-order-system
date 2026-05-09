@@ -22,6 +22,8 @@ export default function OrderEntry() {
   const [rotiLoading, setRotiLoading] = useState(false);
   const [rotiError, setRotiError] = useState(null);
   const [rotiDetail, setRotiDetail] = useState(null);
+  const [outletOpen, setOutletOpen] = useState({});
+  const [outletDays, setOutletDays] = useState({});
   const saveTimers = useRef({});
 
   // Load session dan master data
@@ -43,7 +45,16 @@ export default function OrderEntry() {
       api.get('/api/outlets'),
     ]);
     setMaterials(matRes.data.filter((m) => m.is_active));
-    setOutlets(outRes.data.filter((o) => o.is_active));
+    const activeOutlets = outRes.data.filter((o) => o.is_active);
+    setOutlets(activeOutlets);
+    const openMap = {};
+    const daysMap = {};
+    activeOutlets.forEach((o) => {
+      openMap[o.id] = true;
+      daysMap[o.id] = 2;
+    });
+    setOutletOpen(openMap);
+    setOutletDays(daysMap);
   }
 
   async function loadSession(sessionId) {
@@ -173,21 +184,24 @@ export default function OrderEntry() {
         );
         if (!outlet) return;
         const key = `${outlet.id}_${rotiMaterial.id}`;
-        newMatrix[key] = branch.need;
 
-        // Batalkan debounce timer yang mungkin ada
+        const isOpen = outletOpen[outlet.id] !== false;
+        const days = outletDays[outlet.id] ?? 2;
+        const qty = !isOpen ? 0 : days === 1 ? Math.ceil(branch.need / 2) : branch.need;
+
+        newMatrix[key] = qty;
+
         if (saveTimers.current[key]) {
           clearTimeout(saveTimers.current[key]);
           delete saveTimers.current[key];
         }
 
-        // Simpan langsung ke backend jika sesi sudah ada
         if (session && session.status === 'draft') {
           savePromises.push(
             api.post(`/api/orders/session/${session.id}/request`, {
               outlet_id: outlet.id,
               material_id: rotiMaterial.id,
-              qty: branch.need,
+              qty,
             })
           );
         }
@@ -281,14 +295,44 @@ export default function OrderEntry() {
                 <th className="sticky left-0 z-10 bg-brand-red text-white px-4 py-3 text-left font-medium min-w-[180px] border-r border-red-700">
                   Bahan Baku
                 </th>
-                {outlets.map((outlet) => (
-                  <th
-                    key={outlet.id}
-                    className="bg-brand-red text-white px-3 py-3 text-center font-medium min-w-[90px] border-r border-red-700 whitespace-nowrap"
-                  >
-                    {outlet.name}
-                  </th>
-                ))}
+                {outlets.map((outlet) => {
+                  const isOpen = outletOpen[outlet.id] !== false;
+                  const days = outletDays[outlet.id] ?? 2;
+                  return (
+                    <th
+                      key={outlet.id}
+                      className={`px-3 py-2 text-center font-medium min-w-[100px] border-r border-red-700 ${isOpen ? 'bg-brand-red text-white' : 'bg-red-900 text-red-200'}`}
+                    >
+                      <div className="whitespace-nowrap mb-1.5">{outlet.name}</div>
+                      {!isReadOnly && (
+                        <div className="flex flex-col gap-1 items-center">
+                          <button
+                            type="button"
+                            onClick={() => setOutletOpen((p) => ({ ...p, [outlet.id]: !isOpen }))}
+                            className={`text-xs px-2 py-0.5 rounded-full font-normal border transition-colors w-full ${
+                              isOpen
+                                ? 'bg-green-100 text-green-800 border-green-300 hover:bg-green-200'
+                                : 'bg-red-200 text-red-900 border-red-400 hover:bg-red-300'
+                            }`}
+                          >
+                            {isOpen ? '✅ Buka' : '🔴 Tutup'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOutletDays((p) => ({ ...p, [outlet.id]: p[outlet.id] === 1 ? 2 : 1 }))}
+                            className={`text-xs px-2 py-0.5 rounded-full font-normal border transition-colors w-full ${
+                              days === 1
+                                ? 'bg-yellow-100 text-yellow-800 border-yellow-400 hover:bg-yellow-200'
+                                : 'bg-white/20 text-white border-white/40 hover:bg-white/30'
+                            }`}
+                          >
+                            {days === 1 ? '1 Hari' : '2 Hari'}
+                          </button>
+                        </div>
+                      )}
+                    </th>
+                  );
+                })}
                 <th className="bg-red-900 text-white px-3 py-3 text-center font-medium min-w-[80px]">
                   Total
                 </th>
