@@ -54,7 +54,7 @@ export default function App() {
         <Route path="/analytics" element={<ProtectedRoute loggedIn={loggedIn}><Analytics /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute loggedIn={loggedIn}><Settings /></ProtectedRoute>} />
         <Route path="/master" element={<ProtectedRoute loggedIn={loggedIn}><MasterData /></ProtectedRoute>} />
-        <Route path="/distribution" element={<ProtectedRoute loggedIn={loggedIn}><DistributionListing /></ProtectedRoute>} />
+        <Route path="/distribution" element={<DistributionListing />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

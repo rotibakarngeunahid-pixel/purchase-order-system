@@ -1,5 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
-import api, { toInputDate, formatDateID } from '../lib/api';
+import axios from 'axios';
+import { toInputDate, formatDateID } from '../lib/api';
+
+const baseURL = import.meta.env.VITE_API_URL ?? '';
+const publicApi = axios.create({ baseURL, timeout: 30000 });
 
 const STORAGE_KEY = (date, outletId) => `dist_check_${date}_${outletId}`;
 
@@ -25,10 +29,9 @@ export default function DistributionListing() {
 
   // Ambil daftar outlet aktif untuk dropdown
   useEffect(() => {
-    api.get('/api/outlets').then((res) => {
-      const active = (res.data || []).filter((o) => o.is_active);
-      setOutlets(active);
-      if (active.length > 0) setSelectedOutletId(String(active[0].id));
+    publicApi.get('/api/public/outlets').then((res) => {
+      setOutlets(res.data || []);
+      if ((res.data || []).length > 0) setSelectedOutletId(String(res.data[0].id));
     }).catch(console.error);
   }, []);
 
@@ -36,7 +39,7 @@ export default function DistributionListing() {
   const loadDistribution = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get(`/api/orders/distribution?date=${date}`);
+      const res = await publicApi.get(`/api/public/distribution?date=${date}`);
       setDistributionData(res.data);
     } catch (err) {
       console.error(err);

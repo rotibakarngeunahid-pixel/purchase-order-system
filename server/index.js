@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 
 const authMiddleware = require('./middleware/auth');
 const authRouter = require('./routes/auth');
+const publicRouter = require('./routes/publicRoutes');
 const suppliersRouter = require('./routes/suppliers');
 const materialsRouter = require('./routes/materials');
 const outletsRouter = require('./routes/outlets');
@@ -41,6 +42,9 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'Roti Bakar Ngeunah API', timestamp: new Date().toISOString() });
 });
 app.use('/api/auth', authRouter);
+
+// Public routes (no auth required)
+app.use('/api/public', publicRouter);
 
 // Protected routes
 app.use('/api/suppliers', authMiddleware, suppliersRouter);
