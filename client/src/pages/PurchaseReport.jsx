@@ -13,6 +13,7 @@ function newRow() {
     material_id: '',
     material: null,
     variant_id: '',
+    variants: [],       // lazy-loaded when material is picked
     supplier_id: '',
     qty: '',
     unit: '',
@@ -26,7 +27,6 @@ export default function PurchaseReport() {
   const [outlets, setOutlets] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [allVariants, setAllVariants] = useState([]);
 
   // Form
   const [outletId, setOutletId] = useState('');
@@ -51,16 +51,14 @@ export default function PurchaseReport() {
 
   async function loadMasterData() {
     try {
-      const [outRes, matRes, supRes, varRes] = await Promise.all([
+      const [outRes, matRes, supRes] = await Promise.all([
         api.get('/api/outlets'),
         api.get('/api/materials'),
         api.get('/api/suppliers'),
-        api.get('/api/purchase-report/variants'),
       ]);
       setOutlets(outRes.data.filter((o) => o.is_active));
       setMaterials(matRes.data.filter((m) => m.is_active));
       setSuppliers(supRes.data.filter((s) => s.is_active));
-      setAllVariants(varRes.data);
     } catch {
       showToast('Gagal memuat master data', 'error');
     }
@@ -87,20 +85,27 @@ export default function PurchaseReport() {
     setTimeout(() => setToast(null), 4000);
   }
 
-  function variantsForMaterial(materialId) {
-    return allVariants.filter((v) => v.material_id === materialId);
-  }
-
   function updateRow(idx, patch) {
     setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
   }
 
-  function onSelectMaterial(idx, materialId) {
+  async function onSelectMaterial(idx, materialId) {
     const mat = materials.find((m) => m.id === materialId) || null;
+
+    // Fetch variants for this material on-demand
+    let variants = [];
+    if (materialId) {
+      try {
+        const res = await api.get(`/api/materials/${materialId}/variants`);
+        variants = (res.data || []).filter((v) => v.is_active !== false);
+      } catch {}
+    }
+
     updateRow(idx, {
       material_id: materialId,
       material: mat,
       variant_id: '',
+      variants,
       unit: mat ? mat.purchase_unit : '',
       price_per_unit: mat ? String(mat.price_per_purchase_unit || '') : '',
       supplier_id: mat?.supplier_id || '',
@@ -108,17 +113,16 @@ export default function PurchaseReport() {
   }
 
   function onSelectVariant(idx, variantId) {
+    const row = rows[idx];
     if (!variantId) {
-      // Revert to material default price
-      const mat = rows[idx]?.material;
       updateRow(idx, {
         variant_id: '',
-        price_per_unit: mat ? String(mat.price_per_purchase_unit || '') : '',
-        supplier_id: rows[idx]?.material?.supplier_id || '',
+        price_per_unit: row.material ? String(row.material.price_per_purchase_unit || '') : '',
+        supplier_id: row.material?.supplier_id || '',
       });
       return;
     }
-    const variant = allVariants.find((v) => v.id === variantId);
+    const variant = (row.variants || []).find((v) => v.id === variantId);
     if (!variant) return;
     updateRow(idx, {
       variant_id: variantId,
@@ -259,7 +263,7 @@ export default function PurchaseReport() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {rows.map((row, idx) => {
-                  const rowVariants = row.material_id ? variantsForMaterial(row.material_id) : [];
+                  const rowVariants = row.variants || [];
                   const subtotal = Number(row.qty || 0) * Number(row.price_per_unit || 0);
                   return (
                     <tr key={row._id} className="hover:bg-gray-50">
