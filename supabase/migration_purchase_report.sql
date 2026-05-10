@@ -40,4 +40,5 @@ CREATE TABLE IF NOT EXISTS report_resets (
 );
 
 ALTER TABLE report_resets ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "auth_all" ON report_resets;
 CREATE POLICY "auth_all" ON report_resets FOR ALL TO authenticated USING (true) WITH CHECK (true);

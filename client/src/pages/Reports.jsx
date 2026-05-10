@@ -13,6 +13,7 @@ export default function Reports() {
   const [suppliers, setSuppliers] = useState([]);
   const [dailyData, setDailyData] = useState([]);
   const [supplierSummary, setSupplierSummary] = useState([]);
+  const [barangMasukData, setBarangMasukData] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('daily');
   const [showResetModal, setShowResetModal] = useState(false);
@@ -55,12 +56,14 @@ export default function Reports() {
     if (dateTo) params.set('date_to', dateTo);
     if (supplierId) params.set('supplier_id', supplierId);
 
-    const [dailyRes, supplierRes] = await Promise.all([
+    const [dailyRes, supplierRes, barangMasukRes] = await Promise.all([
       api.get(`/api/reports/daily?${params}`),
       api.get(`/api/reports/supplier?${params}`),
+      api.get(`/api/purchase-report?${params}`),
     ]);
     setDailyData(dailyRes.data);
     setSupplierSummary(supplierRes.data);
+    setBarangMasukData(barangMasukRes.data);
     setLoading(false);
   }
 
@@ -68,6 +71,17 @@ export default function Reports() {
     .filter((po) => po.status === 'received')
     .reduce((sum, po) => sum + Number(po.total_actual || 0), 0);
   const totalEstimated = dailyData.reduce((sum, po) => sum + Number(po.total_estimated || 0), 0);
+  const totalBarangMasuk = barangMasukData.reduce(
+    (sum, item) => sum + Number(item.qty || 0) * Number(item.price_per_unit || 0),
+    0
+  );
+
+  const barangMasukByDate = barangMasukData.reduce((acc, item) => {
+    const d = item.date;
+    if (!acc[d]) acc[d] = [];
+    acc[d].push(item);
+    return acc;
+  }, {});
 
   const statusLabel = { pending: 'Pending', confirmed: 'Dikonfirmasi', received: 'Diterima' };
   const statusClass = { pending: 'badge-pending', confirmed: 'badge-sent', received: 'badge-received' };
@@ -168,7 +182,7 @@ export default function Reports() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="card p-4">
           <p className="text-xs text-gray-500 uppercase tracking-wide">Total PO</p>
           <p className="text-2xl font-bold text-gray-900">{dailyData.length}</p>
@@ -181,6 +195,11 @@ export default function Reports() {
           <p className="text-xs text-gray-500 uppercase tracking-wide">Total Aktual (Diterima)</p>
           <p className="text-2xl font-bold text-brand-red">{formatRupiah(totalActual)}</p>
         </div>
+        <div className="card p-4 border-l-4 border-green-500">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Barang Masuk</p>
+          <p className="text-2xl font-bold text-green-600">{formatRupiah(totalBarangMasuk)}</p>
+          <p className="text-xs text-gray-400 mt-1">{barangMasukData.length} item tercatat</p>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -188,6 +207,7 @@ export default function Reports() {
         {[
           { id: 'daily', label: '📅 Pengeluaran Harian' },
           { id: 'supplier', label: '🏭 Per Supplier' },
+          { id: 'barang-masuk', label: '📦 Barang Masuk' },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -264,7 +284,7 @@ export default function Reports() {
             </div>
           )}
         </div>
-      ) : (
+      ) : activeTab === 'supplier' ? (
         <div className="card overflow-hidden">
           {supplierSummary.length === 0 ? (
             <div className="p-10 text-center text-gray-400">
@@ -313,6 +333,68 @@ export default function Reports() {
                 </tr>
               </tfoot>
             </table>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {Object.keys(barangMasukByDate).length === 0 ? (
+            <div className="card p-10 text-center text-gray-400">
+              <p className="text-4xl mb-3">📦</p>
+              <p>Tidak ada barang masuk dalam rentang tanggal ini</p>
+            </div>
+          ) : (
+            Object.entries(barangMasukByDate).map(([date, items]) => {
+              const dateTotal = items.reduce(
+                (sum, i) => sum + Number(i.qty || 0) * Number(i.price_per_unit || 0),
+                0
+              );
+              return (
+                <div key={date} className="card overflow-hidden">
+                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-800">{formatDateID(date)}</span>
+                      <span className="text-xs text-gray-400">{items[0]?.outlet?.name}</span>
+                    </div>
+                    <div className="text-sm text-gray-500">
+                      {items.length} item &bull;{' '}
+                      <span className="font-semibold text-green-600">{formatRupiah(dateTotal)}</span>
+                    </div>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tbody className="divide-y divide-gray-50">
+                      {items.map((item) => (
+                        <tr key={item.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-gray-800">
+                            {item.material?.name}
+                            {item.variant?.brand && (
+                              <span className="ml-1 text-xs text-gray-400">({item.variant.brand})</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center text-brand-red font-medium">
+                            {item.qty} {item.unit}
+                          </td>
+                          <td className="px-4 py-3 text-center text-gray-500 text-xs">
+                            {formatRupiah(item.price_per_unit)}/sat
+                          </td>
+                          <td className="px-4 py-3 text-right font-semibold text-gray-800">
+                            {formatRupiah(Number(item.qty) * Number(item.price_per_unit || 0))}
+                          </td>
+                          <td className="px-4 py-3 text-right text-gray-400 text-xs">
+                            {item.supplier?.name || '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })
+          )}
+          {Object.keys(barangMasukByDate).length > 0 && (
+            <div className="card p-4 bg-green-50 border border-green-200 flex justify-between items-center">
+              <span className="font-semibold text-gray-700">Total Barang Masuk</span>
+              <span className="text-xl font-bold text-green-600">{formatRupiah(totalBarangMasuk)}</span>
+            </div>
           )}
         </div>
       )}

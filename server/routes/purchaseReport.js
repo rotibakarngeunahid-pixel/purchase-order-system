@@ -16,7 +16,7 @@ router.get('/variants', async (req, res) => {
 
 // GET list dengan join lengkap
 router.get('/', async (req, res) => {
-  const { outlet_id, date_from, date_to } = req.query;
+  const { outlet_id, date_from, date_to, supplier_id } = req.query;
 
   let query = supabase
     .from('purchase_report')
@@ -33,6 +33,7 @@ router.get('/', async (req, res) => {
   if (outlet_id) query = query.eq('outlet_id', outlet_id);
   if (date_from) query = query.gte('date', date_from);
   if (date_to) query = query.lte('date', date_to);
+  if (supplier_id) query = query.eq('supplier_id', supplier_id);
 
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
