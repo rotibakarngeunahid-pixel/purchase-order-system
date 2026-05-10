@@ -27,7 +27,6 @@ export default function DistributionListing() {
   const [loading, setLoading] = useState(false);
   const [checks, setChecks] = useState({});
 
-  // Ambil daftar outlet aktif untuk dropdown
   useEffect(() => {
     publicApi.get('/api/public/outlets').then((res) => {
       setOutlets(res.data || []);
@@ -35,7 +34,6 @@ export default function DistributionListing() {
     }).catch(console.error);
   }, []);
 
-  // Muat data distribusi saat tanggal berubah
   const loadDistribution = useCallback(async () => {
     setLoading(true);
     try {
@@ -51,11 +49,8 @@ export default function DistributionListing() {
 
   useEffect(() => { loadDistribution(); }, [loadDistribution]);
 
-  // Muat checks dari localStorage saat outlet/tanggal berubah
   useEffect(() => {
-    if (selectedOutletId) {
-      setChecks(loadChecks(date, selectedOutletId));
-    }
+    if (selectedOutletId) setChecks(loadChecks(date, selectedOutletId));
   }, [date, selectedOutletId]);
 
   const toggleCheck = (itemId) => {
@@ -64,126 +59,137 @@ export default function DistributionListing() {
     saveChecks(date, selectedOutletId, next);
   };
 
-  // Cari data untuk outlet yang dipilih
   const outletData = distributionData?.outlets?.find(
     (o) => String(o.outlet?.id) === String(selectedOutletId)
   );
   const items = outletData?.items || [];
   const checkedCount = items.filter((item) => checks[item.id]).length;
-  const totalQty = items.reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  const allDone = items.length > 0 && checkedCount === items.length;
   const progressPct = items.length > 0 ? (checkedCount / items.length) * 100 : 0;
-
   const selectedOutletName = outlets.find((o) => String(o.id) === String(selectedOutletId))?.name || '';
 
   return (
-    <div className="min-h-screen bg-[#fdf6f0]">
-      {/* Header */}
-      <div className="bg-brand-red px-6 py-5">
-        <p className="text-red-200 text-xs font-medium tracking-widest uppercase mb-0.5">Roti Bakar Ngeunah</p>
-        <h1 className="text-white text-2xl font-bold">Distribution Listing</h1>
+    <div className="min-h-screen bg-gray-50">
+
+      {/* ── Header ── */}
+      <div className="bg-brand-red px-5 pt-6 pb-8">
+        <p className="text-red-300 text-xs font-semibold tracking-widest uppercase mb-1">Roti Bakar Ngeunah</p>
+        <h1 className="text-white text-2xl font-bold leading-tight">Distribution Listing</h1>
         <p className="text-red-200 text-sm mt-0.5">{formatDateID(date)}</p>
       </div>
 
-      <div className="p-4 max-w-2xl mx-auto space-y-4 mt-4">
-        {/* Pilih Outlet */}
-        <div className="bg-white rounded-2xl shadow-sm border border-orange-100 p-4">
-          <p className="text-brand-red text-xs font-semibold tracking-widest uppercase mb-2">Pilih Outlet</p>
-          <div className="flex gap-2">
-            <select
-              value={selectedOutletId}
-              onChange={(e) => setSelectedOutletId(e.target.value)}
-              className="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-brand-orange bg-white appearance-none"
-            >
-              {outlets.map((o) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-orange"
-            />
-          </div>
+      {/* ── Content (overlap header) ── */}
+      <div className="px-4 -mt-3 max-w-xl mx-auto pb-10 space-y-3">
+
+        {/* Pilih Outlet + Tanggal */}
+        <div className="bg-white rounded-2xl shadow-sm p-4">
+          <p className="text-xs font-semibold text-brand-red tracking-widest uppercase mb-3">Pilih Outlet</p>
+          <select
+            value={selectedOutletId}
+            onChange={(e) => setSelectedOutletId(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-800 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-brand-orange bg-white mb-2"
+          >
+            {outlets.map((o) => (
+              <option key={o.id} value={o.id}>{o.name}</option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-brand-orange"
+          />
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-16">
+          <div className="flex items-center justify-center py-20">
             <div className="w-8 h-8 border-4 border-brand-red border-t-transparent rounded-full animate-spin" />
           </div>
         ) : !distributionData?.session ? (
-          <div className="bg-white rounded-2xl shadow-sm border border-orange-100 p-10 text-center text-gray-400">
+          <div className="bg-white rounded-2xl shadow-sm p-10 text-center">
             <p className="text-4xl mb-3">📋</p>
-            <p className="font-medium text-gray-600">Tidak ada order untuk tanggal ini</p>
-            <p className="text-sm mt-1">Order belum dibuat atau belum ada item</p>
+            <p className="font-semibold text-gray-700">Belum ada order untuk tanggal ini</p>
+            <p className="text-sm text-gray-400 mt-1">Order belum dibuat atau belum ada item yang diisi</p>
           </div>
         ) : (
           <>
-            {/* Progress Bar */}
-            <div className="bg-white rounded-2xl shadow-sm border border-orange-100 p-4">
+            {/* Progress */}
+            <div className="bg-white rounded-2xl shadow-sm p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-700">Progress Pengecekan</span>
-                <span className="text-sm font-bold text-brand-red">{checkedCount} / {items.length}</span>
+                <span className="text-sm font-semibold text-gray-700">Progress Pengecekan</span>
+                <span className={`text-sm font-bold ${allDone ? 'text-green-600' : 'text-brand-red'}`}>
+                  {checkedCount} / {items.length}
+                </span>
               </div>
-              <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+              <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-brand-red rounded-full transition-all duration-300"
+                  className={`h-full rounded-full transition-all duration-500 ${allDone ? 'bg-green-500' : 'bg-brand-red'}`}
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
-              {checkedCount === items.length && items.length > 0 && (
-                <p className="text-green-600 text-xs font-medium mt-2 text-center">Semua item sudah dicek!</p>
+              {allDone && (
+                <p className="text-green-600 text-xs font-semibold mt-2 text-center">
+                  Semua item sudah dicek!
+                </p>
               )}
             </div>
 
-            {/* Daftar Item */}
+            {/* Item list */}
             {items.length === 0 ? (
-              <div className="bg-white rounded-2xl shadow-sm border border-orange-100 p-8 text-center text-gray-400">
+              <div className="bg-white rounded-2xl shadow-sm p-10 text-center">
                 <p className="text-3xl mb-2">📦</p>
-                <p className="font-medium">Tidak ada bahan masuk untuk outlet ini</p>
+                <p className="font-medium text-gray-600">Tidak ada bahan masuk untuk outlet ini</p>
               </div>
             ) : (
-              <div className="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden">
-                {/* Card header */}
-                <div className="flex items-center justify-between px-5 py-4 border-b border-orange-50">
+              <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+                {/* Card title */}
+                <div className="flex items-center justify-between px-5 py-4">
                   <h2 className="font-bold text-brand-red text-base">{selectedOutletName}</h2>
-                  <span className="bg-brand-red text-white text-xs font-semibold px-3 py-1 rounded-full">
+                  <span className="bg-brand-red text-white text-xs font-bold px-3 py-1 rounded-full">
                     {items.length} item
                   </span>
                 </div>
 
-                {/* Item list */}
-                <div className="divide-y divide-gray-50">
+                <div className="border-t border-gray-100">
                   {items.map((item, idx) => {
                     const checked = !!checks[item.id];
                     return (
                       <div
                         key={item.id}
-                        className={`flex items-center gap-4 px-5 py-4 transition-colors ${checked ? 'bg-green-50' : 'hover:bg-gray-50'}`}
+                        className={`flex items-center gap-3 px-5 py-3.5 border-b border-gray-50 last:border-b-0 transition-colors ${checked ? 'bg-green-50' : ''}`}
                       >
-                        <span className="text-gray-400 text-sm w-5 text-right flex-shrink-0">{idx + 1}</span>
-                        <div className="flex-1">
-                          <p className={`font-medium text-sm ${checked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
-                            {item.material_name}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl font-bold text-gray-800">{item.qty}</span>
-                          <span className="text-xs text-gray-500 border border-gray-200 rounded-full px-2 py-0.5">
+                        {/* Nomor */}
+                        <span className="text-gray-300 text-sm w-4 text-center flex-shrink-0 font-medium">
+                          {idx + 1}
+                        </span>
+
+                        {/* Nama */}
+                        <p className={`flex-1 text-sm font-medium ${checked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                          {item.material_name}
+                        </p>
+
+                        {/* Qty + Satuan */}
+                        <div className="flex items-baseline gap-1.5 flex-shrink-0">
+                          <span className={`text-lg font-bold ${checked ? 'text-gray-400' : 'text-gray-800'}`}>
+                            {item.qty}
+                          </span>
+                          <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5 font-medium">
                             {item.purchase_unit || 'pcs'}
                           </span>
                         </div>
+
+                        {/* Tombol centang */}
                         <button
                           onClick={() => toggleCheck(item.id)}
-                          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                          className={`w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
                             checked
-                              ? 'bg-green-500 border-green-500 text-white'
-                              : 'border-gray-300 text-transparent hover:border-brand-orange'
+                              ? 'bg-green-500 border-green-500'
+                              : 'border-gray-300 hover:border-brand-orange'
                           }`}
                         >
                           {checked && (
-                            <svg viewBox="0 0 12 10" fill="none" className="w-3.5 h-3.5">
-                              <path d="M1 5l3.5 3.5L11 1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <svg viewBox="0 0 12 10" fill="none" className="w-3 h-3">
+                              <path d="M1 5l3.5 3.5L11 1" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
                           )}
                         </button>
@@ -192,15 +198,37 @@ export default function DistributionListing() {
                   })}
                 </div>
 
-                {/* Footer total */}
-                <div className="bg-brand-red px-5 py-3.5 flex items-center justify-between">
-                  <span className="text-white text-sm font-semibold">Total Bahan Masuk</span>
-                  <span className="text-white font-bold text-base">{totalQty} Pcs</span>
-                </div>
+                {/* Footer: ringkasan per satuan, bukan total campur */}
+                <SummaryFooter items={items} />
               </div>
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function SummaryFooter({ items }) {
+  // Kelompokkan qty per satuan
+  const byUnit = {};
+  items.forEach((item) => {
+    const unit = item.purchase_unit || 'pcs';
+    byUnit[unit] = (byUnit[unit] || 0) + Number(item.qty || 0);
+  });
+  const entries = Object.entries(byUnit);
+
+  return (
+    <div className="bg-brand-red px-5 py-3.5">
+      <div className="flex items-center justify-between flex-wrap gap-y-1">
+        <span className="text-white text-sm font-semibold">Total Bahan Masuk</span>
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          {entries.map(([unit, qty]) => (
+            <span key={unit} className="text-white font-bold text-sm">
+              {qty} <span className="font-normal opacity-80">{unit}</span>
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
