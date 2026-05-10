@@ -156,32 +156,32 @@ export default function DistributionListing() {
                     return (
                       <div
                         key={item.id}
-                        className={`flex items-center gap-3 px-5 py-3.5 border-b border-gray-50 last:border-b-0 transition-colors ${checked ? 'bg-green-50' : ''}`}
+                        className={`flex items-center px-5 py-3.5 border-b border-gray-50 last:border-b-0 transition-colors ${checked ? 'bg-green-50' : ''}`}
                       >
-                        {/* Nomor */}
-                        <span className="text-gray-300 text-sm w-4 text-center flex-shrink-0 font-medium">
+                        {/* Nomor — lebar tetap, rata kanan */}
+                        <span className="w-6 flex-shrink-0 text-right text-sm text-gray-300 font-medium mr-3">
                           {idx + 1}
                         </span>
 
-                        {/* Nama */}
-                        <p className={`flex-1 text-sm font-medium ${checked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
+                        {/* Nama — ambil sisa ruang */}
+                        <p className={`flex-1 min-w-0 text-sm font-medium truncate ${checked ? 'line-through text-gray-400' : 'text-gray-800'}`}>
                           {item.material_name}
                         </p>
 
-                        {/* Qty + Satuan */}
-                        <div className="flex items-baseline gap-1.5 flex-shrink-0">
-                          <span className={`text-lg font-bold ${checked ? 'text-gray-400' : 'text-gray-800'}`}>
-                            {item.qty}
-                          </span>
-                          <span className="text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5 font-medium">
-                            {item.purchase_unit || 'pcs'}
-                          </span>
-                        </div>
+                        {/* Qty — lebar tetap, rata kanan */}
+                        <span className={`w-10 flex-shrink-0 text-right text-base font-bold ml-3 ${checked ? 'text-gray-400' : 'text-gray-800'}`}>
+                          {item.qty}
+                        </span>
 
-                        {/* Tombol centang */}
+                        {/* Satuan — lebar tetap, rata kiri */}
+                        <span className="w-16 flex-shrink-0 ml-1.5 text-xs text-gray-400 bg-gray-100 rounded-full px-2 py-0.5 font-medium text-center">
+                          {item.purchase_unit || 'pcs'}
+                        </span>
+
+                        {/* Tombol centang — lebar tetap */}
                         <button
                           onClick={() => toggleCheck(item.id)}
-                          className={`w-7 h-7 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                          className={`ml-3 w-7 h-7 flex-shrink-0 rounded-full border-2 flex items-center justify-center transition-all ${
                             checked
                               ? 'bg-green-500 border-green-500'
                               : 'border-gray-300 hover:border-brand-orange'
@@ -198,8 +198,11 @@ export default function DistributionListing() {
                   })}
                 </div>
 
-                {/* Footer: ringkasan per satuan, bukan total campur */}
-                <SummaryFooter items={items} />
+                {/* Footer */}
+                <div className="bg-brand-red px-5 py-3.5 flex items-center justify-between">
+                  <span className="text-white text-sm font-semibold">Total Bahan Masuk</span>
+                  <span className="text-white font-bold text-sm">{items.length} item</span>
+                </div>
               </div>
             )}
           </>
@@ -209,27 +212,3 @@ export default function DistributionListing() {
   );
 }
 
-function SummaryFooter({ items }) {
-  // Kelompokkan qty per satuan
-  const byUnit = {};
-  items.forEach((item) => {
-    const unit = item.purchase_unit || 'pcs';
-    byUnit[unit] = (byUnit[unit] || 0) + Number(item.qty || 0);
-  });
-  const entries = Object.entries(byUnit);
-
-  return (
-    <div className="bg-brand-red px-5 py-3.5">
-      <div className="flex items-center justify-between flex-wrap gap-y-1">
-        <span className="text-white text-sm font-semibold">Total Bahan Masuk</span>
-        <div className="flex items-center gap-3 flex-wrap justify-end">
-          {entries.map(([unit, qty]) => (
-            <span key={unit} className="text-white font-bold text-sm">
-              {qty} <span className="font-normal opacity-80">{unit}</span>
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
