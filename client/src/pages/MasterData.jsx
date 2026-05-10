@@ -241,6 +241,8 @@ function SuppliersTab() {
   const [form, setForm] = useState({ name: '', wa_number: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => { loadSuppliers(); }, []);
 
@@ -274,6 +276,21 @@ function SuppliersTab() {
   const toggleActive = async (s) => {
     await api.put(`/api/suppliers/${s.id}`, { is_active: !s.is_active });
     await loadSuppliers();
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await api.delete(`/api/suppliers/${confirmDelete.id}`);
+      setConfirmDelete(null);
+      await loadSuppliers();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+      setConfirmDelete(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   if (loading) return <div className="py-10 text-center text-gray-400">Memuat...</div>;
@@ -312,6 +329,30 @@ function SuppliersTab() {
 
   return (
     <div>
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Hapus Supplier?</h3>
+            <p className="text-sm text-gray-500 mb-1">
+              Supplier <strong>{confirmDelete.name}</strong> akan dihapus permanen.
+            </p>
+            <p className="text-sm text-red-600 mb-6">
+              Jika supplier masih terhubung dengan bahan baku, penghapusan akan gagal.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setConfirmDelete(null)} className="btn-outline text-sm">Batal</button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? 'Menghapus...' : 'Ya, Hapus'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-gray-500">{suppliers.length} supplier terdaftar</p>
         <button onClick={startAdd} disabled={editingId !== null} className="btn-primary text-sm">+ Tambah Supplier</button>
@@ -356,7 +397,10 @@ function SuppliersTab() {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <button onClick={() => startEdit(s)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
+                    <div className="flex gap-2 justify-center">
+                      <button onClick={() => startEdit(s)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
+                      <button onClick={() => setConfirmDelete(s)} className="text-red-500 text-xs font-medium hover:underline">Hapus</button>
+                    </div>
                   </td>
                 </tr>
               )

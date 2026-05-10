@@ -260,13 +260,29 @@ export default function OrderEntry() {
               {statusLabel[session.status] || session.status}
             </span>
           )}
-          <input
-            type="date"
-            value={orderDate}
-            onChange={handleDateChange}
-            disabled={isReadOnly}
-            className="input w-auto text-sm"
-          />
+          <div className="flex items-center gap-1">
+            <input
+              type="date"
+              value={orderDate}
+              onChange={handleDateChange}
+              disabled={isReadOnly}
+              className="input w-auto text-sm"
+            />
+            {!isReadOnly && (
+              <button
+                type="button"
+                title="Set tanggal ke besok"
+                onClick={() => {
+                  const tomorrow = new Date();
+                  tomorrow.setDate(tomorrow.getDate() + 1);
+                  handleDateChange({ target: { value: tomorrow.toISOString().split('T')[0] } });
+                }}
+                className="px-2 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-orange-50 hover:border-brand-orange hover:text-brand-orange transition-colors"
+              >
+                Besok ↗
+              </button>
+            )}
+          </div>
           <button
             onClick={handleCalculate}
             disabled={calculating || !session}
