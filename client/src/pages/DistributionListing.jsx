@@ -81,36 +81,46 @@ export default function DistributionListing() {
 
       {/* ── Sticky Header ── */}
       <div className="sticky top-0 z-20 bg-brand-red shadow-md">
-        <div className="px-4 pt-5 pb-4">
-          <p className="text-red-300 text-[11px] font-bold tracking-widest uppercase mb-0.5">
-            Roti Bakar Ngeunah
-          </p>
-          <div className="flex items-end justify-between gap-2">
-            <div>
-              <h1 className="text-white text-xl font-bold leading-tight">Distribution Listing</h1>
-              <p className="text-red-200 text-sm mt-0.5">{formatDateID(date)}</p>
-            </div>
-            {/* Date picker kecil di pojok kanan header */}
-            <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="bg-red-700 text-white text-sm rounded-xl px-3 py-2 border border-red-600 focus:outline-none focus:ring-2 focus:ring-white/40 flex-shrink-0"
-            />
+        {/* Baris atas: judul + date */}
+        <div className="px-4 pt-5 pb-3 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-red-300 text-[11px] font-bold tracking-widest uppercase mb-0.5">
+              Roti Bakar Ngeunah
+            </p>
+            <h1 className="text-white text-xl font-bold leading-tight">Distribution Listing</h1>
+            <p className="text-red-200 text-sm mt-0.5">{formatDateID(date)}</p>
           </div>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="bg-red-700 text-white text-sm rounded-xl px-3 py-2 border border-red-600 focus:outline-none focus:ring-2 focus:ring-white/40 flex-shrink-0 mt-1"
+          />
         </div>
 
-        {/* Outlet selector — tepat di bawah judul, masih bagian header sticky */}
-        <div className="px-4 pb-3">
-          <select
-            value={selectedOutletId}
-            onChange={(e) => setSelectedOutletId(e.target.value)}
-            className="w-full bg-white text-gray-800 text-[16px] font-semibold rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-white/40 appearance-none shadow-sm"
-          >
-            {outlets.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
+        {/* Tab navigasi cabang — horizontal scroll */}
+        <div className="pb-3">
+          <p className="px-4 text-red-300 text-[10px] font-bold tracking-widest uppercase mb-2">
+            Pilih Cabang
+          </p>
+          <div className="flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none">
+            {outlets.map((o) => {
+              const active = String(o.id) === String(selectedOutletId);
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => setSelectedOutletId(String(o.id))}
+                  className={`flex-shrink-0 px-4 py-2 rounded-full text-sm font-semibold transition-all active:scale-95 ${
+                    active
+                      ? 'bg-white text-brand-red shadow-sm'
+                      : 'bg-red-700/60 text-red-100 border border-red-600'
+                  }`}
+                >
+                  {o.name}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
