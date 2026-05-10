@@ -283,7 +283,7 @@ export default function PurchaseReport() {
                         </select>
                       </td>
 
-                      {/* Varian */}
+                      {/* Varian / Merk */}
                       <td className="px-3 py-2">
                         {rowVariants.length > 0 ? (
                           <select
@@ -291,13 +291,17 @@ export default function PurchaseReport() {
                             onChange={(e) => onSelectVariant(idx, e.target.value)}
                             className="input text-sm w-full"
                           >
-                            <option value="">Tanpa merk</option>
+                            <option value="">— Pilih merk —</option>
                             {rowVariants.map((v) => (
                               <option key={v.id} value={v.id}>{v.brand}</option>
                             ))}
                           </select>
+                        ) : row.material?.brand ? (
+                          <span className="text-sm text-gray-700 px-2 font-medium">
+                            {row.material.brand}
+                          </span>
                         ) : row.material_id ? (
-                          <span className="text-xs text-gray-400 px-2">Tidak ada varian</span>
+                          <span className="text-xs text-gray-400 px-2">—</span>
                         ) : (
                           <span className="text-xs text-gray-300 px-2">—</span>
                         )}
