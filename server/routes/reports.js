@@ -255,4 +255,34 @@ router.get('/stats', async (req, res) => {
   });
 });
 
+// GET event reset laporan terakhir
+router.get('/last-reset', async (req, res) => {
+  const { data, error } = await supabase
+    .from('report_resets')
+    .select('*')
+    .order('reset_at', { ascending: false })
+    .limit(1);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data && data.length > 0 ? data[0] : null);
+});
+
+// POST catat event reset laporan (data transaksi tidak dihapus)
+router.post('/reset', async (req, res) => {
+  const { reset_type = 'all', notes } = req.body;
+
+  const { data, error } = await supabase
+    .from('report_resets')
+    .insert({
+      reset_type,
+      notes: notes || null,
+      reset_by: req.user?.role || 'admin',
+    })
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 module.exports = router;

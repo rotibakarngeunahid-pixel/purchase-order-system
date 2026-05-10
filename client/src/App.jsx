@@ -10,6 +10,7 @@ import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import MasterData from './pages/MasterData';
 import DistributionListing from './pages/DistributionListing';
+import PurchaseReport from './pages/PurchaseReport';
 import Sidebar from './components/Sidebar';
 
 function isLoggedIn() {
@@ -54,6 +55,7 @@ export default function App() {
         <Route path="/analytics" element={<ProtectedRoute loggedIn={loggedIn}><Analytics /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute loggedIn={loggedIn}><Settings /></ProtectedRoute>} />
         <Route path="/master" element={<ProtectedRoute loggedIn={loggedIn}><MasterData /></ProtectedRoute>} />
+        <Route path="/purchase-report" element={<ProtectedRoute loggedIn={loggedIn}><PurchaseReport /></ProtectedRoute>} />
         <Route path="/distribution" element={<DistributionListing />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

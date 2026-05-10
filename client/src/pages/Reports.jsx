@@ -15,11 +15,38 @@ export default function Reports() {
   const [supplierSummary, setSupplierSummary] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('daily');
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [lastReset, setLastReset] = useState(null);
 
   useEffect(() => {
     api.get('/api/suppliers').then((res) => setSuppliers(res.data.filter((s) => s.is_active)));
     loadReports();
+    loadLastReset();
   }, []);
+
+  async function loadLastReset() {
+    try {
+      const res = await api.get('/api/reports/last-reset');
+      setLastReset(res.data);
+    } catch {}
+  }
+
+  async function handleReset() {
+    setResetting(true);
+    try {
+      const res = await api.post('/api/reports/reset', { reset_type: 'all' });
+      setLastReset(res.data);
+      setDateFrom(toInputDate());
+      setDateTo(toInputDate());
+      setShowResetModal(false);
+      loadReports();
+    } catch (err) {
+      alert('Gagal reset: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setResetting(false);
+    }
+  }
 
   async function loadReports() {
     setLoading(true);
@@ -47,9 +74,59 @@ export default function Reports() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Laporan</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Ringkasan pengeluaran dan histori order</p>
+      {/* Reset confirmation modal */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <h3 className="font-bold text-gray-900 text-lg mb-2">Reset Laporan?</h3>
+            <p className="text-gray-600 text-sm mb-5">
+              Data transaksi tidak akan dihapus. Tampilan laporan akan dimulai dari hari ini dan event
+              reset ini akan dicatat dalam log.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowResetModal(false)}
+                disabled={resetting}
+                className="btn-secondary text-sm"
+              >
+                Batal
+              </button>
+              <button
+                onClick={handleReset}
+                disabled={resetting}
+                className="btn-primary text-sm"
+                style={{ background: '#D32F2F' }}
+              >
+                {resetting ? 'Mereset...' : 'Ya, Reset Laporan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Laporan</h1>
+          <p className="text-gray-500 text-sm mt-0.5">Ringkasan pengeluaran dan histori order</p>
+          {lastReset && (
+            <p className="text-xs text-gray-400 mt-1">
+              Terakhir direset:{' '}
+              {new Date(lastReset.reset_at).toLocaleString('id-ID', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => setShowResetModal(true)}
+          className="btn-secondary text-sm whitespace-nowrap"
+        >
+          🔄 Reset Laporan
+        </button>
       </div>
 
       {/* Filter */}

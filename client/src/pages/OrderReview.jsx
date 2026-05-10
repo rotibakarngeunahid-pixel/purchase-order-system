@@ -30,7 +30,20 @@ function POCard({ po }) {
           <tbody className="divide-y divide-gray-50">
             {po.items.map((item, i) => (
               <tr key={i} className="hover:bg-gray-50">
-                <td className="px-4 py-2.5 font-medium text-gray-800">{item.material_name}</td>
+                <td className="px-4 py-2.5">
+                  <div className="font-medium text-gray-800">{item.material_name}</div>
+                  {item.roti_tawar_bonus && (
+                    <div className="mt-1 text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1 inline-flex items-center gap-2 text-orange-700">
+                      <span>Dibutuhkan: <strong>{item.roti_tawar_bonus.total_needed}</strong></span>
+                      <span className="text-orange-300">|</span>
+                      <span>Order ke supplier: <strong>{item.qty_ordered}</strong></span>
+                      <span className="text-orange-300">|</span>
+                      <span>Bonus: <strong>+{item.roti_tawar_bonus.bonus}</strong></span>
+                      <span className="text-orange-300">|</span>
+                      <span>Total diterima: <strong>{item.roti_tawar_bonus.fulfilled}</strong></span>
+                    </div>
+                  )}
+                </td>
                 <td className="px-4 py-2.5 text-center font-semibold text-brand-red">{item.qty_ordered}</td>
                 <td className="px-4 py-2.5 text-center text-gray-600">{item.purchase_unit}</td>
                 <td className="px-4 py-2.5 text-center text-gray-500 text-xs">
