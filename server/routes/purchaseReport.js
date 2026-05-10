@@ -2,16 +2,35 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 
-// GET list — optional ?date_from=&date_to=
+// GET semua variants aktif (untuk preload di frontend)
+router.get('/variants', async (req, res) => {
+  const { data, error } = await supabase
+    .from('material_variants')
+    .select('id, material_id, brand, supplier_id, price_per_purchase_unit, supplier:suppliers(id, name)')
+    .eq('is_active', true)
+    .order('brand');
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+// GET list dengan join lengkap
 router.get('/', async (req, res) => {
-  const { date_from, date_to } = req.query;
+  const { outlet_id, date_from, date_to } = req.query;
 
   let query = supabase
     .from('purchase_report')
-    .select('*')
+    .select(`
+      *,
+      outlet:outlets(id, name),
+      material:materials(id, code, name, purchase_unit),
+      variant:material_variants(id, brand),
+      supplier:suppliers(id, name)
+    `)
     .order('date', { ascending: false })
     .order('created_at', { ascending: false });
 
+  if (outlet_id) query = query.eq('outlet_id', outlet_id);
   if (date_from) query = query.gte('date', date_from);
   if (date_to) query = query.lte('date', date_to);
 
@@ -20,32 +39,48 @@ router.get('/', async (req, res) => {
   res.json(data || []);
 });
 
-// POST create entry
+// POST bulk — { outlet_id, date, items: [{material_id, variant_id, supplier_id, qty, unit, price_per_unit, notes}] }
 router.post('/', async (req, res) => {
-  const { item_name, qty, unit, date, supplier_name, notes } = req.body;
+  const { outlet_id, date, items } = req.body;
 
-  if (!item_name?.trim() || !qty || !unit?.trim() || !date) {
-    return res.status(400).json({ error: 'item_name, qty, unit, date wajib diisi' });
+  if (!outlet_id || !date || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: 'outlet_id, date, dan items wajib diisi' });
+  }
+
+  const rows = items.map((item) => ({
+    outlet_id,
+    date,
+    material_id: item.material_id,
+    variant_id: item.variant_id || null,
+    supplier_id: item.supplier_id || null,
+    qty: Number(item.qty),
+    unit: item.unit,
+    price_per_unit: Number(item.price_per_unit) || 0,
+    notes: item.notes?.trim() || null,
+  }));
+
+  for (const row of rows) {
+    if (!row.material_id || !row.qty || row.qty <= 0 || !row.unit) {
+      return res.status(400).json({ error: 'Setiap item wajib punya material_id, qty > 0, dan unit' });
+    }
   }
 
   const { data, error } = await supabase
     .from('purchase_report')
-    .insert({
-      item_name: item_name.trim(),
-      qty: Number(qty),
-      unit: unit.trim(),
-      date,
-      supplier_name: supplier_name?.trim() || null,
-      notes: notes?.trim() || null,
-    })
-    .select()
-    .single();
+    .insert(rows)
+    .select(`
+      *,
+      outlet:outlets(id, name),
+      material:materials(id, code, name, purchase_unit),
+      variant:material_variants(id, brand),
+      supplier:suppliers(id, name)
+    `);
 
   if (error) return res.status(500).json({ error: error.message });
   res.status(201).json(data);
 });
 
-// DELETE entry
+// DELETE single item
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
 
