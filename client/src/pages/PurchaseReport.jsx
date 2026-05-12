@@ -44,6 +44,7 @@ export default function PurchaseReport() {
   const [toast, setToast] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -458,16 +459,70 @@ export default function PurchaseReport() {
     return Number.isFinite(parsed) ? parsed : 0;
   }
 
+  function formatImportValue(value) {
+    if (value instanceof Date) return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+    return String(value ?? '').trim();
+  }
+
+  function importError(row, field, message, value = '', suggestion = '') {
+    return {
+      row,
+      field,
+      message,
+      value: formatImportValue(value),
+      suggestion,
+    };
+  }
+
+  function outletNameById(id) {
+    return outlets.find((o) => o.id === id)?.name || '';
+  }
+
+  function updateImportReport(patch) {
+    setImportReport((prev) => ({
+      fileName: prev?.fileName || '',
+      status: prev?.status || 'reading',
+      message: prev?.message || '',
+      parsedRows: prev?.parsedRows || 0,
+      validRows: prev?.validRows || 0,
+      groupCount: prev?.groupCount || 0,
+      groups: prev?.groups || [],
+      errors: prev?.errors || [],
+      warnings: prev?.warnings || [],
+      previewRows: prev?.previewRows || [],
+      headers: prev?.headers || [],
+      ...patch,
+    }));
+  }
+
   async function handleFileChange(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
 
-    // detect file type (xlsx preferred)
     const name = file.name || '';
     const ext = name.split('.').pop().toLowerCase();
-    let parsed = [];
+    const resetFileInput = () => {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    setImporting(true);
+    setImportReport({
+      fileName: name,
+      status: 'reading',
+      message: 'Membaca file import...',
+      parsedRows: 0,
+      validRows: 0,
+      groupCount: 0,
+      groups: [],
+      errors: [],
+      warnings: [],
+      previewRows: [],
+      headers: [],
+    });
 
     try {
+      let parsed = [];
+
       if (ext === 'xlsx' || ext === 'xls') {
         const mod = await import('exceljs');
         const ExcelJS = mod.default || mod;
@@ -475,7 +530,12 @@ export default function PurchaseReport() {
         const ab = await file.arrayBuffer();
         await wb.xlsx.load(ab);
         const sheet = wb.worksheets[0];
-        if (!sheet) { showToast('File XLSX tidak berisi sheet yang valid.', 'error'); fileInputRef.current.value = ''; return; }
+        if (!sheet) {
+          const errors = [importError('-', 'Sheet', 'File XLSX tidak berisi sheet yang valid.')];
+          updateImportReport({ status: 'error', message: 'Import gagal: sheet tidak valid.', errors });
+          showToast('Import gagal: sheet tidak valid.', 'error');
+          return;
+        }
 
         const headers = [];
         sheet.getRow(1).eachCell((cell) => headers.push(String(cell.value || '').trim()));
@@ -494,85 +554,105 @@ export default function PurchaseReport() {
         const text = await file.text();
         parsed = parseCSV(text);
       }
-    } catch (err) {
-      console.error(err);
-      showToast('Gagal membaca file: ' + (err.message || ''), 'error');
-      fileInputRef.current.value = '';
-      return;
-    }
 
-    if (parsed.length === 0) { showToast('File kosong atau tidak valid.', 'error'); fileInputRef.current.value = ''; return; }
-
-    // Normalize headers
-    const headerMap = {};
-    const sampleHeaders = Object.keys(parsed[0]);
-    for (const h of sampleHeaders) {
-      headerMap[normalizeHeader(h)] = h;
-    }
-
-    const alias = {
-      date: ['date','tanggal','tgl'],
-      cabang_name: ['cabang_name','nama_cabang','cabang','outlet_name','nama_outlet','outlet','branch_name','branch'],
-      material_name: ['material_name','raw_materials_name','raw_material_name','raw material name','raw materials name','name','nama','nama_bahan','material','bahan','bahan_baku'],
-      isi_kemasan: ['isi_kemasan','isi kemasan','isi_kemasan','pack_size','isi_pack','isi'],
-      satuan_kemasan: ['satuan_kemasan','unit_kemasan','kemasan_unit','pack_unit'],
-      variant_brand: ['variant_brand','brand','merk','varian','variant'],
-      supplier_name: ['supplier_name','supplier','nama_supplier'],
-      qty: ['qty','quantity','jumlah','kuantiti_beli','kuantitas_beli','quantity_beli','jumlah_beli'],
-      unit: ['unit','satuan','satuan_beli','unit_beli'],
-      price_per_unit: ['price_per_unit','priceunit','price','harga','harga_per_unit','harga_satuan','harga_beli'],
-      total_price: ['total_price','total','total_harga','jumlah_harga'],
-      notes: ['notes','note','catatan']
-    };
-
-    const findHeader = (keys) => {
-      for (const k of keys) {
-        const n = normalizeHeader(k);
-        if (headerMap[n]) return headerMap[n];
+      if (parsed.length === 0) {
+        const errors = [importError('-', 'File', 'File kosong atau tidak ada baris data setelah header.')];
+        updateImportReport({ status: 'error', message: 'Import gagal: file kosong atau tidak valid.', errors });
+        showToast('Import gagal: file kosong atau tidak valid.', 'error');
+        return;
       }
-      return null;
-    };
 
-    const dateHeader = findHeader(alias.date);
-    const cabangHeader = findHeader(alias.cabang_name);
-    const materialHeader = findHeader(alias.material_name);
-    const isiKemasanHeader = findHeader(alias.isi_kemasan);
-    const satuanKemasanHeader = findHeader(alias.satuan_kemasan);
-    const variantHeader = findHeader(alias.variant_brand);
-    const supplierHeader = findHeader(alias.supplier_name);
-    const qtyHeader = findHeader(alias.qty);
-    const unitHeader = findHeader(alias.unit);
-    const priceHeader = findHeader(alias.price_per_unit);
-    const totalPriceHeader = findHeader(alias.total_price);
-    const notesHeader = findHeader(alias.notes);
+      updateImportReport({
+        status: 'validating',
+        message: `${parsed.length} baris terbaca. Memvalidasi header dan isi data...`,
+        parsedRows: parsed.length,
+      });
 
-    if (!qtyHeader || !materialHeader) {
-      showToast('File harus punya kolom material (nama) dan qty.', 'error');
-      fileInputRef.current.value = '';
-      return;
-    }
+      const headerMap = {};
+      const sampleHeaders = Object.keys(parsed[0]);
+      for (const h of sampleHeaders) {
+        headerMap[normalizeHeader(h)] = h;
+      }
 
-    if (!outletId && !cabangHeader) {
-      showToast('Pilih outlet di form atau isi kolom cabang_name di file import.', 'error');
-      fileInputRef.current.value = '';
-      return;
-    }
+      const alias = {
+        date: ['date','tanggal','tgl'],
+        cabang_name: ['cabang_name','nama_cabang','cabang','outlet_name','nama_outlet','outlet','branch_name','branch'],
+        material_name: ['material_name','raw_materials_name','raw_material_name','raw material name','raw materials name','name','nama','nama_bahan','material','bahan','bahan_baku'],
+        isi_kemasan: ['isi_kemasan','isi kemasan','isi_kemasan','pack_size','isi_pack','isi'],
+        satuan_kemasan: ['satuan_kemasan','unit_kemasan','kemasan_unit','pack_unit'],
+        variant_brand: ['variant_brand','brand','merk','varian','variant'],
+        supplier_name: ['supplier_name','supplier','nama_supplier'],
+        qty: ['qty','quantity','jumlah','kuantiti_beli','kuantitas_beli','quantity_beli','jumlah_beli'],
+        unit: ['unit','satuan','satuan_beli','unit_beli'],
+        price_per_unit: ['price_per_unit','priceunit','price','harga','harga_per_unit','harga_satuan','harga_beli'],
+        total_price: ['total_price','total','total_harga','jumlah_harga'],
+        notes: ['notes','note','catatan']
+      };
 
-    if (!date && !dateHeader) {
-      showToast('Isi tanggal di form atau isi kolom Date/Tanggal di file import.', 'error');
-      fileInputRef.current.value = '';
-      return;
-    }
+      const findHeader = (keys) => {
+        for (const k of keys) {
+          const n = normalizeHeader(k);
+          if (headerMap[n]) return headerMap[n];
+        }
+        return null;
+      };
 
-    setImporting(true);
-    try {
-      // fetch variants list to help matching
+      const dateHeader = findHeader(alias.date);
+      const cabangHeader = findHeader(alias.cabang_name);
+      const materialHeader = findHeader(alias.material_name);
+      const isiKemasanHeader = findHeader(alias.isi_kemasan);
+      const satuanKemasanHeader = findHeader(alias.satuan_kemasan);
+      const variantHeader = findHeader(alias.variant_brand);
+      const supplierHeader = findHeader(alias.supplier_name);
+      const qtyHeader = findHeader(alias.qty);
+      const unitHeader = findHeader(alias.unit);
+      const priceHeader = findHeader(alias.price_per_unit);
+      const totalPriceHeader = findHeader(alias.total_price);
+      const notesHeader = findHeader(alias.notes);
+      const detectedHeaders = [
+        dateHeader && `Tanggal: ${dateHeader}`,
+        cabangHeader && `Cabang: ${cabangHeader}`,
+        materialHeader && `Bahan: ${materialHeader}`,
+        qtyHeader && `Qty: ${qtyHeader}`,
+        unitHeader && `Satuan: ${unitHeader}`,
+        priceHeader && `Harga: ${priceHeader}`,
+      ].filter(Boolean);
+
+      const headerErrors = [];
+      if (!materialHeader) {
+        headerErrors.push(importError('-', 'Header bahan', 'Kolom nama bahan tidak ditemukan.', sampleHeaders.join(', '), 'Gunakan header Raw Materials Name, material_name, nama_bahan, atau bahan.'));
+      }
+      if (!qtyHeader) {
+        headerErrors.push(importError('-', 'Header qty', 'Kolom kuantiti beli tidak ditemukan.', sampleHeaders.join(', '), 'Gunakan header Kuantiti Beli, qty, quantity, atau jumlah.'));
+      }
+      if (!outletId && !cabangHeader) {
+        headerErrors.push(importError('-', 'Header cabang', 'Kolom cabang/outlet tidak ditemukan dan outlet di form belum dipilih.', sampleHeaders.join(', '), 'Gunakan header Outlet, cabang_name, nama_cabang, atau pilih Outlet di form.'));
+      }
+      if (!date && !dateHeader) {
+        headerErrors.push(importError('-', 'Header tanggal', 'Kolom tanggal tidak ditemukan dan tanggal di form kosong.', sampleHeaders.join(', '), 'Gunakan header Date/Tanggal atau isi tanggal di form.'));
+      }
+
+      if (headerErrors.length > 0) {
+        updateImportReport({
+          status: 'error',
+          message: 'Import gagal: header wajib belum lengkap.',
+          parsedRows: parsed.length,
+          headers: detectedHeaders,
+          errors: headerErrors,
+        });
+        showToast('Import gagal: header wajib belum lengkap.', 'error');
+        return;
+      }
+
       const [variantsRes] = await Promise.all([api.get('/api/purchase-report/variants')]);
       const variants = variantsRes.data || [];
 
       const itemsByGroup = {};
-      let totalImported = 0;
+      const previewRows = [];
       const errors = [];
+      const warnings = [];
+      let totalValid = 0;
+
       for (let i = 0; i < parsed.length; i++) {
         const row = parsed[i];
         const rowNum = i + 2; // csv/xlsx data row
@@ -580,30 +660,50 @@ export default function PurchaseReport() {
         const rawDate = dateHeader ? row[dateHeader] : '';
         const parsedDate = dateHeader ? parseImportDate(rawDate) : '';
         if (dateHeader && !isImportValueEmpty(rawDate) && !parsedDate) {
-          errors.push(`Baris ${rowNum}: format tanggal tidak valid (${String(rawDate)})`);
+          errors.push(importError(rowNum, 'Tanggal', 'Format tanggal tidak valid.', rawDate, 'Gunakan format seperti 1-May-26, 2026-05-01, atau 01/05/2026.'));
           continue;
         }
         const rowDate = parsedDate || date;
-        if (!rowDate) { errors.push(`Baris ${rowNum}: tanggal wajib diisi`); continue; }
+        if (!rowDate) {
+          errors.push(importError(rowNum, 'Tanggal', 'Tanggal wajib diisi.', rawDate, 'Isi kolom Date/Tanggal atau tanggal di form.'));
+          continue;
+        }
 
         const cabangName = cabangHeader ? String(row[cabangHeader] || '').trim() : '';
         let rowOutletId = outletId;
+        let rowOutletName = outletNameById(outletId);
         if (cabangName) {
           const outlet = outlets.find((o) => normalizeLookupValue(o.name) === normalizeLookupValue(cabangName));
-          if (!outlet) { errors.push(`Baris ${rowNum}: cabang tidak ditemukan (${cabangName})`); continue; }
+          if (!outlet) {
+            errors.push(importError(rowNum, 'Outlet', 'Cabang/outlet tidak ditemukan di master data aktif.', cabangName, 'Samakan nama dengan Master Data > Outlet.'));
+            continue;
+          }
           rowOutletId = outlet.id;
+          rowOutletName = outlet.name;
         }
-        if (!rowOutletId) { errors.push(`Baris ${rowNum}: cabang wajib diisi`); continue; }
+        if (!rowOutletId) {
+          errors.push(importError(rowNum, 'Outlet', 'Cabang wajib diisi.', cabangName, 'Isi kolom Outlet atau pilih Outlet di form.'));
+          continue;
+        }
 
         const rawMaterial = (materialHeader ? row[materialHeader] : '') || '';
         const materialKey = String(rawMaterial).trim();
-        if (!materialKey) { errors.push(`Baris ${rowNum}: material kosong`); continue; }
+        if (!materialKey) {
+          errors.push(importError(rowNum, 'Bahan', 'Nama bahan kosong.', rawMaterial, 'Isi kolom Raw Materials Name.'));
+          continue;
+        }
 
         const mat = materials.find((m) => normalizeLookupValue(m.name) === normalizeLookupValue(materialKey));
-        if (!mat) { errors.push(`Baris ${rowNum}: material tidak ditemukan (${materialKey})`); continue; }
+        if (!mat) {
+          errors.push(importError(rowNum, 'Bahan', 'Bahan tidak ditemukan di master data aktif.', materialKey, 'Samakan nama dengan Master Data > Bahan Baku.'));
+          continue;
+        }
 
         const qtyVal = parseImportNumber(qtyHeader ? row[qtyHeader] : '');
-        if (!(qtyVal > 0)) { errors.push(`Baris ${rowNum}: qty harus > 0`); continue; }
+        if (!(qtyVal > 0)) {
+          errors.push(importError(rowNum, 'Kuantiti Beli', 'Qty harus lebih besar dari 0.', qtyHeader ? row[qtyHeader] : '', 'Isi angka pembelian, contoh 10.'));
+          continue;
+        }
 
         const isiKemasanVal = isiKemasanHeader ? String(row[isiKemasanHeader] || '').trim() : '';
         const satuanKemasanVal = satuanKemasanHeader ? String(row[satuanKemasanHeader] || '').trim() : '';
@@ -611,24 +711,40 @@ export default function PurchaseReport() {
 
         let unitVal = (unitHeader ? row[unitHeader] : '') || '';
         unitVal = String(unitVal).trim() || mat.purchase_unit || '';
-        if (!unitVal) { errors.push(`Baris ${rowNum}: unit tidak terdeteksi dan material tidak punya purchase_unit`); continue; }
+        if (!unitVal) {
+          errors.push(importError(rowNum, 'Satuan Beli', 'Satuan tidak terdeteksi dan bahan tidak punya purchase_unit.', unitHeader ? row[unitHeader] : '', 'Isi kolom Satuan Beli.'));
+          continue;
+        }
 
         const priceFromFile = priceHeader ? parseImportNumber(row[priceHeader]) : 0;
         const totalPriceVal = totalPriceHeader ? parseImportNumber(row[totalPriceHeader]) : 0;
         const priceVal = priceFromFile || (totalPriceVal > 0 ? totalPriceVal / qtyVal : 0);
+        if (!(priceVal > 0)) {
+          warnings.push(importError(rowNum, 'Price/Unit', 'Harga tidak terisi. Item akan masuk dengan harga 0.', priceHeader ? row[priceHeader] : '', 'Isi Price/Unit atau Total Price jika harga ingin tercatat.'));
+        }
 
         let variantId = null;
         const variantBrand = variantHeader ? String(row[variantHeader] || '').trim() : '';
         if (variantBrand) {
           const found = variants.find((v) => v.material_id === mat.id && normalizeLookupValue(v.brand) === normalizeLookupValue(variantBrand));
-          if (found) variantId = found.id;
+          if (found) {
+            variantId = found.id;
+          } else {
+            errors.push(importError(rowNum, 'Brand', 'Brand tidak ditemukan untuk bahan ini.', variantBrand, 'Tambahkan brand di varian bahan atau kosongkan kolom Brand.'));
+            continue;
+          }
         }
 
         let supplierId = null;
         const supplierName = supplierHeader ? String(row[supplierHeader] || '').trim() : '';
         if (supplierName) {
           const s = suppliers.find((sp) => normalizeLookupValue(sp.name) === normalizeLookupValue(supplierName));
-          if (s) supplierId = s.id;
+          if (s) {
+            supplierId = s.id;
+          } else {
+            errors.push(importError(rowNum, 'Supplier', 'Supplier tidak ditemukan di master data aktif.', supplierName, 'Samakan nama dengan Master Data > Supplier atau kosongkan kolom Supplier.'));
+            continue;
+          }
         }
 
         const notesVal = (notesHeader ? String(row[notesHeader] || '').trim() : '') || '';
@@ -647,22 +763,75 @@ export default function PurchaseReport() {
         const groupKey = `${rowDate}__${rowOutletId}`;
         if (!itemsByGroup[groupKey]) itemsByGroup[groupKey] = { date: rowDate, outlet_id: rowOutletId, items: [] };
         itemsByGroup[groupKey].items.push(item);
-        totalImported++;
-      }
+        totalValid++;
 
-      if (errors.length > 0) {
-        showToast(`Import gagal: ${errors.length} baris bermasalah. Lihat console untuk detail.`, 'error');
-        console.error('Import errors:', errors);
-        fileInputRef.current.value = '';
-        return;
+        if (previewRows.length < 12) {
+          previewRows.push({
+            rowNum,
+            date: rowDate,
+            outlet: rowOutletName,
+            material: mat.name,
+            brand: variantBrand || '-',
+            supplier: supplierName || '-',
+            qty: qtyVal,
+            unit: unitVal,
+            price: priceVal,
+            subtotal: qtyVal * priceVal,
+          });
+        }
       }
 
       const groupEntries = Object.values(itemsByGroup).filter((group) => group.items.length > 0);
-      if (groupEntries.length === 0) {
-        showToast('Tidak ada baris valid untuk diimpor.', 'error');
-        fileInputRef.current.value = '';
+      const groups = groupEntries.map((group) => ({
+        date: group.date,
+        outlet: outletNameById(group.outlet_id),
+        rows: group.items.length,
+        total: group.items.reduce((sum, item) => sum + Number(item.qty || 0) * Number(item.price_per_unit || 0), 0),
+      }));
+
+      if (errors.length > 0) {
+        updateImportReport({
+          status: 'error',
+          message: `Import dihentikan. Ada ${errors.length} error yang harus diperbaiki.`,
+          parsedRows: parsed.length,
+          validRows: totalValid,
+          groupCount: groups.length,
+          groups,
+          errors,
+          warnings,
+          previewRows,
+          headers: detectedHeaders,
+        });
+        showToast(`Import gagal: ${errors.length} error ditemukan. Detail tampil di panel import.`, 'error');
         return;
       }
+
+      if (groupEntries.length === 0) {
+        const emptyErrors = [importError('-', 'Data', 'Tidak ada baris valid untuk diimpor.')];
+        updateImportReport({
+          status: 'error',
+          message: 'Import gagal: tidak ada baris valid.',
+          parsedRows: parsed.length,
+          errors: emptyErrors,
+          warnings,
+          headers: detectedHeaders,
+        });
+        showToast('Import gagal: tidak ada baris valid.', 'error');
+        return;
+      }
+
+      updateImportReport({
+        status: 'submitting',
+        message: `Mengirim ${totalValid} baris ke sistem purchase...`,
+        parsedRows: parsed.length,
+        validRows: totalValid,
+        groupCount: groups.length,
+        groups,
+        errors: [],
+        warnings,
+        previewRows,
+        headers: detectedHeaders,
+      });
 
       // Server accepts one date/outlet per request, so group imported rows by tanggal + cabang.
       await Promise.all(groupEntries.map((group) => api.post('/api/purchase-report', {
@@ -670,16 +839,35 @@ export default function PurchaseReport() {
         date: group.date,
         items: group.items,
       })));
-      showToast(`${totalImported} baris berhasil diimpor${groupEntries.length > 1 ? ` untuk ${groupEntries.length} grup tanggal/cabang` : ''}.`);
+
+      updateImportReport({
+        status: 'success',
+        message: `${totalValid} baris berhasil diimpor${groups.length > 1 ? ` untuk ${groups.length} grup tanggal/cabang` : ''}.`,
+        parsedRows: parsed.length,
+        validRows: totalValid,
+        groupCount: groups.length,
+        groups,
+        errors: [],
+        warnings,
+        previewRows,
+        headers: detectedHeaders,
+      });
+      showToast(`${totalValid} baris berhasil diimpor${groups.length > 1 ? ` untuk ${groups.length} grup tanggal/cabang` : ''}.`);
       setRows([newRow()]);
       setOutletId('');
       loadRecords();
     } catch (err) {
       console.error(err);
-      showToast('Gagal mengimpor: ' + (err.response?.data?.error || err.message), 'error');
+      const message = err.response?.data?.error || err.message || 'Terjadi error saat import.';
+      updateImportReport({
+        status: 'error',
+        message: 'Import gagal saat mengirim data ke server.',
+        errors: [importError('-', 'Server', message)],
+      });
+      showToast('Gagal mengimpor: ' + message, 'error');
     } finally {
       setImporting(false);
-      fileInputRef.current.value = '';
+      resetFileInput();
     }
   }
 
@@ -691,6 +879,217 @@ export default function PurchaseReport() {
     return acc;
   }, {});
   const groupedList = Object.values(grouped).sort((a, b) => b.date.localeCompare(a.date));
+
+  function getImportStatusText(status) {
+    if (status === 'reading') return 'Membaca file';
+    if (status === 'validating') return 'Validasi data';
+    if (status === 'submitting') return 'Mengirim data';
+    if (status === 'success') return 'Berhasil';
+    if (status === 'error') return 'Perlu diperbaiki';
+    return 'Siap';
+  }
+
+  function getImportStatusClasses(status) {
+    if (status === 'success') return 'border-green-200 bg-green-50 text-green-700';
+    if (status === 'error') return 'border-red-200 bg-red-50 text-red-700';
+    if (status === 'submitting' || status === 'validating' || status === 'reading') return 'border-blue-200 bg-blue-50 text-blue-700';
+    return 'border-gray-200 bg-gray-50 text-gray-700';
+  }
+
+  function renderImportPanel() {
+    if (!importReport) return null;
+
+    const busy = importing || ['reading', 'validating', 'submitting'].includes(importReport.status);
+    const statusClasses = getImportStatusClasses(importReport.status);
+
+    return (
+      <div className={`mb-6 rounded-lg border ${statusClasses}`}>
+        <div className="p-4 border-b border-current/10 flex items-start gap-3">
+          <div className={`mt-1 h-3 w-3 rounded-full ${busy ? 'bg-blue-500 animate-pulse' : importReport.status === 'success' ? 'bg-green-500' : importReport.status === 'error' ? 'bg-red-500' : 'bg-gray-400'}`} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="font-semibold text-gray-900">Status Import</h2>
+              <span className="px-2 py-0.5 rounded-full border border-current/20 text-xs font-semibold">
+                {getImportStatusText(importReport.status)}
+              </span>
+            </div>
+            <p className="text-sm mt-1 text-gray-700">{importReport.message}</p>
+            {importReport.fileName && (
+              <p className="text-xs mt-1 text-gray-500">File: {importReport.fileName}</p>
+            )}
+          </div>
+          {!busy && (
+            <button
+              type="button"
+              onClick={() => setImportReport(null)}
+              className="text-xs font-semibold text-gray-500 hover:text-gray-800"
+            >
+              Tutup
+            </button>
+          )}
+        </div>
+
+        <div className="p-4 bg-white rounded-b-lg text-gray-700">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="border border-gray-200 rounded-md p-3">
+              <p className="text-xs text-gray-500">Baris terbaca</p>
+              <p className="text-xl font-bold text-gray-900">{importReport.parsedRows || 0}</p>
+            </div>
+            <div className="border border-gray-200 rounded-md p-3">
+              <p className="text-xs text-gray-500">Baris valid</p>
+              <p className="text-xl font-bold text-gray-900">{importReport.validRows || 0}</p>
+            </div>
+            <div className="border border-gray-200 rounded-md p-3">
+              <p className="text-xs text-gray-500">Grup tanggal/cabang</p>
+              <p className="text-xl font-bold text-gray-900">{importReport.groupCount || 0}</p>
+            </div>
+            <div className="border border-gray-200 rounded-md p-3">
+              <p className="text-xs text-gray-500">Error</p>
+              <p className={`text-xl font-bold ${(importReport.errors || []).length ? 'text-red-600' : 'text-gray-900'}`}>
+                {(importReport.errors || []).length}
+              </p>
+            </div>
+          </div>
+
+          {(importReport.headers || []).length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Header terdeteksi</p>
+              <div className="flex flex-wrap gap-2">
+                {importReport.headers.map((header) => (
+                  <span key={header} className="px-2 py-1 rounded border border-gray-200 bg-gray-50 text-xs text-gray-700">
+                    {header}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(importReport.errors || []).length > 0 && (
+            <div className="mb-4 border border-red-200 rounded-md overflow-hidden">
+              <div className="px-3 py-2 bg-red-50 border-b border-red-100">
+                <p className="font-semibold text-sm text-red-700">Error yang harus diperbaiki</p>
+                <p className="text-xs text-red-600">Import tidak dikirim jika masih ada error.</p>
+              </div>
+              <div className="overflow-x-auto max-h-72">
+                <table className="w-full text-xs">
+                  <thead className="bg-white sticky top-0">
+                    <tr className="border-b border-red-100 text-red-700">
+                      <th className="px-3 py-2 text-left w-16">Baris</th>
+                      <th className="px-3 py-2 text-left w-32">Kolom</th>
+                      <th className="px-3 py-2 text-left">Masalah</th>
+                      <th className="px-3 py-2 text-left">Nilai</th>
+                      <th className="px-3 py-2 text-left">Saran</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-red-50">
+                    {importReport.errors.map((err, idx) => (
+                      <tr key={`${err.row}-${err.field}-${idx}`}>
+                        <td className="px-3 py-2 font-semibold text-red-700">{err.row}</td>
+                        <td className="px-3 py-2">{err.field}</td>
+                        <td className="px-3 py-2">{err.message}</td>
+                        <td className="px-3 py-2 text-gray-500">{err.value || '-'}</td>
+                        <td className="px-3 py-2 text-gray-600">{err.suggestion || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {(importReport.warnings || []).length > 0 && (
+            <div className="mb-4 border border-amber-200 rounded-md overflow-hidden">
+              <div className="px-3 py-2 bg-amber-50 border-b border-amber-100">
+                <p className="font-semibold text-sm text-amber-800">Peringatan</p>
+              </div>
+              <div className="divide-y divide-amber-50">
+                {importReport.warnings.map((warning, idx) => (
+                  <div key={`${warning.row}-${warning.field}-${idx}`} className="px-3 py-2 text-xs">
+                    <span className="font-semibold text-amber-800">Baris {warning.row}, {warning.field}: </span>
+                    <span>{warning.message}</span>
+                    {warning.suggestion && <span className="text-gray-500"> {warning.suggestion}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(importReport.groups || []).length > 0 && (
+            <div className="mb-4">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Data yang akan masuk</p>
+              <div className="overflow-x-auto border border-gray-200 rounded-md">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr className="border-b border-gray-200 text-gray-600">
+                      <th className="px-3 py-2 text-left">Tanggal</th>
+                      <th className="px-3 py-2 text-left">Cabang</th>
+                      <th className="px-3 py-2 text-right">Baris</th>
+                      <th className="px-3 py-2 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {importReport.groups.map((group, idx) => (
+                      <tr key={`${group.date}-${group.outlet}-${idx}`}>
+                        <td className="px-3 py-2">{formatDateID(group.date)}</td>
+                        <td className="px-3 py-2">{group.outlet}</td>
+                        <td className="px-3 py-2 text-right">{group.rows}</td>
+                        <td className="px-3 py-2 text-right font-semibold">{formatRupiah(group.total || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {(importReport.previewRows || []).length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Preview baris valid</p>
+              <div className="overflow-x-auto border border-gray-200 rounded-md">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50">
+                    <tr className="border-b border-gray-200 text-gray-600">
+                      <th className="px-3 py-2 text-left">Baris</th>
+                      <th className="px-3 py-2 text-left">Tanggal</th>
+                      <th className="px-3 py-2 text-left">Cabang</th>
+                      <th className="px-3 py-2 text-left">Bahan</th>
+                      <th className="px-3 py-2 text-left">Brand</th>
+                      <th className="px-3 py-2 text-left">Supplier</th>
+                      <th className="px-3 py-2 text-right">Qty</th>
+                      <th className="px-3 py-2 text-left">Satuan</th>
+                      <th className="px-3 py-2 text-right">Harga</th>
+                      <th className="px-3 py-2 text-right">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {importReport.previewRows.map((row) => (
+                      <tr key={row.rowNum}>
+                        <td className="px-3 py-2 font-semibold">{row.rowNum}</td>
+                        <td className="px-3 py-2">{formatDateID(row.date)}</td>
+                        <td className="px-3 py-2">{row.outlet}</td>
+                        <td className="px-3 py-2">{row.material}</td>
+                        <td className="px-3 py-2">{row.brand}</td>
+                        <td className="px-3 py-2">{row.supplier}</td>
+                        <td className="px-3 py-2 text-right">{row.qty}</td>
+                        <td className="px-3 py-2">{row.unit}</td>
+                        <td className="px-3 py-2 text-right">{formatRupiah(row.price || 0)}</td>
+                        <td className="px-3 py-2 text-right font-semibold">{formatRupiah(row.subtotal || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {importReport.validRows > importReport.previewRows.length && (
+                <p className="text-xs text-gray-500 mt-2">
+                  Preview menampilkan {importReport.previewRows.length} dari {importReport.validRows} baris valid.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -930,6 +1329,8 @@ export default function PurchaseReport() {
           </div>
         </div>
       </form>
+
+      {renderImportPanel()}
 
       {/* ── Histori ── */}
       <div className="card overflow-hidden">
