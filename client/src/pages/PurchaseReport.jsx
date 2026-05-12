@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
 
 function getFirstOfMonth() {
@@ -43,6 +43,8 @@ export default function PurchaseReport() {
 
   const [toast, setToast] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     loadMasterData();
@@ -187,6 +189,205 @@ export default function PurchaseReport() {
       showToast('Gagal menghapus.', 'error');
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  // ---- Export template / Import CSV ----
+  function exportTemplate() {
+    // headers: allow user to fill material by code or name, variant brand, supplier name
+    const headers = [
+      'material_code',
+      'material_name',
+      'variant_brand',
+      'supplier_name',
+      'qty',
+      'unit',
+      'price_per_unit',
+      'notes'
+    ];
+    const example = [
+      'MTR-001',
+      'Tepung Terigu',
+      'Merk A',
+      'Supplier 1',
+      '10',
+      'kg',
+      '50000',
+      'contoh'
+    ];
+    const csv = [headers.join(','), example.map((v) => `"${String(v).replace(/"/g,'""')}"`).join(',')].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'purchase_report_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function parseCSV(text) {
+    if (!text) return [];
+    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\uFEFF/, '');
+    const lines = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === '"') {
+        if (inQuotes && text[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = !inQuotes; }
+      } else if (ch === '\n' && !inQuotes) {
+        lines.push(cur);
+        cur = '';
+      } else { cur += ch; }
+    }
+    if (cur !== '') lines.push(cur);
+    if (lines.length === 0) return [];
+    const rawHeaders = lines[0].split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(h => h.trim().replace(/^"|"$/g, ''));
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      const cols = lines[i].split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map(c => c.trim().replace(/^"|"$/g, ''));
+      const obj = {};
+      for (let j = 0; j < rawHeaders.length; j++) {
+        obj[rawHeaders[j]] = cols[j] !== undefined ? cols[j] : '';
+      }
+      rows.push(obj);
+    }
+    return rows;
+  }
+
+  function normalizeHeader(h) {
+    return String(h || '').toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  }
+
+  async function handleFileChange(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!outletId) { showToast('Pilih outlet terlebih dahulu sebelum import.', 'error'); fileInputRef.current.value = ''; return; }
+    if (!date) { showToast('Isi tanggal terlebih dahulu sebelum import.', 'error'); fileInputRef.current.value = ''; return; }
+
+    const text = await file.text();
+    const parsed = parseCSV(text);
+    if (parsed.length === 0) { showToast('File CSV kosong atau tidak valid.', 'error'); fileInputRef.current.value = ''; return; }
+
+    // Normalize headers
+    const headerMap = {};
+    const sampleHeaders = Object.keys(parsed[0]);
+    for (const h of sampleHeaders) {
+      headerMap[normalizeHeader(h)] = h;
+    }
+
+    const alias = {
+      material_code: ['material_code','code','kode','kode_bahan','materialcode','materialkode','material'],
+      material_name: ['material_name','name','nama','nama_bahan','material_name'],
+      variant_brand: ['variant_brand','brand','merk','varian','variant'],
+      supplier_name: ['supplier_name','supplier','nama_supplier'],
+      qty: ['qty','quantity','jumlah'],
+      unit: ['unit','satuan'],
+      price_per_unit: ['price_per_unit','price','harga','harga_per_unit'],
+      notes: ['notes','note','catatan']
+    };
+
+    const findHeader = (keys) => {
+      for (const k of keys) {
+        if (headerMap[k]) return headerMap[k];
+      }
+      return null;
+    };
+
+    const materialHeader = findHeader(alias.material_code.map(normalizeHeader)) || findHeader(alias.material_name.map(normalizeHeader));
+    const variantHeader = findHeader(alias.variant_brand.map(normalizeHeader));
+    const supplierHeader = findHeader(alias.supplier_name.map(normalizeHeader));
+    const qtyHeader = findHeader(alias.qty.map(normalizeHeader));
+    const unitHeader = findHeader(alias.unit.map(normalizeHeader));
+    const priceHeader = findHeader(alias.price_per_unit.map(normalizeHeader));
+    const notesHeader = findHeader(alias.notes.map(normalizeHeader));
+
+    if (!qtyHeader || !(materialHeader)) {
+      showToast('CSV harus punya kolom material (kode/nama) dan qty.', 'error');
+      fileInputRef.current.value = '';
+      return;
+    }
+
+    setImporting(true);
+    try {
+      // fetch variants list to help matching
+      const [variantsRes] = await Promise.all([api.get('/api/purchase-report/variants')]);
+      const variants = variantsRes.data || [];
+
+      const items = [];
+      const errors = [];
+      for (let i = 0; i < parsed.length; i++) {
+        const row = parsed[i];
+        const rowNum = i + 2; // csv line number
+        const rawMaterial = (materialHeader ? row[materialHeader] : '') || '';
+        const rawMaterialAlt = (materialHeader === null && row[sampleHeaders[0]]) || '';
+        const materialKey = (rawMaterial || rawMaterialAlt).trim();
+        if (!materialKey) { errors.push(`Baris ${rowNum}: material kosong`); continue; }
+
+        const mat = materials.find((m) => (m.code && m.code.toLowerCase() === materialKey.toLowerCase()) || (m.name && m.name.toLowerCase() === materialKey.toLowerCase()));
+        if (!mat) { errors.push(`Baris ${rowNum}: material tidak ditemukan (${materialKey})`); continue; }
+
+        const qtyVal = Number((qtyHeader ? row[qtyHeader] : '') || 0);
+        if (!(qtyVal > 0)) { errors.push(`Baris ${rowNum}: qty harus > 0`); continue; }
+
+        let unitVal = (unitHeader ? row[unitHeader] : '') || '';
+        unitVal = unitVal.trim() || mat.purchase_unit || '';
+        if (!unitVal) { errors.push(`Baris ${rowNum}: unit tidak terdeteksi dan material tidak punya purchase_unit`); continue; }
+
+        const priceVal = Number((priceHeader ? row[priceHeader] : '') || 0) || 0;
+
+        let variantId = null;
+        const variantBrand = variantHeader ? (row[variantHeader] || '').trim() : '';
+        if (variantBrand) {
+          const found = variants.find((v) => v.material_id === mat.id && v.brand && v.brand.toLowerCase() === variantBrand.toLowerCase());
+          if (found) variantId = found.id;
+        }
+
+        let supplierId = null;
+        const supplierName = supplierHeader ? (row[supplierHeader] || '').trim() : '';
+        if (supplierName) {
+          const s = suppliers.find((sp) => sp.name && sp.name.toLowerCase() === supplierName.toLowerCase());
+          if (s) supplierId = s.id;
+        }
+
+        items.push({
+          material_id: mat.id,
+          variant_id: variantId,
+          supplier_id: supplierId,
+          qty: qtyVal,
+          unit: unitVal,
+          price_per_unit: priceVal,
+          notes: notesHeader ? (row[notesHeader] || '').trim() : ''
+        });
+      }
+
+      if (errors.length > 0) {
+        showToast(`Import gagal: ${errors.length} baris bermasalah. Lihat console untuk detail.`, 'error');
+        console.error('Import errors:', errors);
+        fileInputRef.current.value = '';
+        return;
+      }
+
+      // submit to server
+      await api.post('/api/purchase-report', {
+        outlet_id: outletId,
+        date,
+        items,
+      });
+      showToast(`${items.length} baris berhasil diimpor.`);
+      setRows([newRow()]);
+      setOutletId('');
+      loadRecords();
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal mengimpor: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setImporting(false);
+      fileInputRef.current.value = '';
     }
   }
 
@@ -409,9 +610,22 @@ export default function PurchaseReport() {
           </div>
 
           <div className="flex items-center justify-between mt-4">
-            <button type="button" onClick={addRow} className="btn-secondary text-sm">
-              + Tambah Bahan
-            </button>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={addRow} className="btn-secondary text-sm">
+                + Tambah Bahan
+              </button>
+              <button type="button" onClick={exportTemplate} className="btn-secondary text-sm">
+                Export Template
+              </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current && fileInputRef.current.click()}
+                className={`btn-secondary text-sm ${importing ? 'opacity-60 pointer-events-none' : ''}`}
+              >
+                {importing ? 'Importing...' : 'Import CSV'}
+              </button>
+              <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleFileChange} className="hidden" />
+            </div>
             <button
               type="submit"
               disabled={submitting || validRows.length === 0}
