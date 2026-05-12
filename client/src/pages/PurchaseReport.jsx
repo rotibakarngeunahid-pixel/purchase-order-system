@@ -478,6 +478,22 @@ export default function PurchaseReport() {
     return outlets.find((o) => o.id === id)?.name || '';
   }
 
+  function supplierNameById(id) {
+    return suppliers.find((s) => s.id === id)?.name || '';
+  }
+
+  function isSameLookupValue(a, b) {
+    return normalizeLookupValue(a) === normalizeLookupValue(b);
+  }
+
+  function findMaterialByNameOrBrand(value) {
+    const key = normalizeLookupValue(value);
+    if (!key) return null;
+    return materials.find((m) => normalizeLookupValue(m.name) === key)
+      || materials.find((m) => normalizeLookupValue(m.brand) === key)
+      || null;
+  }
+
   function updateImportReport(patch) {
     setImportReport((prev) => ({
       fileName: prev?.fileName || '',
@@ -718,24 +734,54 @@ export default function PurchaseReport() {
 
         const priceFromFile = priceHeader ? parseImportNumber(row[priceHeader]) : 0;
         const totalPriceVal = totalPriceHeader ? parseImportNumber(row[totalPriceHeader]) : 0;
-        const priceVal = priceFromFile || (totalPriceVal > 0 ? totalPriceVal / qtyVal : 0);
-        if (!(priceVal > 0)) {
-          warnings.push(importError(rowNum, 'Price/Unit', 'Harga tidak terisi. Item akan masuk dengan harga 0.', priceHeader ? row[priceHeader] : '', 'Isi Price/Unit atau Total Price jika harga ingin tercatat.'));
-        }
+        let priceVal = priceFromFile || (totalPriceVal > 0 ? totalPriceVal / qtyVal : 0);
 
         let variantId = null;
+        let variantSupplierId = null;
         const variantBrand = variantHeader ? String(row[variantHeader] || '').trim() : '';
+        let resolvedMaterial = mat;
+        let resolvedBrand = variantBrand;
         if (variantBrand) {
           const found = variants.find((v) => v.material_id === mat.id && normalizeLookupValue(v.brand) === normalizeLookupValue(variantBrand));
           if (found) {
             variantId = found.id;
+            variantSupplierId = found.supplier_id || null;
+            if (!priceVal && Number(found.price_per_purchase_unit) > 0) {
+              priceVal = Number(found.price_per_purchase_unit);
+            }
+          } else if (
+            isSameLookupValue(variantBrand, mat.brand)
+            || isSameLookupValue(variantBrand, mat.name)
+          ) {
+            variantId = null;
+            if (!priceVal && Number(mat.price_per_purchase_unit) > 0) {
+              priceVal = Number(mat.price_per_purchase_unit);
+            }
           } else {
-            errors.push(importError(rowNum, 'Brand', 'Brand tidak ditemukan untuk bahan ini.', variantBrand, 'Tambahkan brand di varian bahan atau kosongkan kolom Brand.'));
-            continue;
+            const brandAsMaterial = findMaterialByNameOrBrand(variantBrand);
+            if (brandAsMaterial) {
+              resolvedMaterial = brandAsMaterial;
+              resolvedBrand = brandAsMaterial.brand || brandAsMaterial.name;
+              variantId = null;
+              unitVal = String(unitVal).trim() || brandAsMaterial.purchase_unit || '';
+              if (!priceVal && Number(brandAsMaterial.price_per_purchase_unit) > 0) {
+                priceVal = Number(brandAsMaterial.price_per_purchase_unit);
+              }
+              warnings.push(importError(rowNum, 'Bahan/Brand', `Brand ${variantBrand} terdeteksi sebagai bahan ${brandAsMaterial.name}.`, `${materialKey} / ${variantBrand}`, `Baris ini akan masuk sebagai bahan ${brandAsMaterial.name}.`));
+            } else {
+              errors.push(importError(rowNum, 'Brand', 'Brand tidak ditemukan untuk bahan ini.', variantBrand, 'Tambahkan brand di varian bahan, gunakan brand default di Master Data, atau kosongkan kolom Brand.'));
+              continue;
+            }
           }
+        } else if (!priceVal && Number(mat.price_per_purchase_unit) > 0) {
+          priceVal = Number(mat.price_per_purchase_unit);
         }
 
-        let supplierId = null;
+        if (!(priceVal > 0)) {
+          warnings.push(importError(rowNum, 'Price/Unit', 'Harga tidak terisi. Item akan masuk dengan harga 0.', priceHeader ? row[priceHeader] : '', 'Isi Price/Unit atau Total Price jika harga ingin tercatat.'));
+        }
+
+        let supplierId = variantSupplierId || resolvedMaterial.supplier_id || null;
         const supplierName = supplierHeader ? String(row[supplierHeader] || '').trim() : '';
         if (supplierName) {
           const s = suppliers.find((sp) => normalizeLookupValue(sp.name) === normalizeLookupValue(supplierName));
@@ -751,7 +797,7 @@ export default function PurchaseReport() {
         const notesCombined = kemasanVal ? (notesVal ? `${notesVal} | isi_kemasan:${kemasanVal}` : `isi_kemasan:${kemasanVal}`) : notesVal;
 
         const item = {
-          material_id: mat.id,
+          material_id: resolvedMaterial.id,
           variant_id: variantId,
           supplier_id: supplierId,
           qty: qtyVal,
@@ -770,9 +816,9 @@ export default function PurchaseReport() {
             rowNum,
             date: rowDate,
             outlet: rowOutletName,
-            material: mat.name,
-            brand: variantBrand || '-',
-            supplier: supplierName || '-',
+            material: resolvedMaterial.name,
+            brand: resolvedBrand || '-',
+            supplier: supplierName || supplierNameById(supplierId) || '-',
             qty: qtyVal,
             unit: unitVal,
             price: priceVal,
