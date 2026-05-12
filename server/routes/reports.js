@@ -223,6 +223,34 @@ router.get('/analytics/trends', async (req, res) => {
     map[month].order_count += 1;
   }
 
+  // Sertakan juga pengeluaran dari `purchase_report` (laporan barang masuk)
+  const { data: reportRows, error: reportError } = await supabase
+    .from('purchase_report')
+    .select('qty, price_per_unit, date');
+
+  if (reportError) return res.status(500).json({ error: reportError.message });
+
+  let filteredReports = reportRows || [];
+  if (date_from || date_to) {
+    filteredReports = filteredReports.filter((r) => {
+      const d = r.date;
+      if (!d) return true;
+      if (date_from && d < date_from) return false;
+      if (date_to && d > date_to) return false;
+      return true;
+    });
+  }
+
+  for (const r of filteredReports) {
+    const d = r.date;
+    if (!d) continue;
+    const month = d.substring(0, 7);
+    if (!map[month]) {
+      map[month] = { month, total_estimated: 0, total_actual: 0, order_count: 0 };
+    }
+    map[month].total_actual += Number(r.qty || 0) * Number(r.price_per_unit || 0);
+  }
+
   const result = Object.values(map).sort((a, b) => a.month.localeCompare(b.month));
   res.json(result);
 });
@@ -243,9 +271,21 @@ router.get('/stats', async (req, res) => {
       .gte('created_at', firstOfMonth),
   ]);
 
-  const monthlySpending = (monthlyPOs.data || []).reduce(
-    (sum, po) => sum + Number(po.total_actual || 0), 0
+  // Ambil juga pengeluaran dari purchase_report sejak awal bulan
+  const { data: reportsThisMonth, error: reportsError } = await supabase
+    .from('purchase_report')
+    .select('qty, price_per_unit, date')
+    .gte('date', firstOfMonth);
+
+  if (reportsError) return res.status(500).json({ error: reportsError.message });
+
+  const monthlySpendingPO = (monthlyPOs.data || []).reduce((sum, po) => sum + Number(po.total_actual || 0), 0);
+  const monthlySpendingReports = (reportsThisMonth || []).reduce(
+    (sum, r) => sum + Number(r.qty || 0) * Number(r.price_per_unit || 0),
+    0
   );
+
+  const monthlySpending = monthlySpendingPO + monthlySpendingReports;
 
   res.json({
     today_sessions: todaySession.data?.length || 0,
