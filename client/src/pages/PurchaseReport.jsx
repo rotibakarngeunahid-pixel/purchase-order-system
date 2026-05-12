@@ -194,7 +194,7 @@ export default function PurchaseReport() {
 
   // ---- Export template / Import CSV or XLSX ----
   async function exportTemplate() {
-    // Create XLSX template with dropdown for material_name and a column `isi_kemasan`
+    // Create XLSX template with dropdown for cabang/material and a column `isi_kemasan`
     try {
       const mod = await import('exceljs');
       const ExcelJS = mod.default || mod;
@@ -205,6 +205,7 @@ export default function PurchaseReport() {
       const materialsSheet = wb.addWorksheet('Materials');
 
       template.columns = [
+        { header: 'cabang_name', key: 'cabang_name', width: 30 },
         { header: 'material_name', key: 'material_name', width: 40 },
         { header: 'isi_kemasan', key: 'isi_kemasan', width: 18 },
         { header: 'variant_brand', key: 'variant_brand', width: 20 },
@@ -215,9 +216,10 @@ export default function PurchaseReport() {
         { header: 'notes', key: 'notes', width: 30 },
       ];
 
+      const sampleOutlet = (outlets && outlets[0] && outlets[0].name) || 'Outlet A';
       const sampleMaterial = (materials && materials[0] && materials[0].name) || 'Tepung Terigu';
       const sampleUnit = (materials && materials[0] && materials[0].purchase_unit) || 'kg';
-      template.addRow([sampleMaterial, '1 pack', 'Merk A', 'Supplier 1', 10, sampleUnit, 50000, 'contoh']);
+      template.addRow([sampleOutlet, sampleMaterial, '1 pack', 'Merk A', 'Supplier 1', 10, sampleUnit, 50000, 'contoh']);
 
       // Populate materials sheet for dropdown source
       materialsSheet.getCell('A1').value = 'name';
@@ -225,15 +227,31 @@ export default function PurchaseReport() {
         materialsSheet.getCell(`A${i + 2}`).value = m.name;
       });
 
-      const lastMatRow = Math.max(2, (materials || []).length + 1);
-      const formulaRange = `=Materials!$A$2:$A$${lastMatRow}`;
+      // Populate outlets sheet for dropdown source
+      const outletsSheet = wb.addWorksheet('Outlets');
+      outletsSheet.getCell('A1').value = 'name';
+      (outlets || []).forEach((o, i) => {
+        outletsSheet.getCell(`A${i + 2}`).value = o.name;
+      });
 
-      // Add data validation (dropdown) for material_name column on many rows
+      const lastMatRow = Math.max(2, (materials || []).length + 1);
+      const lastOutRow = Math.max(2, (outlets || []).length + 1);
+      const formulaMatRange = `=Materials!$A$2:$A$${lastMatRow}`;
+      const formulaOutRange = `=Outlets!$A$2:$A$${lastOutRow}`;
+
+      // Add data validation (dropdown) for cabang_name and material_name columns on many rows
       for (let r = 2; r <= 1000; r++) {
         template.getCell(`A${r}`).dataValidation = {
           type: 'list',
           allowBlank: true,
-          formulae: [formulaRange],
+          formulae: [formulaOutRange],
+          showErrorMessage: true,
+          error: 'Pilih cabang dari daftar',
+        };
+        template.getCell(`B${r}`).dataValidation = {
+          type: 'list',
+          allowBlank: true,
+          formulae: [formulaMatRange],
           showErrorMessage: true,
           error: 'Pilih material dari daftar',
         };
@@ -255,6 +273,7 @@ export default function PurchaseReport() {
       console.error(err);
       // Fallback to simple CSV if exceljs fails
       const headers = [
+        'cabang_name',
         'material_name',
         'isi_kemasan',
         'variant_brand',
@@ -265,6 +284,7 @@ export default function PurchaseReport() {
         'notes',
       ];
       const example = [
+        'Outlet A',
         'Tepung Terigu',
         '1 pack',
         'Merk A',
@@ -322,10 +342,14 @@ export default function PurchaseReport() {
   function normalizeHeader(h) {
     return String(h || '').toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   }
+
+  function normalizeLookupValue(value) {
+    return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  }
+
   async function handleFileChange(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    if (!outletId) { showToast('Pilih outlet terlebih dahulu sebelum import.', 'error'); fileInputRef.current.value = ''; return; }
     if (!date) { showToast('Isi tanggal terlebih dahulu sebelum import.', 'error'); fileInputRef.current.value = ''; return; }
 
     // detect file type (xlsx preferred)
@@ -381,6 +405,7 @@ export default function PurchaseReport() {
     }
 
     const alias = {
+      cabang_name: ['cabang_name','nama_cabang','cabang','outlet_name','nama_outlet','outlet','branch_name','branch'],
       material_name: ['material_name','name','nama','nama_bahan','material'],
       isi_kemasan: ['isi_kemasan','isi kemasan','isi_kemasan','pack_size','isi_pack','isi'],
       variant_brand: ['variant_brand','brand','merk','varian','variant'],
@@ -399,6 +424,7 @@ export default function PurchaseReport() {
       return null;
     };
 
+    const cabangHeader = findHeader(alias.cabang_name);
     const materialHeader = findHeader(alias.material_name);
     const isiKemasanHeader = findHeader(alias.isi_kemasan);
     const variantHeader = findHeader(alias.variant_brand);
@@ -414,22 +440,39 @@ export default function PurchaseReport() {
       return;
     }
 
+    if (!outletId && !cabangHeader) {
+      showToast('Pilih outlet di form atau isi kolom cabang_name di file import.', 'error');
+      fileInputRef.current.value = '';
+      return;
+    }
+
     setImporting(true);
     try {
       // fetch variants list to help matching
       const [variantsRes] = await Promise.all([api.get('/api/purchase-report/variants')]);
       const variants = variantsRes.data || [];
 
-      const items = [];
+      const itemsByOutlet = {};
+      let totalImported = 0;
       const errors = [];
       for (let i = 0; i < parsed.length; i++) {
         const row = parsed[i];
         const rowNum = i + 2; // csv/xlsx data row
+
+        const cabangName = cabangHeader ? (row[cabangHeader] || '').trim() : '';
+        let rowOutletId = outletId;
+        if (cabangName) {
+          const outlet = outlets.find((o) => normalizeLookupValue(o.name) === normalizeLookupValue(cabangName));
+          if (!outlet) { errors.push(`Baris ${rowNum}: cabang tidak ditemukan (${cabangName})`); continue; }
+          rowOutletId = outlet.id;
+        }
+        if (!rowOutletId) { errors.push(`Baris ${rowNum}: cabang wajib diisi`); continue; }
+
         const rawMaterial = (materialHeader ? row[materialHeader] : '') || '';
         const materialKey = rawMaterial.trim();
         if (!materialKey) { errors.push(`Baris ${rowNum}: material kosong`); continue; }
 
-        const mat = materials.find((m) => (m.name && m.name.toLowerCase() === materialKey.toLowerCase()));
+        const mat = materials.find((m) => normalizeLookupValue(m.name) === normalizeLookupValue(materialKey));
         if (!mat) { errors.push(`Baris ${rowNum}: material tidak ditemukan (${materialKey})`); continue; }
 
         const qtyVal = Number((qtyHeader ? row[qtyHeader] : '') || 0);
@@ -446,21 +489,21 @@ export default function PurchaseReport() {
         let variantId = null;
         const variantBrand = variantHeader ? (row[variantHeader] || '').trim() : '';
         if (variantBrand) {
-          const found = variants.find((v) => v.material_id === mat.id && v.brand && v.brand.toLowerCase() === variantBrand.toLowerCase());
+          const found = variants.find((v) => v.material_id === mat.id && normalizeLookupValue(v.brand) === normalizeLookupValue(variantBrand));
           if (found) variantId = found.id;
         }
 
         let supplierId = null;
         const supplierName = supplierHeader ? (row[supplierHeader] || '').trim() : '';
         if (supplierName) {
-          const s = suppliers.find((sp) => sp.name && sp.name.toLowerCase() === supplierName.toLowerCase());
+          const s = suppliers.find((sp) => normalizeLookupValue(sp.name) === normalizeLookupValue(supplierName));
           if (s) supplierId = s.id;
         }
 
         const notesVal = (notesHeader ? (row[notesHeader] || '').trim() : '') || '';
         const notesCombined = isiKemasanVal ? (notesVal ? `${notesVal} | isi_kemasan:${isiKemasanVal}` : `isi_kemasan:${isiKemasanVal}`) : notesVal;
 
-        items.push({
+        const item = {
           material_id: mat.id,
           variant_id: variantId,
           supplier_id: supplierId,
@@ -468,7 +511,11 @@ export default function PurchaseReport() {
           unit: unitVal,
           price_per_unit: priceVal,
           notes: notesCombined,
-        });
+        };
+
+        if (!itemsByOutlet[rowOutletId]) itemsByOutlet[rowOutletId] = [];
+        itemsByOutlet[rowOutletId].push(item);
+        totalImported++;
       }
 
       if (errors.length > 0) {
@@ -478,13 +525,20 @@ export default function PurchaseReport() {
         return;
       }
 
-      // submit to server
-      await api.post('/api/purchase-report', {
-        outlet_id: outletId,
+      const outletEntries = Object.entries(itemsByOutlet).filter(([, outletItems]) => outletItems.length > 0);
+      if (outletEntries.length === 0) {
+        showToast('Tidak ada baris valid untuk diimpor.', 'error');
+        fileInputRef.current.value = '';
+        return;
+      }
+
+      // Server accepts one outlet per request, so group imported rows by cabang.
+      await Promise.all(outletEntries.map(([rowOutletId, outletItems]) => api.post('/api/purchase-report', {
+        outlet_id: rowOutletId,
         date,
-        items,
-      });
-      showToast(`${items.length} baris berhasil diimpor.`);
+        items: outletItems,
+      })));
+      showToast(`${totalImported} baris berhasil diimpor${outletEntries.length > 1 ? ` untuk ${outletEntries.length} cabang` : ''}.`);
       setRows([newRow()]);
       setOutletId('');
       loadRecords();
@@ -728,7 +782,7 @@ export default function PurchaseReport() {
                 onClick={() => fileInputRef.current && fileInputRef.current.click()}
                 className={`btn-secondary text-sm ${importing ? 'opacity-60 pointer-events-none' : ''}`}
               >
-                {importing ? 'Importing...' : 'Import CSV'}
+                {importing ? 'Mengimpor...' : 'Import Excel/CSV'}
               </button>
               <input ref={fileInputRef} type="file" accept=".csv,.xlsx" onChange={handleFileChange} className="hidden" />
             </div>
