@@ -127,10 +127,41 @@ router.get('/analytics/materials', async (req, res) => {
     const id = item.material?.id;
     if (!id) continue;
     if (!map[id]) {
-      map[id] = { material: item.material, total_qty: 0, order_count: 0 };
+      map[id] = { material: item.material, total_qty: 0, order_count: 0, total_expense: 0 };
     }
     map[id].total_qty += Number(item.qty);
     map[id].order_count += 1;
+  }
+
+  // Ambil pengeluaran dari purchase_report untuk outlet/tanggal yang sama
+  const { data: reportRows, error: reportError } = await supabase
+    .from('purchase_report')
+    .select('material_id, qty, price_per_unit, date, outlet_id, material:materials(id, name, purchase_unit)');
+
+  if (reportError) return res.status(500).json({ error: reportError.message });
+
+  let filteredReports = reportRows || [];
+  if (date_from || date_to) {
+    filteredReports = filteredReports.filter((r) => {
+      const d = r.date;
+      if (!d) return true;
+      if (date_from && d < date_from) return false;
+      if (date_to && d > date_to) return false;
+      return true;
+    });
+  }
+  if (outlet_id) {
+    filteredReports = filteredReports.filter((r) => r.outlet_id === outlet_id);
+  }
+
+  for (const r of filteredReports) {
+    const id = r.material_id || r.material?.id;
+    if (!id) continue;
+    if (!map[id]) {
+      map[id] = { material: r.material || { id }, total_qty: 0, order_count: 0, total_expense: 0 };
+    }
+    const amount = Number(r.qty || 0) * Number(r.price_per_unit || 0);
+    map[id].total_expense = (map[id].total_expense || 0) + amount;
   }
 
   const result = Object.values(map)
