@@ -173,7 +173,7 @@ export default function Analytics() {
         </div>
       ) : activeTab === 'materials' ? (
         <div className="card p-5">
-          <h2 className="font-semibold text-gray-800 mb-4">Top 20 Bahan Paling Banyak Dipesan</h2>
+          <h2 className="font-semibold text-gray-800 mb-4">Top 20 Bahan Paling Banyak Tercatat</h2>
           {materialsData.length === 0 ? (
             <p className="text-center text-gray-400 py-10">Tidak ada data dalam periode ini</p>
           ) : (

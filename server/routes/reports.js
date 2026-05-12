@@ -133,7 +133,7 @@ router.get('/analytics/materials', async (req, res) => {
     map[id].order_count += 1;
   }
 
-  // Ambil pengeluaran dari purchase_report untuk outlet/tanggal yang sama
+  // Ambil barang masuk dari purchase_report untuk outlet/tanggal yang sama
   const { data: reportRows, error: reportError } = await supabase
     .from('purchase_report')
     .select('material_id, qty, price_per_unit, date, outlet_id, material:materials(id, name, purchase_unit)');
@@ -160,6 +160,8 @@ router.get('/analytics/materials', async (req, res) => {
     if (!map[id]) {
       map[id] = { material: r.material || { id }, total_qty: 0, order_count: 0, total_expense: 0 };
     }
+    map[id].total_qty += Number(r.qty || 0);
+    map[id].order_count += 1;
     const amount = Number(r.qty || 0) * Number(r.price_per_unit || 0);
     map[id].total_expense = (map[id].total_expense || 0) + amount;
   }
