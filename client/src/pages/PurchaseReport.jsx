@@ -192,39 +192,99 @@ export default function PurchaseReport() {
     }
   }
 
-  // ---- Export template / Import CSV ----
-  function exportTemplate() {
-    // headers: allow user to fill material by code or name, variant brand, supplier name
-    const headers = [
-      'material_code',
-      'material_name',
-      'variant_brand',
-      'supplier_name',
-      'qty',
-      'unit',
-      'price_per_unit',
-      'notes'
-    ];
-    const example = [
-      'MTR-001',
-      'Tepung Terigu',
-      'Merk A',
-      'Supplier 1',
-      '10',
-      'kg',
-      '50000',
-      'contoh'
-    ];
-    const csv = [headers.join(','), example.map((v) => `"${String(v).replace(/"/g,'""')}"`).join(',')].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'purchase_report_template.csv';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  // ---- Export template / Import CSV or XLSX ----
+  async function exportTemplate() {
+    // Create XLSX template with dropdown for material_name and a column `isi_kemasan`
+    try {
+      const mod = await import('exceljs');
+      const ExcelJS = mod.default || mod;
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'RotiBakarNgeunah';
+
+      const template = wb.addWorksheet('Template');
+      const materialsSheet = wb.addWorksheet('Materials');
+
+      template.columns = [
+        { header: 'material_name', key: 'material_name', width: 40 },
+        { header: 'isi_kemasan', key: 'isi_kemasan', width: 18 },
+        { header: 'variant_brand', key: 'variant_brand', width: 20 },
+        { header: 'supplier_name', key: 'supplier_name', width: 30 },
+        { header: 'qty', key: 'qty', width: 10 },
+        { header: 'unit', key: 'unit', width: 12 },
+        { header: 'price_per_unit', key: 'price_per_unit', width: 16 },
+        { header: 'notes', key: 'notes', width: 30 },
+      ];
+
+      const sampleMaterial = (materials && materials[0] && materials[0].name) || 'Tepung Terigu';
+      const sampleUnit = (materials && materials[0] && materials[0].purchase_unit) || 'kg';
+      template.addRow([sampleMaterial, '1 pack', 'Merk A', 'Supplier 1', 10, sampleUnit, 50000, 'contoh']);
+
+      // Populate materials sheet for dropdown source
+      materialsSheet.getCell('A1').value = 'name';
+      (materials || []).forEach((m, i) => {
+        materialsSheet.getCell(`A${i + 2}`).value = m.name;
+      });
+
+      const lastMatRow = Math.max(2, (materials || []).length + 1);
+      const formulaRange = `=Materials!$A$2:$A$${lastMatRow}`;
+
+      // Add data validation (dropdown) for material_name column on many rows
+      for (let r = 2; r <= 1000; r++) {
+        template.getCell(`A${r}`).dataValidation = {
+          type: 'list',
+          allowBlank: true,
+          formulae: [formulaRange],
+          showErrorMessage: true,
+          error: 'Pilih material dari daftar',
+        };
+      }
+
+      template.views = [{ state: 'frozen', ySplit: 1 }];
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'purchase_report_template.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      // Fallback to simple CSV if exceljs fails
+      const headers = [
+        'material_name',
+        'isi_kemasan',
+        'variant_brand',
+        'supplier_name',
+        'qty',
+        'unit',
+        'price_per_unit',
+        'notes',
+      ];
+      const example = [
+        'Tepung Terigu',
+        '1 pack',
+        'Merk A',
+        'Supplier 1',
+        '10',
+        'kg',
+        '50000',
+        'contoh',
+      ];
+      const csv = [headers.join(','), example.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'purchase_report_template.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
   }
 
   function parseCSV(text) {
@@ -262,16 +322,56 @@ export default function PurchaseReport() {
   function normalizeHeader(h) {
     return String(h || '').toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   }
-
   async function handleFileChange(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
     if (!outletId) { showToast('Pilih outlet terlebih dahulu sebelum import.', 'error'); fileInputRef.current.value = ''; return; }
     if (!date) { showToast('Isi tanggal terlebih dahulu sebelum import.', 'error'); fileInputRef.current.value = ''; return; }
 
-    const text = await file.text();
-    const parsed = parseCSV(text);
-    if (parsed.length === 0) { showToast('File CSV kosong atau tidak valid.', 'error'); fileInputRef.current.value = ''; return; }
+    // detect file type (xlsx preferred)
+    const name = file.name || '';
+    const ext = name.split('.').pop().toLowerCase();
+    let parsed = [];
+
+    try {
+      if (ext === 'xlsx' || ext === 'xls') {
+        const mod = await import('exceljs');
+        const ExcelJS = mod.default || mod;
+        const wb = new ExcelJS.Workbook();
+        const ab = await file.arrayBuffer();
+        await wb.xlsx.load(ab);
+        const sheet = wb.worksheets[0];
+        if (!sheet) { showToast('File XLSX tidak berisi sheet yang valid.', 'error'); fileInputRef.current.value = ''; return; }
+
+        const headers = [];
+        sheet.getRow(1).eachCell((cell) => headers.push(String(cell.value || '').trim()));
+        for (let r = 2; r <= sheet.rowCount; r++) {
+          const rowObj = {};
+          let empty = true;
+          for (let c = 0; c < headers.length; c++) {
+            const cell = sheet.getRow(r).getCell(c + 1);
+            let val = cell && (cell.value != null ? cell.value : '');
+            if (val && typeof val === 'object' && val.richText) {
+              val = val.richText.map((t) => t.text).join('');
+            }
+            val = val === null || val === undefined ? '' : String(val);
+            rowObj[headers[c]] = val;
+            if (val.trim() !== '') empty = false;
+          }
+          if (!empty) parsed.push(rowObj);
+        }
+      } else {
+        const text = await file.text();
+        parsed = parseCSV(text);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Gagal membaca file: ' + (err.message || ''), 'error');
+      fileInputRef.current.value = '';
+      return;
+    }
+
+    if (parsed.length === 0) { showToast('File kosong atau tidak valid.', 'error'); fileInputRef.current.value = ''; return; }
 
     // Normalize headers
     const headerMap = {};
@@ -281,8 +381,8 @@ export default function PurchaseReport() {
     }
 
     const alias = {
-      material_code: ['material_code','code','kode','kode_bahan','materialcode','materialkode','material'],
-      material_name: ['material_name','name','nama','nama_bahan','material_name'],
+      material_name: ['material_name','name','nama','nama_bahan','material'],
+      isi_kemasan: ['isi_kemasan','isi kemasan','isi_kemasan','pack_size','isi_pack','isi'],
       variant_brand: ['variant_brand','brand','merk','varian','variant'],
       supplier_name: ['supplier_name','supplier','nama_supplier'],
       qty: ['qty','quantity','jumlah'],
@@ -293,21 +393,23 @@ export default function PurchaseReport() {
 
     const findHeader = (keys) => {
       for (const k of keys) {
-        if (headerMap[k]) return headerMap[k];
+        const n = normalizeHeader(k);
+        if (headerMap[n]) return headerMap[n];
       }
       return null;
     };
 
-    const materialHeader = findHeader(alias.material_code.map(normalizeHeader)) || findHeader(alias.material_name.map(normalizeHeader));
-    const variantHeader = findHeader(alias.variant_brand.map(normalizeHeader));
-    const supplierHeader = findHeader(alias.supplier_name.map(normalizeHeader));
-    const qtyHeader = findHeader(alias.qty.map(normalizeHeader));
-    const unitHeader = findHeader(alias.unit.map(normalizeHeader));
-    const priceHeader = findHeader(alias.price_per_unit.map(normalizeHeader));
-    const notesHeader = findHeader(alias.notes.map(normalizeHeader));
+    const materialHeader = findHeader(alias.material_name);
+    const isiKemasanHeader = findHeader(alias.isi_kemasan);
+    const variantHeader = findHeader(alias.variant_brand);
+    const supplierHeader = findHeader(alias.supplier_name);
+    const qtyHeader = findHeader(alias.qty);
+    const unitHeader = findHeader(alias.unit);
+    const priceHeader = findHeader(alias.price_per_unit);
+    const notesHeader = findHeader(alias.notes);
 
-    if (!qtyHeader || !(materialHeader)) {
-      showToast('CSV harus punya kolom material (kode/nama) dan qty.', 'error');
+    if (!qtyHeader || !materialHeader) {
+      showToast('File harus punya kolom material (nama) dan qty.', 'error');
       fileInputRef.current.value = '';
       return;
     }
@@ -322,17 +424,18 @@ export default function PurchaseReport() {
       const errors = [];
       for (let i = 0; i < parsed.length; i++) {
         const row = parsed[i];
-        const rowNum = i + 2; // csv line number
+        const rowNum = i + 2; // csv/xlsx data row
         const rawMaterial = (materialHeader ? row[materialHeader] : '') || '';
-        const rawMaterialAlt = (materialHeader === null && row[sampleHeaders[0]]) || '';
-        const materialKey = (rawMaterial || rawMaterialAlt).trim();
+        const materialKey = rawMaterial.trim();
         if (!materialKey) { errors.push(`Baris ${rowNum}: material kosong`); continue; }
 
-        const mat = materials.find((m) => (m.code && m.code.toLowerCase() === materialKey.toLowerCase()) || (m.name && m.name.toLowerCase() === materialKey.toLowerCase()));
+        const mat = materials.find((m) => (m.name && m.name.toLowerCase() === materialKey.toLowerCase()));
         if (!mat) { errors.push(`Baris ${rowNum}: material tidak ditemukan (${materialKey})`); continue; }
 
         const qtyVal = Number((qtyHeader ? row[qtyHeader] : '') || 0);
         if (!(qtyVal > 0)) { errors.push(`Baris ${rowNum}: qty harus > 0`); continue; }
+
+        let isiKemasanVal = isiKemasanHeader ? (row[isiKemasanHeader] || '').trim() : '';
 
         let unitVal = (unitHeader ? row[unitHeader] : '') || '';
         unitVal = unitVal.trim() || mat.purchase_unit || '';
@@ -354,6 +457,9 @@ export default function PurchaseReport() {
           if (s) supplierId = s.id;
         }
 
+        const notesVal = (notesHeader ? (row[notesHeader] || '').trim() : '') || '';
+        const notesCombined = isiKemasanVal ? (notesVal ? `${notesVal} | isi_kemasan:${isiKemasanVal}` : `isi_kemasan:${isiKemasanVal}`) : notesVal;
+
         items.push({
           material_id: mat.id,
           variant_id: variantId,
@@ -361,7 +467,7 @@ export default function PurchaseReport() {
           qty: qtyVal,
           unit: unitVal,
           price_per_unit: priceVal,
-          notes: notesHeader ? (row[notesHeader] || '').trim() : ''
+          notes: notesCombined,
         });
       }
 
@@ -624,7 +730,7 @@ export default function PurchaseReport() {
               >
                 {importing ? 'Importing...' : 'Import CSV'}
               </button>
-              <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleFileChange} className="hidden" />
+              <input ref={fileInputRef} type="file" accept=".csv,.xlsx" onChange={handleFileChange} className="hidden" />
             </div>
             <button
               type="submit"
