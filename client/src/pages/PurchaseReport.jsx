@@ -194,7 +194,7 @@ export default function PurchaseReport() {
 
   // ---- Export template / Import CSV or XLSX ----
   async function exportTemplate() {
-    // Create XLSX template with dropdown for cabang/material and a column `isi_kemasan`
+    // Create XLSX template with dropdown for cabang/material and a per-row date.
     try {
       const mod = await import('exceljs');
       const ExcelJS = mod.default || mod;
@@ -205,21 +205,25 @@ export default function PurchaseReport() {
       const materialsSheet = wb.addWorksheet('Materials');
 
       template.columns = [
-        { header: 'cabang_name', key: 'cabang_name', width: 30 },
-        { header: 'material_name', key: 'material_name', width: 40 },
-        { header: 'isi_kemasan', key: 'isi_kemasan', width: 18 },
-        { header: 'variant_brand', key: 'variant_brand', width: 20 },
-        { header: 'supplier_name', key: 'supplier_name', width: 30 },
-        { header: 'qty', key: 'qty', width: 10 },
-        { header: 'unit', key: 'unit', width: 12 },
-        { header: 'price_per_unit', key: 'price_per_unit', width: 16 },
-        { header: 'notes', key: 'notes', width: 30 },
+        { header: 'Date', key: 'date', width: 14 },
+        { header: 'Outlet', key: 'cabang_name', width: 30 },
+        { header: 'Raw Materials Name', key: 'material_name', width: 40 },
+        { header: 'Isi Kemasan', key: 'isi_kemasan', width: 16 },
+        { header: 'Satuan Kemasan', key: 'satuan_kemasan', width: 18 },
+        { header: 'Kuantiti Beli', key: 'qty', width: 14 },
+        { header: 'Satuan Beli', key: 'unit', width: 14 },
+        { header: 'Brand', key: 'variant_brand', width: 20 },
+        { header: 'Supplier', key: 'supplier_name', width: 30 },
+        { header: 'Price/Unit', key: 'price_per_unit', width: 16 },
+        { header: 'Total Price', key: 'total_price', width: 16 },
+        { header: 'Notes', key: 'notes', width: 30 },
       ];
 
       const sampleOutlet = (outlets && outlets[0] && outlets[0].name) || 'Outlet A';
       const sampleMaterial = (materials && materials[0] && materials[0].name) || 'Tepung Terigu';
       const sampleUnit = (materials && materials[0] && materials[0].purchase_unit) || 'kg';
-      template.addRow([sampleOutlet, sampleMaterial, '1 pack', 'Merk A', 'Supplier 1', 10, sampleUnit, 50000, 'contoh']);
+      template.addRow([new Date(), sampleOutlet, sampleMaterial, 1, sampleUnit, 10, sampleUnit, 'Merk A', 'Supplier 1', 50000, { formula: 'F2*J2', result: 500000 }, 'contoh']);
+      template.getColumn(1).numFmt = 'd-mmm-yy';
 
       // Populate materials sheet for dropdown source
       materialsSheet.getCell('A1').value = 'name';
@@ -239,16 +243,16 @@ export default function PurchaseReport() {
       const formulaMatRange = `=Materials!$A$2:$A$${lastMatRow}`;
       const formulaOutRange = `=Outlets!$A$2:$A$${lastOutRow}`;
 
-      // Add data validation (dropdown) for cabang_name and material_name columns on many rows
+      // Add data validation (dropdown) for Outlet and Raw Materials Name columns on many rows
       for (let r = 2; r <= 1000; r++) {
-        template.getCell(`A${r}`).dataValidation = {
+        template.getCell(`B${r}`).dataValidation = {
           type: 'list',
           allowBlank: true,
           formulae: [formulaOutRange],
           showErrorMessage: true,
           error: 'Pilih cabang dari daftar',
         };
-        template.getCell(`B${r}`).dataValidation = {
+        template.getCell(`C${r}`).dataValidation = {
           type: 'list',
           allowBlank: true,
           formulae: [formulaMatRange],
@@ -273,25 +277,31 @@ export default function PurchaseReport() {
       console.error(err);
       // Fallback to simple CSV if exceljs fails
       const headers = [
-        'cabang_name',
-        'material_name',
-        'isi_kemasan',
-        'variant_brand',
-        'supplier_name',
-        'qty',
-        'unit',
-        'price_per_unit',
-        'notes',
+        'Date',
+        'Outlet',
+        'Raw Materials Name',
+        'Isi Kemasan',
+        'Satuan Kemasan',
+        'Kuantiti Beli',
+        'Satuan Beli',
+        'Brand',
+        'Supplier',
+        'Price/Unit',
+        'Total Price',
+        'Notes',
       ];
       const example = [
+        toInputDate(),
         'Outlet A',
         'Tepung Terigu',
-        '1 pack',
-        'Merk A',
-        'Supplier 1',
+        '1',
+        'kg',
         '10',
         'kg',
+        'Merk A',
+        'Supplier 1',
         '50000',
+        '500000',
         'contoh',
       ];
       const csv = [headers.join(','), example.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')].join('\n');
@@ -347,10 +357,110 @@ export default function PurchaseReport() {
     return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
   }
 
+  function readImportCellValue(cell) {
+    let val = cell && cell.value != null ? cell.value : '';
+    if (val instanceof Date) return val;
+    if (val && typeof val === 'object') {
+      if (val.richText) return val.richText.map((t) => t.text).join('');
+      if (val.result != null) return val.result;
+      if (val.text != null) return val.text;
+      if (val.hyperlink && val.text) return val.text;
+    }
+    return val;
+  }
+
+  function isImportValueEmpty(value) {
+    if (value instanceof Date) return false;
+    return String(value ?? '').trim() === '';
+  }
+
+  function pad2(value) {
+    return String(value).padStart(2, '0');
+  }
+
+  function formatDateParts(year, month, day) {
+    if (!year || !month || !day) return '';
+    const fullYear = year < 100 ? 2000 + year : year;
+    return `${fullYear}-${pad2(month)}-${pad2(day)}`;
+  }
+
+  function parseImportDate(value) {
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+    }
+
+    if (typeof value === 'number' && value > 20000 && value < 80000) {
+      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+      const dateValue = new Date(excelEpoch.getTime() + value * 86400000);
+      return `${dateValue.getUTCFullYear()}-${pad2(dateValue.getUTCMonth() + 1)}-${pad2(dateValue.getUTCDate())}`;
+    }
+
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    let match = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    if (match) return formatDateParts(Number(match[1]), Number(match[2]), Number(match[3]));
+
+    const months = {
+      jan: 1, january: 1, januari: 1,
+      feb: 2, february: 2, februari: 2,
+      mar: 3, march: 3, maret: 3,
+      apr: 4, april: 4,
+      may: 5, mei: 5,
+      jun: 6, june: 6, juni: 6,
+      jul: 7, july: 7, juli: 7,
+      aug: 8, august: 8, agu: 8, agustus: 8,
+      sep: 9, sept: 9, september: 9,
+      oct: 10, october: 10, okt: 10, oktober: 10,
+      nov: 11, november: 11,
+      dec: 12, december: 12, des: 12, desember: 12,
+    };
+
+    match = raw.match(/^(\d{1,2})[-\s/]([A-Za-z]+)[-\s/](\d{2,4})$/);
+    if (match) {
+      const month = months[match[2].toLowerCase()];
+      if (month) return formatDateParts(Number(match[3]), month, Number(match[1]));
+    }
+
+    match = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/);
+    if (match) return formatDateParts(Number(match[3]), Number(match[2]), Number(match[1]));
+
+    return '';
+  }
+
+  function parseImportNumber(value) {
+    if (typeof value === 'number') return value;
+    const raw = String(value || '').trim();
+    if (!raw) return 0;
+
+    const cleaned = raw.replace(/[^\d,.-]/g, '');
+    const lastComma = cleaned.lastIndexOf(',');
+    const lastDot = cleaned.lastIndexOf('.');
+    let normalized = cleaned;
+
+    if (lastComma >= 0 && lastDot >= 0) {
+      normalized = lastComma > lastDot
+        ? cleaned.replace(/\./g, '').replace(',', '.')
+        : cleaned.replace(/,/g, '');
+    } else if (lastComma >= 0) {
+      const parts = cleaned.split(',');
+      normalized = parts.length > 1 && parts[parts.length - 1].length === 3
+        ? cleaned.replace(/,/g, '')
+        : cleaned.replace(',', '.');
+    } else if (lastDot >= 0) {
+      const parts = cleaned.split('.');
+      normalized = parts.length > 1 && parts[parts.length - 1].length === 3
+        ? cleaned.replace(/\./g, '')
+        : cleaned;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
   async function handleFileChange(e) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    if (!date) { showToast('Isi tanggal terlebih dahulu sebelum import.', 'error'); fileInputRef.current.value = ''; return; }
 
     // detect file type (xlsx preferred)
     const name = file.name || '';
@@ -374,13 +484,9 @@ export default function PurchaseReport() {
           let empty = true;
           for (let c = 0; c < headers.length; c++) {
             const cell = sheet.getRow(r).getCell(c + 1);
-            let val = cell && (cell.value != null ? cell.value : '');
-            if (val && typeof val === 'object' && val.richText) {
-              val = val.richText.map((t) => t.text).join('');
-            }
-            val = val === null || val === undefined ? '' : String(val);
+            const val = readImportCellValue(cell);
             rowObj[headers[c]] = val;
-            if (val.trim() !== '') empty = false;
+            if (!isImportValueEmpty(val)) empty = false;
           }
           if (!empty) parsed.push(rowObj);
         }
@@ -405,14 +511,17 @@ export default function PurchaseReport() {
     }
 
     const alias = {
+      date: ['date','tanggal','tgl'],
       cabang_name: ['cabang_name','nama_cabang','cabang','outlet_name','nama_outlet','outlet','branch_name','branch'],
-      material_name: ['material_name','name','nama','nama_bahan','material'],
+      material_name: ['material_name','raw_materials_name','raw_material_name','raw material name','raw materials name','name','nama','nama_bahan','material','bahan','bahan_baku'],
       isi_kemasan: ['isi_kemasan','isi kemasan','isi_kemasan','pack_size','isi_pack','isi'],
+      satuan_kemasan: ['satuan_kemasan','unit_kemasan','kemasan_unit','pack_unit'],
       variant_brand: ['variant_brand','brand','merk','varian','variant'],
       supplier_name: ['supplier_name','supplier','nama_supplier'],
-      qty: ['qty','quantity','jumlah'],
-      unit: ['unit','satuan'],
-      price_per_unit: ['price_per_unit','price','harga','harga_per_unit'],
+      qty: ['qty','quantity','jumlah','kuantiti_beli','kuantitas_beli','quantity_beli','jumlah_beli'],
+      unit: ['unit','satuan','satuan_beli','unit_beli'],
+      price_per_unit: ['price_per_unit','priceunit','price','harga','harga_per_unit','harga_satuan','harga_beli'],
+      total_price: ['total_price','total','total_harga','jumlah_harga'],
       notes: ['notes','note','catatan']
     };
 
@@ -424,14 +533,17 @@ export default function PurchaseReport() {
       return null;
     };
 
+    const dateHeader = findHeader(alias.date);
     const cabangHeader = findHeader(alias.cabang_name);
     const materialHeader = findHeader(alias.material_name);
     const isiKemasanHeader = findHeader(alias.isi_kemasan);
+    const satuanKemasanHeader = findHeader(alias.satuan_kemasan);
     const variantHeader = findHeader(alias.variant_brand);
     const supplierHeader = findHeader(alias.supplier_name);
     const qtyHeader = findHeader(alias.qty);
     const unitHeader = findHeader(alias.unit);
     const priceHeader = findHeader(alias.price_per_unit);
+    const totalPriceHeader = findHeader(alias.total_price);
     const notesHeader = findHeader(alias.notes);
 
     if (!qtyHeader || !materialHeader) {
@@ -446,20 +558,35 @@ export default function PurchaseReport() {
       return;
     }
 
+    if (!date && !dateHeader) {
+      showToast('Isi tanggal di form atau isi kolom Date/Tanggal di file import.', 'error');
+      fileInputRef.current.value = '';
+      return;
+    }
+
     setImporting(true);
     try {
       // fetch variants list to help matching
       const [variantsRes] = await Promise.all([api.get('/api/purchase-report/variants')]);
       const variants = variantsRes.data || [];
 
-      const itemsByOutlet = {};
+      const itemsByGroup = {};
       let totalImported = 0;
       const errors = [];
       for (let i = 0; i < parsed.length; i++) {
         const row = parsed[i];
         const rowNum = i + 2; // csv/xlsx data row
 
-        const cabangName = cabangHeader ? (row[cabangHeader] || '').trim() : '';
+        const rawDate = dateHeader ? row[dateHeader] : '';
+        const parsedDate = dateHeader ? parseImportDate(rawDate) : '';
+        if (dateHeader && !isImportValueEmpty(rawDate) && !parsedDate) {
+          errors.push(`Baris ${rowNum}: format tanggal tidak valid (${String(rawDate)})`);
+          continue;
+        }
+        const rowDate = parsedDate || date;
+        if (!rowDate) { errors.push(`Baris ${rowNum}: tanggal wajib diisi`); continue; }
+
+        const cabangName = cabangHeader ? String(row[cabangHeader] || '').trim() : '';
         let rowOutletId = outletId;
         if (cabangName) {
           const outlet = outlets.find((o) => normalizeLookupValue(o.name) === normalizeLookupValue(cabangName));
@@ -469,39 +596,43 @@ export default function PurchaseReport() {
         if (!rowOutletId) { errors.push(`Baris ${rowNum}: cabang wajib diisi`); continue; }
 
         const rawMaterial = (materialHeader ? row[materialHeader] : '') || '';
-        const materialKey = rawMaterial.trim();
+        const materialKey = String(rawMaterial).trim();
         if (!materialKey) { errors.push(`Baris ${rowNum}: material kosong`); continue; }
 
         const mat = materials.find((m) => normalizeLookupValue(m.name) === normalizeLookupValue(materialKey));
         if (!mat) { errors.push(`Baris ${rowNum}: material tidak ditemukan (${materialKey})`); continue; }
 
-        const qtyVal = Number((qtyHeader ? row[qtyHeader] : '') || 0);
+        const qtyVal = parseImportNumber(qtyHeader ? row[qtyHeader] : '');
         if (!(qtyVal > 0)) { errors.push(`Baris ${rowNum}: qty harus > 0`); continue; }
 
-        let isiKemasanVal = isiKemasanHeader ? (row[isiKemasanHeader] || '').trim() : '';
+        const isiKemasanVal = isiKemasanHeader ? String(row[isiKemasanHeader] || '').trim() : '';
+        const satuanKemasanVal = satuanKemasanHeader ? String(row[satuanKemasanHeader] || '').trim() : '';
+        const kemasanVal = [isiKemasanVal, satuanKemasanVal].filter(Boolean).join(' ');
 
         let unitVal = (unitHeader ? row[unitHeader] : '') || '';
-        unitVal = unitVal.trim() || mat.purchase_unit || '';
+        unitVal = String(unitVal).trim() || mat.purchase_unit || '';
         if (!unitVal) { errors.push(`Baris ${rowNum}: unit tidak terdeteksi dan material tidak punya purchase_unit`); continue; }
 
-        const priceVal = Number((priceHeader ? row[priceHeader] : '') || 0) || 0;
+        const priceFromFile = priceHeader ? parseImportNumber(row[priceHeader]) : 0;
+        const totalPriceVal = totalPriceHeader ? parseImportNumber(row[totalPriceHeader]) : 0;
+        const priceVal = priceFromFile || (totalPriceVal > 0 ? totalPriceVal / qtyVal : 0);
 
         let variantId = null;
-        const variantBrand = variantHeader ? (row[variantHeader] || '').trim() : '';
+        const variantBrand = variantHeader ? String(row[variantHeader] || '').trim() : '';
         if (variantBrand) {
           const found = variants.find((v) => v.material_id === mat.id && normalizeLookupValue(v.brand) === normalizeLookupValue(variantBrand));
           if (found) variantId = found.id;
         }
 
         let supplierId = null;
-        const supplierName = supplierHeader ? (row[supplierHeader] || '').trim() : '';
+        const supplierName = supplierHeader ? String(row[supplierHeader] || '').trim() : '';
         if (supplierName) {
           const s = suppliers.find((sp) => normalizeLookupValue(sp.name) === normalizeLookupValue(supplierName));
           if (s) supplierId = s.id;
         }
 
-        const notesVal = (notesHeader ? (row[notesHeader] || '').trim() : '') || '';
-        const notesCombined = isiKemasanVal ? (notesVal ? `${notesVal} | isi_kemasan:${isiKemasanVal}` : `isi_kemasan:${isiKemasanVal}`) : notesVal;
+        const notesVal = (notesHeader ? String(row[notesHeader] || '').trim() : '') || '';
+        const notesCombined = kemasanVal ? (notesVal ? `${notesVal} | isi_kemasan:${kemasanVal}` : `isi_kemasan:${kemasanVal}`) : notesVal;
 
         const item = {
           material_id: mat.id,
@@ -513,8 +644,9 @@ export default function PurchaseReport() {
           notes: notesCombined,
         };
 
-        if (!itemsByOutlet[rowOutletId]) itemsByOutlet[rowOutletId] = [];
-        itemsByOutlet[rowOutletId].push(item);
+        const groupKey = `${rowDate}__${rowOutletId}`;
+        if (!itemsByGroup[groupKey]) itemsByGroup[groupKey] = { date: rowDate, outlet_id: rowOutletId, items: [] };
+        itemsByGroup[groupKey].items.push(item);
         totalImported++;
       }
 
@@ -525,20 +657,20 @@ export default function PurchaseReport() {
         return;
       }
 
-      const outletEntries = Object.entries(itemsByOutlet).filter(([, outletItems]) => outletItems.length > 0);
-      if (outletEntries.length === 0) {
+      const groupEntries = Object.values(itemsByGroup).filter((group) => group.items.length > 0);
+      if (groupEntries.length === 0) {
         showToast('Tidak ada baris valid untuk diimpor.', 'error');
         fileInputRef.current.value = '';
         return;
       }
 
-      // Server accepts one outlet per request, so group imported rows by cabang.
-      await Promise.all(outletEntries.map(([rowOutletId, outletItems]) => api.post('/api/purchase-report', {
-        outlet_id: rowOutletId,
-        date,
-        items: outletItems,
+      // Server accepts one date/outlet per request, so group imported rows by tanggal + cabang.
+      await Promise.all(groupEntries.map((group) => api.post('/api/purchase-report', {
+        outlet_id: group.outlet_id,
+        date: group.date,
+        items: group.items,
       })));
-      showToast(`${totalImported} baris berhasil diimpor${outletEntries.length > 1 ? ` untuk ${outletEntries.length} cabang` : ''}.`);
+      showToast(`${totalImported} baris berhasil diimpor${groupEntries.length > 1 ? ` untuk ${groupEntries.length} grup tanggal/cabang` : ''}.`);
       setRows([newRow()]);
       setOutletId('');
       loadRecords();
