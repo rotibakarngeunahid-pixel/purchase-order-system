@@ -1,16 +1,42 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import {
+  BarChart3,
+  ClipboardCheck,
+  ClipboardList,
+  Database,
+  FileBarChart,
+  LayoutDashboard,
+  LogOut,
+  PackagePlus,
+  Settings,
+  Truck,
+} from 'lucide-react';
 
 const navItems = [
-  { to: '/', label: 'Dashboard', icon: 'DB', exact: true },
-  { to: '/order', label: 'Input Order', icon: 'IO' },
-  { to: '/purchase', label: 'Catat Penerimaan', icon: 'CP' },
-  { to: '/purchase-report', label: 'Lap. Barang Masuk', icon: 'BM' },
-  { to: '/distribution', label: 'Distribution Listing', icon: 'DL' },
-  { to: '/reports', label: 'Laporan', icon: 'LP' },
-  { to: '/analytics', label: 'Analitik', icon: 'AN' },
-  { to: '/master', label: 'Master Data', icon: 'MD' },
-  { to: '/settings', label: 'Pengaturan', icon: 'PG' },
+  { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+  { to: '/order', label: 'Input Order', icon: ClipboardList },
+  { to: '/purchase', label: 'Catat Penerimaan', icon: ClipboardCheck },
+  { to: '/purchase-report', label: 'Lap. Barang Masuk', icon: PackagePlus },
+  { to: '/distribution', label: 'Distribution Listing', icon: Truck },
+  { to: '/reports', label: 'Laporan', icon: FileBarChart },
+  { to: '/analytics', label: 'Analitik', icon: BarChart3 },
+  { to: '/master', label: 'Master Data', icon: Database },
+  { to: '/settings', label: 'Pengaturan', icon: Settings },
 ];
+
+function SidebarIcon({ icon: Icon, active = false }) {
+  return (
+    <span
+      className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${
+        active
+          ? 'bg-brand-red text-white shadow-sm'
+          : 'bg-gray-100 text-gray-500 group-hover:bg-red-50 group-hover:text-brand-red'
+      }`}
+    >
+      <Icon className="h-[18px] w-[18px]" strokeWidth={2.3} />
+    </span>
+  );
+}
 
 export default function Sidebar() {
   const navigate = useNavigate();
@@ -21,64 +47,66 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="w-full md:w-60 md:min-h-screen bg-brand-red flex flex-col shadow-xl md:flex-shrink-0">
+    <aside className="w-full border-b border-gray-200 bg-white shadow-sm md:w-64 md:min-h-screen md:flex-shrink-0 md:border-b-0 md:border-r md:shadow-none flex flex-col">
       {/* Logo */}
-      <div className="p-4 md:p-5 border-b border-red-700">
+      <div className="border-b border-gray-100 p-4 md:p-5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <img
               src="https://staff-portal.rotibakarngeunah.my.id/wp-content/uploads/2026/05/cropped-Untitled-2.png"
               alt="Logo"
-              className="w-10 h-10 rounded-lg object-contain bg-white p-1"
+              className="h-11 w-11 rounded-xl object-contain bg-white p-1.5 ring-1 ring-gray-200 shadow-sm"
               onError={(e) => { e.target.style.display = 'none'; }}
             />
             <div>
-              <p className="text-white font-semibold text-sm leading-tight">Roti Bakar</p>
-              <p className="text-red-200 font-bold text-base leading-tight">Ngeunah</p>
+              <p className="text-sm font-bold leading-tight text-gray-900">Roti Bakar</p>
+              <p className="text-base font-bold leading-tight text-brand-red">Ngeunah</p>
             </div>
           </div>
           <button
             onClick={handleLogout}
-            className="md:hidden px-3 py-2 rounded-lg text-xs font-semibold text-red-100 hover:bg-red-700 hover:text-white transition-colors"
+            className="flex h-10 w-10 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-red-50 hover:text-brand-red md:hidden"
+            title="Keluar"
+            aria-label="Keluar"
           >
-            Keluar
+            <LogOut className="h-[18px] w-[18px]" strokeWidth={2.3} />
           </button>
         </div>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 p-3 flex gap-2 overflow-x-auto md:block md:space-y-1">
+      <nav className="scrollbar-none flex flex-1 gap-2 overflow-x-auto p-3 md:flex-col md:gap-1 md:overflow-visible">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
             end={item.exact}
             className={({ isActive }) =>
-              `flex flex-shrink-0 items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors md:w-full ${
+              `group flex h-12 flex-shrink-0 items-center gap-3 rounded-lg px-3 text-sm font-semibold whitespace-nowrap transition-all md:w-full ${
                 isActive
-                  ? 'bg-white text-brand-red shadow-sm'
-                  : 'text-red-100 hover:bg-red-700 hover:text-white'
+                  ? 'bg-red-50 text-brand-red shadow-sm ring-1 ring-red-100'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               }`
             }
           >
-            <span className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-[10px] font-bold text-brand-red leading-none">
-              {item.icon}
-            </span>
-            {item.label}
+            {({ isActive }) => (
+              <>
+                <SidebarIcon icon={item.icon} active={isActive} />
+                <span>{item.label}</span>
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
 
       {/* Logout */}
-      <div className="hidden md:block p-3 border-t border-red-700">
+      <div className="hidden border-t border-gray-100 p-3 md:block">
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-red-200 hover:bg-red-700 hover:text-white transition-colors"
+          className="group flex h-12 w-full items-center gap-3 rounded-lg px-3 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
         >
-          <span className="w-7 h-7 flex items-center justify-center rounded-md bg-white text-[10px] font-bold text-brand-red leading-none">
-            EX
-          </span>
-          Keluar
+          <SidebarIcon icon={LogOut} />
+          <span>Keluar</span>
         </button>
       </div>
     </aside>
