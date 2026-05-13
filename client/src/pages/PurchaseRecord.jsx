@@ -100,7 +100,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
             <h3 className="text-white font-semibold text-lg">Catat Penerimaan</h3>
             <p className="text-red-200 text-sm">{po.supplier?.name}</p>
           </div>
-          <button onClick={onClose} className="text-white hover:text-red-200 text-2xl leading-none">×</button>
+          <button onClick={onClose} className="text-white hover:text-red-200 text-2xl leading-none">x</button>
         </div>
 
         {/* Content */}
@@ -202,7 +202,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
         <div className="px-6 py-4 border-t flex items-center justify-between flex-shrink-0">
           <p className="text-sm text-gray-500">
             Est: <span className="font-medium">{formatRupiah(po.total_estimated)}</span>
-            {' → '}Aktual: <span className="font-bold text-brand-red">{formatRupiah(totalActual)}</span>
+            {' / '}Aktual: <span className="font-bold text-brand-red">{formatRupiah(totalActual)}</span>
           </p>
           <div className="flex gap-2">
             <button
@@ -290,7 +290,7 @@ export default function PurchaseRecord() {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="page-shell">
       {selectedPO && (
         <ReceiveModal
           po={selectedPO}
@@ -343,15 +343,15 @@ export default function PurchaseRecord() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Catat Penerimaan</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Catat barang yang sudah diterima dari supplier</p>
+          <h1 className="page-title">Catat Penerimaan</h1>
+          <p className="page-subtitle">Catat barang yang sudah diterima dari supplier</p>
         </div>
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="input w-auto text-sm"
+          className="input w-full sm:w-56"
         >
           <option value="">Semua Status</option>
           <option value="pending">Pending</option>
@@ -367,17 +367,16 @@ export default function PurchaseRecord() {
         </div>
       ) : pos.length === 0 ? (
         <div className="card p-10 text-center text-gray-400">
-          <p className="text-4xl mb-3">📦</p>
           <p className="font-medium">Tidak ada Purchase Order</p>
           <p className="text-sm mt-1">PO akan muncul setelah order dikirim via email</p>
         </div>
       ) : (
         <div className="space-y-3">
           {pos.map((po) => (
-            <div key={po.id} className="card p-4 flex items-center justify-between flex-wrap gap-3">
+            <div key={po.id} className="card p-4 grid gap-4 lg:grid-cols-[minmax(220px,1fr)_auto] items-center">
               <div className="flex items-center gap-4">
-                <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-xl">
-                  🏭
+                <div className="w-10 h-10 bg-red-50 rounded-lg flex items-center justify-center text-xs font-bold text-brand-red">
+                  PO
                 </div>
                 <div>
                   <p className="font-semibold text-gray-800">{po.supplier?.name}</p>
@@ -386,13 +385,13 @@ export default function PurchaseRecord() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-4 flex-wrap">
-                <div className="text-center">
+              <div className="flex items-center gap-4 flex-wrap lg:justify-end">
+                <div className="text-left sm:text-center min-w-28">
                   <p className="text-xs text-gray-500">Est. Total</p>
                   <p className="font-semibold text-gray-800">{formatRupiah(po.total_estimated)}</p>
                 </div>
                 {po.total_actual ? (
-                  <div className="text-center">
+                  <div className="text-left sm:text-center min-w-28">
                     <p className="text-xs text-gray-500">Aktual</p>
                     <p className="font-semibold text-brand-red">{formatRupiah(po.total_actual)}</p>
                   </div>

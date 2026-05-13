@@ -701,27 +701,29 @@ function OutletsTab() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'suppliers', label: '🏭 Supplier' },
-  { id: 'materials', label: '🧂 Bahan Baku' },
-  { id: 'outlets', label: '🏪 Outlet' },
+  { id: 'suppliers', label: 'Supplier' },
+  { id: 'materials', label: 'Bahan Baku' },
+  { id: 'outlets', label: 'Outlet' },
 ];
 
 export default function MasterData() {
   const [activeTab, setActiveTab] = useState('suppliers');
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Master Data</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Kelola supplier, bahan baku, dan outlet</p>
+    <div className="page-shell">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Master Data</h1>
+          <p className="page-subtitle">Kelola supplier, bahan baku, dan outlet</p>
+        </div>
       </div>
-      <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit mb-6">
+      <div className="segmented-tabs mb-6">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              activeTab === tab.id ? 'bg-white text-brand-red shadow-sm' : 'text-gray-600 hover:text-gray-800'
+            className={`segmented-tab ${
+              activeTab === tab.id ? 'segmented-tab-active' : 'text-gray-600 hover:text-gray-800'
             }`}
           >
             {tab.label}

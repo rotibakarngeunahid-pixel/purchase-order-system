@@ -159,7 +159,7 @@ export default function RotiTawarConfig() {
                     className="text-gray-300 hover:text-red-500 transition-colors text-lg leading-none"
                     title="Hapus baris"
                   >
-                    ×
+                    x
                   </button>
                 </td>
               </tr>
@@ -177,7 +177,7 @@ export default function RotiTawarConfig() {
           + Tambah Baris
         </button>
         <button type="button" onClick={handleSave} disabled={saving} className="btn-primary text-sm">
-          {saving ? 'Menyimpan...' : '💾 Simpan Mapping'}
+          {saving ? 'Menyimpan...' : 'Simpan Mapping'}
         </button>
       </div>
     </div>

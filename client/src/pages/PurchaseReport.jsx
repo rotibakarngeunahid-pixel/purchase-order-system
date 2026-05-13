@@ -1138,7 +1138,7 @@ export default function PurchaseReport() {
   }
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-shell">
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm ${
           toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
@@ -1147,22 +1147,24 @@ export default function PurchaseReport() {
         </div>
       )}
 
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Laporan Barang Masuk</h1>
-        <p className="text-gray-500 text-sm mt-0.5">Catat penerimaan bahan baku per outlet</p>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Laporan Barang Masuk</h1>
+          <p className="page-subtitle">Catat penerimaan bahan baku per outlet</p>
+        </div>
       </div>
 
       {/* ── Form Input ── */}
       <form onSubmit={handleSubmit}>
         <div className="card p-5 mb-6">
           {/* Header row */}
-          <div className="flex items-center gap-4 mb-5 flex-wrap">
-            <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1">Outlet</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <div className="filter-field">
+              <label className="filter-label">Outlet</label>
               <select
                 value={outletId}
                 onChange={(e) => setOutletId(e.target.value)}
-                className="input text-sm min-w-40"
+                className="input"
                 required
               >
                 <option value="">— Pilih Outlet —</option>
@@ -1171,21 +1173,21 @@ export default function PurchaseReport() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-1">Tanggal</label>
+            <div className="filter-field">
+              <label className="filter-label">Tanggal</label>
               <input
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="input text-sm"
+                className="input"
                 required
               />
             </div>
           </div>
 
           {/* Item table */}
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="w-full text-sm">
+          <div className="table-wrap rounded-lg border border-gray-200">
+            <table className="data-table" style={{ minWidth: '1120px' }}>
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="px-3 py-2.5 text-left font-medium text-gray-500 w-8 text-center">#</th>
@@ -1346,8 +1348,8 @@ export default function PurchaseReport() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between mt-4">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between gap-3 mt-4 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <button type="button" onClick={addRow} className="btn-secondary text-sm">
                 + Tambah Bahan
               </button>
@@ -1380,28 +1382,28 @@ export default function PurchaseReport() {
 
       {/* ── Histori ── */}
       <div className="card overflow-hidden">
-        <div className="p-4 border-b border-gray-100 flex items-center gap-3 flex-wrap">
-          <h2 className="font-semibold text-gray-800 flex-1">Histori Barang Masuk</h2>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Outlet:</label>
+        <div className="p-4 border-b border-gray-100 grid gap-3 lg:grid-cols-[minmax(180px,1fr)_180px_160px_160px_auto] items-end">
+          <h2 className="font-semibold text-gray-800 lg:pb-2">Histori Barang Masuk</h2>
+          <div className="filter-field">
+            <label className="filter-label">Outlet</label>
             <select
               value={filterOutletId}
               onChange={(e) => setFilterOutletId(e.target.value)}
-              className="input text-sm w-auto"
+              className="input"
             >
               <option value="">Semua</option>
               {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Dari:</label>
-            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="input text-sm w-auto" />
+          <div className="filter-field">
+            <label className="filter-label">Dari</label>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="input" />
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600 whitespace-nowrap">Sampai:</label>
-            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input text-sm w-auto" />
+          <div className="filter-field">
+            <label className="filter-label">Sampai</label>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input" />
           </div>
-          <button onClick={loadRecords} disabled={loading} className="btn-primary text-sm">
+          <button onClick={loadRecords} disabled={loading} className="btn-primary text-sm h-10">
             {loading ? 'Memuat...' : 'Terapkan'}
           </button>
         </div>
@@ -1412,7 +1414,6 @@ export default function PurchaseReport() {
           </div>
         ) : groupedList.length === 0 ? (
           <div className="p-10 text-center text-gray-400">
-            <p className="text-4xl mb-3">📦</p>
             <p>Belum ada catatan dalam rentang tanggal ini</p>
           </div>
         ) : (
@@ -1425,24 +1426,34 @@ export default function PurchaseReport() {
               return (
                 <div key={`${group.date}__${group.outlet?.id}`}>
                   {/* Group header */}
-                  <div className="px-4 py-2.5 bg-gray-50 flex items-center gap-3 flex-wrap">
+                  <div className="px-5 py-3 bg-gray-50 flex items-center gap-3 flex-wrap">
                     <span className="font-semibold text-sm text-brand-red">{group.outlet?.name}</span>
                     <span className="text-gray-400 text-xs">•</span>
                     <span className="text-gray-600 text-sm">{formatDateID(group.date)}</span>
-                    <span className="text-gray-400 text-xs ml-auto">{group.items.length} item</span>
+                    <span className="text-gray-400 text-xs ml-auto tabular-nums">{group.items.length} item</span>
                     {groupTotal > 0 && (
                       <span className="text-sm font-semibold text-gray-700">{formatRupiah(groupTotal)}</span>
                     )}
                   </div>
 
                   {/* Items */}
-                  <table className="w-full text-sm">
-                    <tbody className="divide-y divide-gray-50">
+                  <div className="table-wrap">
+                  <table className="data-table table-fixed" style={{ minWidth: '920px' }}>
+                    <colgroup>
+                      <col style={{ width: '30%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '15%' }} />
+                      <col style={{ width: '15%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '10%' }} />
+                      <col style={{ width: '4%' }} />
+                    </colgroup>
+                    <tbody>
                       {group.items.map((r) => {
                         const subtotal = Number(r.qty || 0) * Number(r.price_per_unit || 0);
                         return (
-                          <tr key={r.id} className="hover:bg-gray-50">
-                            <td className="px-4 py-2.5 font-medium text-gray-800">
+                          <tr key={r.id}>
+                            <td className="font-medium text-gray-800">
                               {r.material?.name}
                               {r.variant && (
                                 <span className="ml-2 text-xs bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">
@@ -1450,21 +1461,21 @@ export default function PurchaseReport() {
                                 </span>
                               )}
                             </td>
-                            <td className="px-4 py-2.5 text-center">
+                            <td className="center-cell">
                               <span className="font-semibold text-brand-red">{r.qty}</span>
                               <span className="text-gray-500 ml-1 text-xs">{r.unit}</span>
                             </td>
-                            <td className="px-4 py-2.5 text-right text-gray-500 text-xs">
+                            <td className="num-cell text-gray-500 text-xs">
                               {r.price_per_unit > 0 ? formatRupiah(r.price_per_unit) + '/sat' : '—'}
                             </td>
-                            <td className="px-4 py-2.5 text-right font-semibold text-gray-700">
+                            <td className="num-cell font-semibold text-gray-700">
                               {subtotal > 0 ? formatRupiah(subtotal) : '—'}
                             </td>
-                            <td className="px-4 py-2.5 text-gray-500 text-xs">{r.supplier?.name || '—'}</td>
-                            <td className="px-4 py-2.5 text-gray-400 text-xs max-w-xs truncate">
+                            <td className="text-gray-500 text-xs truncate">{r.supplier?.name || '-'}</td>
+                            <td className="text-gray-400 text-xs truncate">
                               {r.notes || ''}
                             </td>
-                            <td className="px-4 py-2.5 text-center">
+                            <td className="center-cell">
                               <button
                                 onClick={() => handleDelete(r.id)}
                                 disabled={deletingId === r.id}
@@ -1479,6 +1490,7 @@ export default function PurchaseReport() {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               );
             })}

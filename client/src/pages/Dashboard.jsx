@@ -7,8 +7,8 @@ const statusClass = { draft: 'badge-draft', sent: 'badge-sent', completed: 'badg
 
 function StatCard({ icon, label, value, sub, color }) {
   return (
-    <div className="card p-5 flex items-center gap-4">
-      <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${color}`}>
+    <div className="card p-4 min-h-[104px] flex items-center gap-4">
+      <div className={`w-11 h-11 rounded-lg flex items-center justify-center text-sm font-bold ${color}`}>
         {icon}
       </div>
       <div>
@@ -109,48 +109,48 @@ export default function Dashboard() {
   }, 0);
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-shell">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
+          <h1 className="page-title">Dashboard</h1>
+          <p className="page-subtitle">
             {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
-        <div className="flex gap-3">
+        <div className="page-actions">
           <button onClick={() => navigate('/reports')} className="btn-outline text-sm">
-            📊 Lihat Laporan
+            Lihat Laporan
           </button>
           <button onClick={handleNewOrder} className="btn-primary text-sm">
-            ➕ Order Baru
+            + Order Baru
           </button>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="stat-grid mb-8">
         <StatCard
-          icon="📋"
+          icon="OH"
           label="Order Hari Ini"
           value={stats?.today_sessions ?? 0}
           color="bg-red-50"
         />
         <StatCard
-          icon="🏭"
+          icon="SA"
           label="Supplier Aktif"
           value={stats?.active_suppliers ?? 0}
           color="bg-orange-50"
         />
         <StatCard
-          icon="⏳"
+          icon="PP"
           label="PO Pending"
           value={stats?.pending_pos ?? 0}
           sub="Belum diterima"
           color="bg-yellow-50"
         />
         <StatCard
-          icon="💰"
+          icon="PB"
           label="Pengeluaran Bulan Ini"
           value={formatRupiah(stats?.monthly_spending ?? 0)}
           sub="Sudah dikonfirmasi"
@@ -169,39 +169,44 @@ export default function Dashboard() {
         <div className="overflow-x-auto">
           {sessions.length === 0 ? (
             <div className="p-10 text-center text-gray-400">
-              <p className="text-4xl mb-3">📋</p>
               <p className="font-medium">Belum ada sesi order</p>
               <p className="text-sm mt-1">Klik "Order Baru" untuk memulai</p>
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="data-table table-fixed" style={{ minWidth: '720px' }}>
+              <colgroup>
+                <col style={{ width: '30%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '25%' }} />
+                <col style={{ width: '25%' }} />
+              </colgroup>
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="px-5 py-3 text-left font-medium text-gray-600">Tanggal</th>
-                  <th className="px-5 py-3 text-left font-medium text-gray-600">Status</th>
-                  <th className="px-5 py-3 text-right font-medium text-gray-600">Total Est.</th>
-                  <th className="px-5 py-3 text-center font-medium text-gray-600">Aksi</th>
+                <tr>
+                  <th>Tanggal</th>
+                  <th>Status</th>
+                  <th className="num-cell">Total Est.</th>
+                  <th className="center-cell">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody>
                 {sessions.map((session) => {
                   const total = (session.purchase_orders || []).reduce(
                     (sum, po) => sum + Number(po.total_estimated || 0), 0
                   );
                   return (
-                    <tr key={session.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-5 py-3.5 font-medium text-gray-800">
+                    <tr key={session.id}>
+                      <td className="font-medium text-gray-800">
                         {formatDateID(session.order_date)}
                       </td>
-                      <td className="px-5 py-3.5">
+                      <td>
                         <span className={statusClass[session.status] || 'badge-draft'}>
                           {statusLabel[session.status] || session.status}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-right font-medium text-gray-800">
+                      <td className="num-cell font-medium text-gray-800">
                         {total > 0 ? formatRupiah(total) : <span className="text-gray-400">-</span>}
                       </td>
-                      <td className="px-5 py-3.5 text-center">
+                      <td className="center-cell">
                         {session.status === 'draft' ? (
                           <div className="flex items-center justify-center gap-3">
                             <button

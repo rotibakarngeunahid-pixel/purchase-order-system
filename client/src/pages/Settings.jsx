@@ -94,7 +94,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="p-6 max-w-2xl mx-auto">
+    <div className="page-shell max-w-3xl">
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm ${
           toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
@@ -103,18 +103,18 @@ export default function Settings() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Pengaturan</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Konfigurasi sistem order bahan baku</p>
+          <h1 className="page-title">Pengaturan</h1>
+          <p className="page-subtitle">Konfigurasi sistem order bahan baku</p>
         </div>
         <button onClick={handleSave} disabled={saving} className="btn-primary">
-          {saving ? 'Menyimpan...' : '💾 Simpan Semua'}
+          {saving ? 'Menyimpan...' : 'Simpan Semua'}
         </button>
       </div>
 
       {/* Info Bisnis */}
-      <Section title="📋 Info Bisnis">
+      <Section title="Info Bisnis">
         <Field
           label="Nama Usaha"
           id="business_name"
@@ -142,32 +142,32 @@ export default function Settings() {
               Mengirim test email...
             </span>
           ) : (
-            '📨 Kirim Email Test ke Alamat Ini'
+            'Kirim Email Test ke Alamat Ini'
           )}
         </button>
       </Section>
 
       {/* WhatsApp */}
-      <Section title="💬 Konfigurasi WhatsApp">
+      <Section title="Konfigurasi WhatsApp">
         <Field
           label="Teks Penutup Pesan WA"
           id="wa_greeting_text"
           type="textarea"
           value={settings.wa_greeting_text}
           onChange={(e) => set('wa_greeting_text', e.target.value)}
-          placeholder="Mohon konfirmasi ketersediaan. Terima kasih 🙏"
+          placeholder="Mohon konfirmasi ketersediaan. Terima kasih."
           hint="Teks ini akan ditampilkan di bagian bawah setiap pesan WhatsApp yang dikirim ke supplier."
         />
       </Section>
 
       <div className="flex justify-end mt-2">
         <button onClick={handleSave} disabled={saving} className="btn-primary">
-          {saving ? 'Menyimpan...' : '💾 Simpan Semua'}
+          {saving ? 'Menyimpan...' : 'Simpan Semua'}
         </button>
       </div>
 
       {/* Roti Tawar Auto-Calc Config */}
-      <Section title="🍞 Konfigurasi Roti Tawar Auto-Calc">
+      <Section title="Konfigurasi Roti Tawar Auto-Calc">
         <RotiTawarConfig />
       </Section>
     </div>

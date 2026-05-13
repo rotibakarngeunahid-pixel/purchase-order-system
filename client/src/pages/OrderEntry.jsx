@@ -246,14 +246,14 @@ export default function OrderEntry() {
   }
 
   return (
-    <div className="p-6">
+    <div className="page-shell-wide">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Input Order</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Isi permintaan bahan baku per outlet</p>
+          <h1 className="page-title">Input Order</h1>
+          <p className="page-subtitle">Isi permintaan bahan baku per outlet</p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="page-actions">
           {saving && <span className="text-xs text-gray-400 animate-pulse">Menyimpan...</span>}
           {session && (
             <span className={statusClass[session.status] || 'badge-draft'}>
@@ -279,7 +279,7 @@ export default function OrderEntry() {
                 }}
                 className="px-2 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-orange-50 hover:border-brand-orange hover:text-brand-orange transition-colors"
               >
-                Besok ↗
+                Besok
               </button>
             )}
           </div>
@@ -288,19 +288,19 @@ export default function OrderEntry() {
             disabled={calculating || !session}
             className="btn-primary text-sm"
           >
-            {calculating ? 'Memproses...' : '🧮 Hitung & Review →'}
+            {calculating ? 'Memproses...' : 'Hitung & Review'}
           </button>
         </div>
       </div>
 
       {isReadOnly && (
         <div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800 text-sm">
-          ⚠️ Sesi ini sudah dikirim. Tidak dapat mengedit lagi.
+          Sesi ini sudah dikirim. Tidak dapat mengedit lagi.
           <button
             onClick={() => navigate(`/order/${session.id}/review`)}
             className="ml-2 underline"
           >
-            Lihat Review →
+            Lihat Review
           </button>
         </div>
       )}
@@ -334,7 +334,7 @@ export default function OrderEntry() {
                                 : 'bg-red-200 text-red-900 border-red-400 hover:bg-red-300'
                             }`}
                           >
-                            {isOpen ? '✅ Buka' : '🔴 Tutup'}
+                            {isOpen ? 'Buka' : 'Tutup'}
                           </button>
                           <button
                             type="button"
@@ -377,7 +377,7 @@ export default function OrderEntry() {
                           disabled={rotiLoading}
                           className="mt-1 text-xs px-2 py-0.5 rounded border border-brand-red text-brand-red hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
                         >
-                          {rotiLoading ? 'Menghitung...' : '⚡ Hitung Otomatis'}
+                          {rotiLoading ? 'Menghitung...' : 'Hitung Otomatis'}
                         </button>
                       )}
                     </td>
@@ -435,7 +435,7 @@ export default function OrderEntry() {
 
       {rotiError && (
         <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          ⚠️ {rotiError}
+          {rotiError}
         </div>
       )}
 
@@ -448,7 +448,7 @@ export default function OrderEntry() {
               onClick={() => setRotiDetail(null)}
               className="text-gray-400 hover:text-gray-600 text-lg leading-none"
             >
-              ×
+              x
             </button>
           </div>
 
@@ -457,7 +457,7 @@ export default function OrderEntry() {
               { label: 'Total kebutuhan', value: rotiDetail.total_needed },
               { label: 'Order ke supplier', value: rotiDetail.optimal_order },
               { label: 'Bonus supplier', value: rotiDetail.bonus },
-              { label: 'Terpenuhi', value: `${rotiDetail.fulfilled} ✓` },
+              { label: 'Terpenuhi', value: `${rotiDetail.fulfilled} OK` },
             ].map(({ label, value }) => (
               <div key={label} className="bg-gray-50 rounded-lg p-3 text-center">
                 <div className="text-xs text-gray-500 mb-1">{label}</div>
@@ -491,7 +491,7 @@ export default function OrderEntry() {
             </table>
           </div>
           <p className="text-xs text-gray-400 mt-2">
-            Data stok per tanggal {rotiDetail.tanggal}. Nilai sudah diisi otomatis — Anda bisa mengubahnya secara manual.
+            Data stok per tanggal {rotiDetail.tanggal}. Nilai sudah diisi otomatis, Anda bisa mengubahnya secara manual.
           </p>
         </div>
       )}

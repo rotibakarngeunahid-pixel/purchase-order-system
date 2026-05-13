@@ -7,28 +7,110 @@
     box-sizing: border-box;
   }
   body {
-    @apply font-sans text-brand-dark bg-gray-50;
+    @apply font-sans text-brand-dark bg-gray-50 antialiased;
+    letter-spacing: 0;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-brand-red text-white px-4 py-2 rounded-lg font-medium hover:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 bg-brand-red text-white px-4 py-2 rounded-lg font-medium hover:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap;
   }
   .btn-secondary {
-    @apply bg-brand-orange text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 bg-brand-orange text-white px-4 py-2 rounded-lg font-medium hover:bg-orange-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap;
   }
   .btn-outline {
-    @apply border border-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center gap-2 border border-gray-300 bg-white text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap;
   }
   .card {
-    @apply bg-white rounded-xl border border-gray-100 shadow-sm;
+    @apply bg-white rounded-lg border border-gray-100 shadow-sm;
   }
   .input {
-    @apply w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-red focus:border-transparent;
+    @apply w-full h-10 border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-red focus:border-transparent disabled:bg-gray-100 disabled:text-gray-400;
   }
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1;
+  }
+  .page-shell {
+    @apply w-full max-w-6xl mx-auto p-4 sm:p-6;
+  }
+  .page-shell-wide {
+    @apply w-full p-4 sm:p-6;
+  }
+  .page-header {
+    @apply mb-6 flex items-start justify-between gap-4 flex-wrap;
+  }
+  .page-title {
+    @apply text-2xl font-bold text-gray-900 leading-tight;
+  }
+  .page-subtitle {
+    @apply text-gray-500 text-sm mt-1;
+  }
+  .page-actions {
+    @apply flex items-center justify-end gap-2 flex-wrap;
+  }
+  .filter-card {
+    @apply card p-4 mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-end;
+  }
+  .filter-field {
+    @apply min-w-0;
+  }
+  .filter-label {
+    @apply block text-xs font-semibold text-gray-500 mb-1;
+    letter-spacing: 0;
+  }
+  .stat-grid {
+    @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6;
+  }
+  .stat-card {
+    @apply card p-4 min-h-[104px] flex flex-col justify-between;
+  }
+  .stat-label {
+    @apply text-xs font-semibold text-gray-500 uppercase;
+    letter-spacing: 0;
+  }
+  .stat-value {
+    @apply mt-2 text-2xl font-bold text-gray-900 leading-tight tabular-nums break-words;
+  }
+  .segmented-tabs {
+    @apply inline-flex max-w-full gap-1 p-1 bg-gray-100 rounded-lg mb-4 overflow-x-auto;
+  }
+  .segmented-tab {
+    @apply h-10 px-4 rounded-md text-sm font-medium transition-all text-gray-600 hover:text-gray-900 whitespace-nowrap;
+  }
+  .segmented-tab-active {
+    @apply bg-white text-brand-red shadow-sm;
+  }
+  .table-wrap {
+    @apply overflow-x-auto;
+  }
+  .data-table {
+    @apply w-full text-sm border-collapse;
+  }
+  .data-table thead tr {
+    @apply bg-gray-50 border-b border-gray-100;
+  }
+  .data-table th {
+    @apply px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase align-middle;
+    letter-spacing: 0;
+  }
+  .data-table td {
+    @apply px-4 py-3 align-middle;
+  }
+  .data-table tbody {
+    @apply divide-y divide-gray-50;
+  }
+  .data-table tbody tr {
+    @apply transition-colors hover:bg-gray-50;
+  }
+  .num-cell {
+    @apply text-right tabular-nums whitespace-nowrap;
+  }
+  .center-cell {
+    @apply text-center whitespace-nowrap;
+  }
+  .muted-cell {
+    @apply text-gray-500;
   }
   .badge-draft {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700;

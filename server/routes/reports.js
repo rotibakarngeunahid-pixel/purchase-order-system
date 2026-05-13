@@ -91,11 +91,15 @@ router.get('/supplier', async (req, res) => {
   res.json(summary);
 });
 
-// GET analitik: top bahan per permintaan outlet
+function makeKey(...parts) {
+  return parts.map((part) => part || '').join('|');
+}
+
+// GET analitik: top bahan per permintaan outlet + total harga aktual
 router.get('/analytics/materials', async (req, res) => {
   const { date_from, date_to, outlet_id } = req.query;
 
-  let query = supabase
+  const { data, error } = await supabase
     .from('order_request_items')
     .select(`
       qty, outlet_id,
@@ -104,9 +108,6 @@ router.get('/analytics/materials', async (req, res) => {
     `)
     .gt('qty', 0);
 
-  if (outlet_id) query = query.eq('outlet_id', outlet_id);
-
-  const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
   // Hanya sesi yang sudah selesai semua PO-nya (completed)
@@ -121,9 +122,28 @@ router.get('/analytics/materials', async (req, res) => {
     });
   }
 
+  const displayItems = outlet_id
+    ? filtered.filter((item) => item.outlet_id === outlet_id)
+    : filtered;
+
   // Agregasi per material
   const map = {};
+  const qtyBySessionMaterial = {};
+  const qtyBySessionMaterialOutlet = {};
+
   for (const item of filtered) {
+    const sessionId = item.session?.id;
+    const materialId = item.material?.id;
+    if (!sessionId || !materialId) continue;
+
+    const qty = Number(item.qty || 0);
+    qtyBySessionMaterial[makeKey(sessionId, materialId)] =
+      (qtyBySessionMaterial[makeKey(sessionId, materialId)] || 0) + qty;
+    qtyBySessionMaterialOutlet[makeKey(sessionId, materialId, item.outlet_id)] =
+      (qtyBySessionMaterialOutlet[makeKey(sessionId, materialId, item.outlet_id)] || 0) + qty;
+  }
+
+  for (const item of displayItems) {
     const id = item.material?.id;
     if (!id) continue;
     if (!map[id]) {
@@ -131,6 +151,63 @@ router.get('/analytics/materials', async (req, res) => {
     }
     map[id].total_qty += Number(item.qty);
     map[id].order_count += 1;
+  }
+
+  // Ambil total harga aktual dari PO reguler. Jika filter cabang dipakai,
+  // biaya PO dibagi proporsional berdasarkan qty permintaan cabang tersebut.
+  const { data: poRows, error: poError } = await supabase
+    .from('purchase_order_items')
+    .select(`
+      material_id, qty_ordered, qty_received, price_actual, subtotal_actual,
+      material:materials(id, name, purchase_unit),
+      po:purchase_orders(
+        status,
+        session_id,
+        session:order_sessions(id, order_date)
+      )
+    `);
+
+  if (poError) return res.status(500).json({ error: poError.message });
+
+  let filteredPORows = (poRows || []).filter((row) => (
+    row.po?.status === 'received' || row.po?.status === 'received_partial'
+  ));
+  if (date_from || date_to) {
+    filteredPORows = filteredPORows.filter((row) => {
+      const d = row.po?.session?.order_date;
+      if (!d) return true;
+      if (date_from && d < date_from) return false;
+      if (date_to && d > date_to) return false;
+      return true;
+    });
+  }
+
+  for (const row of filteredPORows) {
+    const id = row.material_id || row.material?.id;
+    const sessionId = row.po?.session_id || row.po?.session?.id;
+    if (!id || !sessionId) continue;
+
+    const subtotal = Number(row.subtotal_actual || 0);
+    const fallbackSubtotal = Number(row.qty_received || 0) * Number(row.price_actual || 0);
+    let amount = subtotal > 0 ? subtotal : fallbackSubtotal;
+    if (amount <= 0) continue;
+
+    if (outlet_id) {
+      const outletQty = qtyBySessionMaterialOutlet[makeKey(sessionId, id, outlet_id)] || 0;
+      const totalQty = qtyBySessionMaterial[makeKey(sessionId, id)] || 0;
+      if (outletQty <= 0 || totalQty <= 0) continue;
+      amount *= outletQty / totalQty;
+    }
+
+    if (!map[id]) {
+      map[id] = {
+        material: row.material || { id },
+        total_qty: Number(row.qty_received || row.qty_ordered || 0),
+        order_count: 1,
+        total_expense: 0,
+      };
+    }
+    map[id].total_expense = (map[id].total_expense || 0) + amount;
   }
 
   // Ambil barang masuk dari purchase_report untuk outlet/tanggal yang sama

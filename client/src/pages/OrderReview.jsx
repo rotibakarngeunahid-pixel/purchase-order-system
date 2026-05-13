@@ -5,7 +5,7 @@ import api, { formatRupiah, formatDateID } from '../lib/api';
 function POCard({ po }) {
   return (
     <div className="card overflow-hidden mb-4">
-      <div className="bg-brand-red px-5 py-3 flex items-center justify-between">
+      <div className="bg-brand-red px-5 py-3 flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h3 className="text-white font-semibold text-base">{po.supplier.name}</h3>
           <p className="text-red-200 text-xs mt-0.5">WA: {po.supplier.wa_number}</p>
@@ -15,22 +15,30 @@ function POCard({ po }) {
           <p className="text-white font-bold text-lg">{formatRupiah(po.total_estimated)}</p>
         </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="table-wrap">
+        <table className="data-table table-fixed" style={{ minWidth: '760px' }}>
+          <colgroup>
+            <col style={{ width: '36%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '14%' }} />
+          </colgroup>
           <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
-              <th className="px-4 py-2.5 text-left font-medium text-gray-600">Bahan</th>
-              <th className="px-4 py-2.5 text-center font-medium text-gray-600">Qty</th>
-              <th className="px-4 py-2.5 text-center font-medium text-gray-600">Satuan</th>
-              <th className="px-4 py-2.5 text-center font-medium text-gray-600">Kemasan</th>
-              <th className="px-4 py-2.5 text-right font-medium text-gray-600">Harga/Sat</th>
-              <th className="px-4 py-2.5 text-right font-medium text-gray-600">Subtotal</th>
+            <tr>
+              <th>Bahan</th>
+              <th className="center-cell">Qty</th>
+              <th className="center-cell">Satuan</th>
+              <th className="center-cell">Kemasan</th>
+              <th className="num-cell">Harga/Sat</th>
+              <th className="num-cell">Subtotal</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-50">
+          <tbody>
             {po.items.map((item, i) => (
-              <tr key={i} className="hover:bg-gray-50">
-                <td className="px-4 py-2.5">
+              <tr key={i}>
+                <td>
                   <div className="font-medium text-gray-800">{item.material_name}</div>
                   {item.roti_tawar_bonus && (
                     <div className="mt-1 text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1 inline-flex items-center gap-2 text-orange-700">
@@ -44,13 +52,13 @@ function POCard({ po }) {
                     </div>
                   )}
                 </td>
-                <td className="px-4 py-2.5 text-center font-semibold text-brand-red">{item.qty_ordered}</td>
-                <td className="px-4 py-2.5 text-center text-gray-600">{item.purchase_unit}</td>
-                <td className="px-4 py-2.5 text-center text-gray-500 text-xs">
+                <td className="center-cell font-semibold text-brand-red">{item.qty_ordered}</td>
+                <td className="center-cell text-gray-600">{item.purchase_unit}</td>
+                <td className="center-cell text-gray-500 text-xs">
                   {item.package_qty > 1 ? `${item.package_qty} ${item.package_unit}` : '—'}
                 </td>
-                <td className="px-4 py-2.5 text-right text-gray-600">{formatRupiah(item.price_per_purchase_unit)}</td>
-                <td className="px-4 py-2.5 text-right font-medium text-gray-800">{formatRupiah(item.subtotal_estimated)}</td>
+                <td className="num-cell text-gray-600">{formatRupiah(item.price_per_purchase_unit)}</td>
+                <td className="num-cell font-medium text-gray-800">{formatRupiah(item.subtotal_estimated)}</td>
               </tr>
             ))}
           </tbody>
@@ -59,7 +67,7 @@ function POCard({ po }) {
               <td colSpan={5} className="px-4 py-2.5 text-right font-semibold text-gray-700">
                 Total Estimasi:
               </td>
-              <td className="px-4 py-2.5 text-right font-bold text-brand-red text-base">
+              <td className="num-cell font-bold text-brand-red text-base">
                 {formatRupiah(po.total_estimated)}
               </td>
             </tr>
@@ -140,7 +148,7 @@ export default function OrderReview() {
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="page-shell">
       {/* Toast */}
       {toast && (
         <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm ${
@@ -151,13 +159,13 @@ export default function OrderReview() {
       )}
 
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => navigate(`/order?sessionId=${sessionId}`)} className="text-gray-400 hover:text-gray-600">
-          ← Kembali
+      <div className="page-header">
+        <button onClick={() => navigate(`/order?sessionId=${sessionId}`)} className="btn-outline text-sm">
+          Kembali
         </button>
         <div className="flex-1">
-          <h1 className="text-2xl font-bold text-gray-900">Review Order</h1>
-          <p className="text-gray-500 text-sm mt-0.5">
+          <h1 className="page-title">Review Order</h1>
+          <p className="page-subtitle">
             {session && formatDateID(session.order_date)}
             {session?.status && session.status !== 'draft' && (
               <span className="ml-2 badge-sent">Sudah Dikirim</span>
@@ -168,18 +176,17 @@ export default function OrderReview() {
 
       {pos.length === 0 ? (
         <div className="card p-10 text-center text-gray-400">
-          <p className="text-4xl mb-3">📭</p>
           <p className="font-medium">Tidak ada item untuk dipesan</p>
           <p className="text-sm mt-1">Kembali ke input order dan isi qty untuk bahan yang dibutuhkan</p>
           <button onClick={() => navigate(`/order?sessionId=${sessionId}`)} className="btn-primary text-sm mt-4">
-            ← Kembali ke Input
+            Kembali ke Input
           </button>
         </div>
       ) : (
         <>
           {/* Summary bar */}
-          <div className="card p-4 mb-5 flex items-center justify-between flex-wrap gap-3">
-            <div className="flex items-center gap-6">
+          <div className="card p-4 mb-5 flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-6 flex-wrap">
               <div>
                 <p className="text-xs text-gray-500">Jumlah Supplier</p>
                 <p className="font-bold text-xl text-gray-800">{pos.length}</p>
@@ -201,14 +208,14 @@ export default function OrderReview() {
                     Mengirim Email...
                   </span>
                 ) : (
-                  '📧 Kirim ke Email Saya'
+                  'Kirim ke Email Saya'
                 )}
               </button>
             ) : (
               <div className="flex items-center gap-2 text-green-600 font-medium text-sm">
-                ✅ Email sudah dikirim
+                Email sudah dikirim
                 <button onClick={() => navigate('/purchase')} className="btn-outline text-xs ml-2">
-                  Catat Penerimaan →
+                  Catat Penerimaan
                 </button>
               </div>
             )}
@@ -220,7 +227,7 @@ export default function OrderReview() {
           ))}
 
           {/* Grand total footer */}
-          <div className="card p-4 mt-2 flex items-center justify-between bg-red-50">
+          <div className="card p-4 mt-2 flex items-center justify-between gap-3 bg-red-50 flex-wrap">
             <span className="font-semibold text-gray-700">Grand Total Semua Supplier</span>
             <span className="font-bold text-xl text-brand-red">{formatRupiah(grandTotal)}</span>
           </div>

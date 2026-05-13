@@ -87,7 +87,7 @@ export default function Reports() {
   const statusClass = { pending: 'badge-pending', confirmed: 'badge-sent', received: 'badge-received' };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
+    <div className="page-shell">
       {/* Reset confirmation modal */}
       {showResetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -118,10 +118,10 @@ export default function Reports() {
         </div>
       )}
 
-      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
+      <div className="page-header">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Laporan</h1>
-          <p className="text-gray-500 text-sm mt-0.5">Ringkasan pengeluaran dan histori order</p>
+          <h1 className="page-title">Laporan</h1>
+          <p className="page-subtitle">Ringkasan pengeluaran dan histori order</p>
           {lastReset && (
             <p className="text-xs text-gray-400 mt-1">
               Terakhir direset:{' '}
@@ -139,36 +139,36 @@ export default function Reports() {
           onClick={() => setShowResetModal(true)}
           className="btn-secondary text-sm whitespace-nowrap"
         >
-          🔄 Reset Laporan
+          Reset Laporan
         </button>
       </div>
 
       {/* Filter */}
-      <div className="card p-4 mb-6 flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600 whitespace-nowrap">Dari:</label>
+      <div className="filter-card">
+        <div className="filter-field">
+          <label className="filter-label">Dari</label>
           <input
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="input text-sm w-auto"
+            className="input"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600 whitespace-nowrap">Sampai:</label>
+        <div className="filter-field">
+          <label className="filter-label">Sampai</label>
           <input
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="input text-sm w-auto"
+            className="input"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-600 whitespace-nowrap">Supplier:</label>
+        <div className="filter-field">
+          <label className="filter-label">Supplier</label>
           <select
             value={supplierId}
             onChange={(e) => setSupplierId(e.target.value)}
-            className="input text-sm w-auto"
+            className="input"
           >
             <option value="">Semua Supplier</option>
             {suppliers.map((s) => (
@@ -176,45 +176,45 @@ export default function Reports() {
             ))}
           </select>
         </div>
-        <button onClick={loadReports} disabled={loading} className="btn-primary text-sm">
-          {loading ? 'Memuat...' : '🔍 Terapkan Filter'}
+        <button onClick={loadReports} disabled={loading} className="btn-primary text-sm h-10">
+          {loading ? 'Memuat...' : 'Terapkan Filter'}
         </button>
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="card p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total PO</p>
-          <p className="text-2xl font-bold text-gray-900">{dailyData.length}</p>
+      <div className="stat-grid">
+        <div className="stat-card">
+          <p className="stat-label">Total PO</p>
+          <p className="stat-value">{dailyData.length}</p>
         </div>
-        <div className="card p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Estimasi</p>
-          <p className="text-2xl font-bold text-gray-900">{formatRupiah(totalEstimated)}</p>
+        <div className="stat-card">
+          <p className="stat-label">Total Estimasi</p>
+          <p className="stat-value">{formatRupiah(totalEstimated)}</p>
         </div>
-        <div className="card p-4">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Aktual (Diterima)</p>
-          <p className="text-2xl font-bold text-brand-red">{formatRupiah(totalActual)}</p>
+        <div className="stat-card">
+          <p className="stat-label">Total Aktual Diterima</p>
+          <p className="stat-value text-brand-red">{formatRupiah(totalActual)}</p>
         </div>
-        <div className="card p-4 border-l-4 border-green-500">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total Barang Masuk</p>
-          <p className="text-2xl font-bold text-green-600">{formatRupiah(totalBarangMasuk)}</p>
+        <div className="stat-card border-l-4 border-green-500">
+          <p className="stat-label">Total Barang Masuk</p>
+          <p className="stat-value text-green-600">{formatRupiah(totalBarangMasuk)}</p>
           <p className="text-xs text-gray-400 mt-1">{barangMasukData.length} item tercatat</p>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit mb-4">
+      <div className="segmented-tabs">
         {[
-          { id: 'daily', label: '📅 Pengeluaran Harian' },
-          { id: 'supplier', label: '🏭 Per Supplier' },
-          { id: 'barang-masuk', label: '📦 Barang Masuk' },
+          { id: 'daily', label: 'Pengeluaran Harian' },
+          { id: 'supplier', label: 'Per Supplier' },
+          { id: 'barang-masuk', label: 'Barang Masuk' },
         ].map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            className={`segmented-tab ${
               activeTab === tab.id
-                ? 'bg-white text-brand-red shadow-sm'
+                ? 'segmented-tab-active'
                 : 'text-gray-600 hover:text-gray-800'
             }`}
           >
@@ -231,37 +231,44 @@ export default function Reports() {
         <div className="card overflow-hidden">
           {dailyData.length === 0 ? (
             <div className="p-10 text-center text-gray-400">
-              <p className="text-4xl mb-3">📊</p>
               <p>Tidak ada data dalam rentang tanggal ini</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="table-wrap">
+              <table className="data-table table-fixed" style={{ minWidth: '760px' }}>
+                <colgroup>
+                  <col style={{ width: '18%' }} />
+                  <col style={{ width: '24%' }} />
+                  <col style={{ width: '12%' }} />
+                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '16%' }} />
+                  <col style={{ width: '16%' }} />
+                </colgroup>
                 <thead>
-                  <tr className="bg-gray-50 border-b border-gray-100">
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">Tanggal Order</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600">Supplier</th>
-                    <th className="px-4 py-3 text-center font-medium text-gray-600">Jml Item</th>
-                    <th className="px-4 py-3 text-center font-medium text-gray-600">Status</th>
-                    <th className="px-4 py-3 text-right font-medium text-gray-600">Est. Total</th>
-                    <th className="px-4 py-3 text-right font-medium text-gray-600">Aktual</th>
+                  <tr>
+                    <th>Tanggal Order</th>
+                    <th>Supplier</th>
+                    <th className="center-cell">Jml Item</th>
+                    <th className="center-cell">Status</th>
+                    <th className="num-cell">Est. Total</th>
+                    <th className="num-cell">Aktual</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-50">
+                <tbody>
                   {dailyData.map((po) => (
-                    <tr key={po.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-gray-800">
+                    <tr key={po.id}>
+                      <td className="font-medium text-gray-800">
                         {formatDateID(po.session?.order_date)}
                       </td>
-                      <td className="px-4 py-3 font-medium text-gray-800">{po.supplier?.name}</td>
-                      <td className="px-4 py-3 text-center text-gray-600">{po.items?.length || 0}</td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="text-gray-700 truncate">{po.supplier?.name}</td>
+                      <td className="center-cell text-gray-600">{po.items?.length || 0}</td>
+                      <td className="center-cell">
                         <span className={statusClass[po.status] || 'badge-pending'}>
                           {statusLabel[po.status] || po.status}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-700">{formatRupiah(po.total_estimated)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-brand-red">
+                      <td className="num-cell text-gray-700">{formatRupiah(po.total_estimated)}</td>
+                      <td className="num-cell font-medium text-brand-red">
                         {po.total_actual ? formatRupiah(po.total_actual) : <span className="text-gray-300">—</span>}
                       </td>
                     </tr>
@@ -272,10 +279,10 @@ export default function Reports() {
                     <td colSpan={4} className="px-4 py-3 text-right font-semibold text-gray-700">
                       Total:
                     </td>
-                    <td className="px-4 py-3 text-right font-bold text-gray-800">
+                    <td className="num-cell font-bold text-gray-800">
                       {formatRupiah(totalEstimated)}
                     </td>
-                    <td className="px-4 py-3 text-right font-bold text-brand-red">
+                    <td className="num-cell font-bold text-brand-red">
                       {formatRupiah(totalActual)}
                     </td>
                   </tr>
@@ -288,58 +295,65 @@ export default function Reports() {
         <div className="card overflow-hidden">
           {supplierSummary.length === 0 ? (
             <div className="p-10 text-center text-gray-400">
-              <p className="text-4xl mb-3">🏭</p>
               <p>Tidak ada data supplier</p>
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="table-wrap">
+            <table className="data-table table-fixed" style={{ minWidth: '760px' }}>
+              <colgroup>
+                <col style={{ width: '28%' }} />
+                <col style={{ width: '14%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '20%' }} />
+                <col style={{ width: '18%' }} />
+              </colgroup>
               <thead>
-                <tr className="bg-gray-50 border-b border-gray-100">
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Supplier</th>
-                  <th className="px-4 py-3 text-center font-medium text-gray-600">Jml Order</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-600">Total Estimasi</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-600">Total Aktual</th>
-                  <th className="px-4 py-3 text-right font-medium text-gray-600">Rata-rata/Order</th>
+                <tr>
+                  <th>Supplier</th>
+                  <th className="center-cell">Jml Order</th>
+                  <th className="num-cell">Total Estimasi</th>
+                  <th className="num-cell">Total Aktual</th>
+                  <th className="num-cell">Rata-rata/Order</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-50">
+              <tbody>
                 {supplierSummary
                   .filter((s) => s.total_orders > 0)
                   .map((s) => (
-                    <tr key={s.supplier.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-800">{s.supplier.name}</td>
-                      <td className="px-4 py-3 text-center text-gray-600">{s.total_orders}</td>
-                      <td className="px-4 py-3 text-right text-gray-700">{formatRupiah(s.total_estimated)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-brand-red">
+                    <tr key={s.supplier.id}>
+                      <td className="font-medium text-gray-800 truncate">{s.supplier.name}</td>
+                      <td className="center-cell text-gray-600">{s.total_orders}</td>
+                      <td className="num-cell text-gray-700">{formatRupiah(s.total_estimated)}</td>
+                      <td className="num-cell font-medium text-brand-red">
                         {s.total_actual > 0 ? formatRupiah(s.total_actual) : <span className="text-gray-300">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-600">{formatRupiah(s.avg_order_value)}</td>
+                      <td className="num-cell text-gray-600">{formatRupiah(s.avg_order_value)}</td>
                     </tr>
                   ))}
               </tbody>
               <tfoot>
                 <tr className="bg-orange-50 border-t-2 border-orange-200">
                   <td className="px-4 py-3 font-semibold text-gray-700">Total</td>
-                  <td className="px-4 py-3 text-center font-bold text-gray-800">
+                  <td className="center-cell font-bold text-gray-800">
                     {supplierSummary.reduce((s, r) => s + r.total_orders, 0)}
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-gray-800">
+                  <td className="num-cell font-bold text-gray-800">
                     {formatRupiah(supplierSummary.reduce((s, r) => s + r.total_estimated, 0))}
                   </td>
-                  <td className="px-4 py-3 text-right font-bold text-brand-red">
+                  <td className="num-cell font-bold text-brand-red">
                     {formatRupiah(supplierSummary.reduce((s, r) => s + r.total_actual, 0))}
                   </td>
                   <td />
                 </tr>
               </tfoot>
             </table>
+            </div>
           )}
         </div>
       ) : (
         <div className="space-y-3">
           {Object.keys(barangMasukByDate).length === 0 ? (
             <div className="card p-10 text-center text-gray-400">
-              <p className="text-4xl mb-3">📦</p>
               <p>Tidak ada barang masuk dalam rentang tanggal ini</p>
             </div>
           ) : (
@@ -350,48 +364,57 @@ export default function Reports() {
               );
               return (
                 <div key={date} className="card overflow-hidden">
-                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-gray-800">{formatDateID(date)}</span>
-                      <span className="text-xs text-gray-400">{items[0]?.outlet?.name}</span>
+                  <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <span className="font-semibold text-gray-900">{formatDateID(date)}</span>
+                      <span className="ml-2 text-xs text-gray-400">{items[0]?.outlet?.name}</span>
                     </div>
-                    <div className="text-sm text-gray-500">
+                    <div className="text-sm text-gray-500 tabular-nums">
                       {items.length} item &bull;{' '}
                       <span className="font-semibold text-green-600">{formatRupiah(dateTotal)}</span>
                     </div>
                   </div>
-                  <table className="w-full text-sm">
-                    <tbody className="divide-y divide-gray-50">
+                  <div className="table-wrap">
+                  <table className="data-table table-fixed" style={{ minWidth: '760px' }}>
+                    <colgroup>
+                      <col style={{ width: '36%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '18%' }} />
+                      <col style={{ width: '18%' }} />
+                      <col style={{ width: '14%' }} />
+                    </colgroup>
+                    <tbody>
                       {items.map((item) => (
-                        <tr key={item.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-gray-800">
+                        <tr key={item.id}>
+                          <td className="font-medium text-gray-800">
                             {item.material?.name}
                             {item.variant?.brand && (
                               <span className="ml-1 text-xs text-gray-400">({item.variant.brand})</span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-center text-brand-red font-medium">
+                          <td className="center-cell text-brand-red font-medium tabular-nums">
                             {item.qty} {item.unit}
                           </td>
-                          <td className="px-4 py-3 text-center text-gray-500 text-xs">
+                          <td className="num-cell text-gray-500 text-xs">
                             {formatRupiah(item.price_per_unit)}/sat
                           </td>
-                          <td className="px-4 py-3 text-right font-semibold text-gray-800">
+                          <td className="num-cell font-semibold text-gray-800">
                             {formatRupiah(Number(item.qty) * Number(item.price_per_unit || 0))}
                           </td>
-                          <td className="px-4 py-3 text-right text-gray-400 text-xs">
+                          <td className="text-right text-gray-400 text-xs truncate">
                             {item.supplier?.name || '—'}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               );
             })
           )}
           {Object.keys(barangMasukByDate).length > 0 && (
-            <div className="card p-4 bg-green-50 border border-green-200 flex justify-between items-center">
+            <div className="card p-4 bg-green-50 border border-green-200 flex justify-between items-center gap-3 flex-wrap">
               <span className="font-semibold text-gray-700">Total Barang Masuk</span>
               <span className="text-xl font-bold text-green-600">{formatRupiah(totalBarangMasuk)}</span>
             </div>

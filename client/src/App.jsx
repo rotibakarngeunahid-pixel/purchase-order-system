@@ -19,7 +19,7 @@ function isLoggedIn() {
 
 function Layout({ children }) {
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 md:flex">
       <Sidebar />
       <main className="flex-1 min-w-0 overflow-auto">
         {children}
