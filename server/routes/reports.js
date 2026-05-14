@@ -95,6 +95,60 @@ function makeKey(...parts) {
   return parts.map((part) => part || '').join('|');
 }
 
+function isWithinDateRange(date, dateFrom, dateTo) {
+  if (!date) return true;
+  if (dateFrom && date < dateFrom) return false;
+  if (dateTo && date > dateTo) return false;
+  return true;
+}
+
+function getMonthKey(date) {
+  return date ? date.substring(0, 7) : null;
+}
+
+function ensureTrendMonth(map, month) {
+  if (!map[month]) {
+    map[month] = { month, total_estimated: 0, total_actual: 0, order_count: 0 };
+  }
+  return map[month];
+}
+
+function getActualSubtotal(row) {
+  const subtotal = Number(row.subtotal_actual || 0);
+  if (subtotal > 0) return subtotal;
+  return Number(row.qty_received || 0) * Number(row.price_actual || 0);
+}
+
+async function getRequestQtyMaps(dateFrom, dateTo) {
+  const { data, error } = await supabase
+    .from('order_request_items')
+    .select(`
+      qty, outlet_id, material_id,
+      session:order_sessions(id, order_date)
+    `)
+    .gt('qty', 0);
+
+  if (error) throw error;
+
+  const qtyBySessionMaterial = {};
+  const qtyBySessionMaterialOutlet = {};
+
+  for (const item of data || []) {
+    const sessionId = item.session?.id;
+    const materialId = item.material_id;
+    const d = item.session?.order_date;
+    if (!sessionId || !materialId || !isWithinDateRange(d, dateFrom, dateTo)) continue;
+
+    const qty = Number(item.qty || 0);
+    qtyBySessionMaterial[makeKey(sessionId, materialId)] =
+      (qtyBySessionMaterial[makeKey(sessionId, materialId)] || 0) + qty;
+    qtyBySessionMaterialOutlet[makeKey(sessionId, materialId, item.outlet_id)] =
+      (qtyBySessionMaterialOutlet[makeKey(sessionId, materialId, item.outlet_id)] || 0) + qty;
+  }
+
+  return { qtyBySessionMaterial, qtyBySessionMaterialOutlet };
+}
+
 // GET analitik: top bahan per permintaan outlet + total harga aktual
 router.get('/analytics/materials', async (req, res) => {
   const { date_from, date_to, outlet_id } = req.query;
@@ -252,7 +306,7 @@ router.get('/analytics/materials', async (req, res) => {
 
 // GET analitik: konsumsi per outlet/cabang
 router.get('/analytics/outlets', async (req, res) => {
-  const { date_from, date_to } = req.query;
+  const { date_from, date_to, outlet_id } = req.query;
 
   const { data: outlets, error: outletError } = await supabase
     .from('outlets')
@@ -284,7 +338,11 @@ router.get('/analytics/outlets', async (req, res) => {
     });
   }
 
-  const result = (outlets || []).map((outlet) => {
+  const displayOutlets = outlet_id
+    ? (outlets || []).filter((outlet) => outlet.id === outlet_id)
+    : (outlets || []);
+
+  const result = displayOutlets.map((outlet) => {
     const outletItems = filtered.filter((item) => item.outlet_id === outlet.id);
     return {
       outlet,
@@ -296,72 +354,128 @@ router.get('/analytics/outlets', async (req, res) => {
   res.json(result);
 });
 
-// GET analitik: tren bulanan order (dari purchase_orders received)
+// GET analitik: tren bulanan pengeluaran, termasuk alokasi PO per cabang.
 router.get('/analytics/trends', async (req, res) => {
-  const { date_from, date_to } = req.query;
+  const { date_from, date_to, outlet_id } = req.query;
 
-  let query = supabase
-    .from('purchase_orders')
-    .select('total_estimated, total_actual, status, session:order_sessions(order_date)')
-    .in('status', ['received', 'received_partial']);
-
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-
-  let filtered = data || [];
-  if (date_from || date_to) {
-    filtered = filtered.filter((po) => {
-      const d = po.session?.order_date;
-      if (!d) return true;
-      if (date_from && d < date_from) return false;
-      if (date_to && d > date_to) return false;
-      return true;
-    });
-  }
-
-  // Agregasi per bulan
   const map = {};
-  for (const po of filtered) {
-    const d = po.session?.order_date;
-    if (!d) continue;
-    const month = d.substring(0, 7); // "YYYY-MM"
-    if (!map[month]) {
-      map[month] = { month, total_estimated: 0, total_actual: 0, order_count: 0 };
+
+  try {
+    if (outlet_id) {
+      const { qtyBySessionMaterial, qtyBySessionMaterialOutlet } =
+        await getRequestQtyMaps(date_from, date_to);
+
+      const { data: poRows, error } = await supabase
+        .from('purchase_order_items')
+        .select(`
+          material_id, qty_ordered, qty_received, price_actual, subtotal_actual,
+          material:materials(id, price_per_purchase_unit),
+          po:purchase_orders(
+            id,
+            status,
+            session_id,
+            total_estimated,
+            session:order_sessions(id, order_date)
+          )
+        `);
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      const poGroups = {};
+      for (const row of poRows || []) {
+        if (row.po?.status !== 'received' && row.po?.status !== 'received_partial') continue;
+        const d = row.po?.session?.order_date;
+        if (!isWithinDateRange(d, date_from, date_to)) continue;
+        if (!row.po?.id) continue;
+
+        if (!poGroups[row.po.id]) poGroups[row.po.id] = [];
+        poGroups[row.po.id].push(row);
+      }
+
+      for (const rows of Object.values(poGroups)) {
+        const po = rows[0]?.po;
+        const month = getMonthKey(po?.session?.order_date);
+        if (!po || !month) continue;
+
+        const rawEstimates = rows.map((row) => (
+          Number(row.qty_ordered || 0) * Number(row.material?.price_per_purchase_unit || 0)
+        ));
+        const rawEstimateTotal = rawEstimates.reduce((sum, amount) => sum + amount, 0);
+        const trend = ensureTrendMonth(map, month);
+        let hasOutletExpense = false;
+
+        rows.forEach((row, index) => {
+          const materialId = row.material_id || row.material?.id;
+          const sessionId = row.po?.session_id || row.po?.session?.id;
+          if (!materialId || !sessionId) return;
+
+          const outletQty = qtyBySessionMaterialOutlet[makeKey(sessionId, materialId, outlet_id)] || 0;
+          const totalQty = qtyBySessionMaterial[makeKey(sessionId, materialId)] || 0;
+          if (outletQty <= 0 || totalQty <= 0) return;
+
+          const outletRatio = outletQty / totalQty;
+          const actualSubtotal = getActualSubtotal(row);
+          const estimatedSubtotal = rawEstimateTotal > 0
+            ? Number(po.total_estimated || 0) * (rawEstimates[index] / rawEstimateTotal)
+            : Number(po.total_estimated || 0) / rows.length;
+
+          trend.total_actual += actualSubtotal * outletRatio;
+          trend.total_estimated += estimatedSubtotal * outletRatio;
+          hasOutletExpense = true;
+        });
+
+        if (hasOutletExpense) trend.order_count += 1;
+      }
+    } else {
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .select('total_estimated, total_actual, status, session:order_sessions(order_date)')
+        .in('status', ['received', 'received_partial']);
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      for (const po of data || []) {
+        const d = po.session?.order_date;
+        if (!isWithinDateRange(d, date_from, date_to)) continue;
+
+        const month = getMonthKey(d);
+        if (!month) continue;
+        const trend = ensureTrendMonth(map, month);
+        trend.total_estimated += Number(po.total_estimated || 0);
+        trend.total_actual += Number(po.total_actual || 0);
+        trend.order_count += 1;
+      }
     }
-    map[month].total_estimated += Number(po.total_estimated || 0);
-    map[month].total_actual += Number(po.total_actual || 0);
-    map[month].order_count += 1;
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
   }
 
   // Sertakan juga pengeluaran dari `purchase_report` (laporan barang masuk)
   const { data: reportRows, error: reportError } = await supabase
     .from('purchase_report')
-    .select('qty, price_per_unit, date');
+    .select('qty, price_per_unit, date, outlet_id');
 
   if (reportError) return res.status(500).json({ error: reportError.message });
 
   let filteredReports = reportRows || [];
   if (date_from || date_to) {
-    filteredReports = filteredReports.filter((r) => {
-      const d = r.date;
-      if (!d) return true;
-      if (date_from && d < date_from) return false;
-      if (date_to && d > date_to) return false;
-      return true;
-    });
+    filteredReports = filteredReports.filter((r) => isWithinDateRange(r.date, date_from, date_to));
+  }
+  if (outlet_id) {
+    filteredReports = filteredReports.filter((r) => r.outlet_id === outlet_id);
   }
 
   for (const r of filteredReports) {
     const d = r.date;
     if (!d) continue;
-    const month = d.substring(0, 7);
-    if (!map[month]) {
-      map[month] = { month, total_estimated: 0, total_actual: 0, order_count: 0 };
-    }
-    map[month].total_actual += Number(r.qty || 0) * Number(r.price_per_unit || 0);
+    const month = getMonthKey(d);
+    const trend = ensureTrendMonth(map, month);
+    trend.total_actual += Number(r.qty || 0) * Number(r.price_per_unit || 0);
   }
 
-  const result = Object.values(map).sort((a, b) => a.month.localeCompare(b.month));
+  const result = Object.values(map)
+    .filter((row) => row.order_count > 0 || row.total_estimated > 0 || row.total_actual > 0)
+    .sort((a, b) => a.month.localeCompare(b.month));
   res.json(result);
 });
 
