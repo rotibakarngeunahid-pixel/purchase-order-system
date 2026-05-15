@@ -94,6 +94,7 @@ export default function OrderEntry() {
     setRotiReferenceDate(newRefDate);
     setRotiDetail(null);
     setRotiError(null);
+    setRotiStockMap({});
     setMatrix({});
     setLoading(true);
     try {
@@ -116,6 +117,85 @@ export default function OrderEntry() {
       setMatrix(m2);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleTomorrowClick = async () => {
+    const tomorrow = getLocalOperationalTomorrow();
+    const today = getLocalOperationalDate();
+    const rotiMaterial = materials.find((m) => m.name.toLowerCase().includes('roti tawar'));
+
+    setOrderDate(tomorrow);
+    setRotiReferenceDate(today);
+    setRotiDetail(null);
+    setRotiError(null);
+    setRotiStockMap({});
+    setMatrix({});
+    setLoading(true);
+
+    let loadedSession = null;
+    let loadedMatrix = {};
+
+    try {
+      const res = await api.post('/api/orders/session', { order_date: tomorrow });
+      const fullRes = await api.get(`/api/orders/session/${res.data.id}`);
+      loadedSession = fullRes.data;
+      (fullRes.data.items || []).forEach((item) => {
+        loadedMatrix[`${item.outlet_id}_${item.material_id}`] = item.qty;
+      });
+      setSession(loadedSession);
+      setMatrix(loadedMatrix);
+    } finally {
+      setLoading(false);
+    }
+
+    // Auto-hitung roti hanya jika session draft dan belum ada data roti tersimpan
+    if (!rotiMaterial || loadedSession?.status !== 'draft') return;
+    const hasExistingRoti = (loadedSession.items || []).some(
+      (i) => i.material_id === rotiMaterial.id && i.qty > 0
+    );
+    if (hasExistingRoti) return;
+
+    setRotiLoading(true);
+    try {
+      const result = await previewRotiOrder({ orderDate: tomorrow, referenceDate: today });
+      const newMatrix = { ...loadedMatrix };
+      const savePromises = [];
+      const stockMap = {};
+
+      result.branches.forEach((branch) => {
+        const outlet = outlets.find(
+          (o) => o.name.toLowerCase() === branch.display_name.toLowerCase()
+        );
+        if (!outlet) return;
+        const key = `${outlet.id}_${rotiMaterial.id}`;
+        const isOpen = outletOpen[outlet.id] !== false;
+        const days = outletDays[outlet.id] ?? 2;
+        const qty = !isOpen ? 0 : days === 1 ? Math.ceil(branch.need / 2) : branch.need;
+        newMatrix[key] = qty;
+        stockMap[outlet.id] = { current_stock: branch.current_stock, min_stock: branch.min_stock };
+        savePromises.push(
+          api.post(`/api/orders/session/${loadedSession.id}/request`, {
+            outlet_id: outlet.id,
+            material_id: rotiMaterial.id,
+            qty,
+          })
+        );
+      });
+
+      setMatrix(newMatrix);
+      setRotiDetail(result);
+      setRotiStockMap(stockMap);
+
+      if (savePromises.length > 0) {
+        setSaving(true);
+        await Promise.all(savePromises).finally(() => setSaving(false));
+      }
+    } catch (e) {
+      const msg = e.response?.data?.error;
+      setRotiError(msg || 'Gagal mengambil data stok roti. Coba klik "Hitung Otomatis" secara manual.');
+    } finally {
+      setRotiLoading(false);
     }
   };
 
@@ -280,9 +360,7 @@ export default function OrderEntry() {
               <button
                 type="button"
                 title="Set tanggal ke besok"
-                onClick={() => {
-                  handleDateChange({ target: { value: getLocalOperationalTomorrow() } });
-                }}
+                onClick={handleTomorrowClick}
                 className="px-2 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-orange-50 hover:border-brand-orange hover:text-brand-orange transition-colors"
               >
                 Besok
