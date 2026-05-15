@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
-const { getReportingDate } = require('../services/reportingDate');
+const { getReportingDate, resolveRotiReferenceDate } = require('../services/reportingDate');
 
 const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxEqwArPOXtQbAOoMSWoYRiUAUHZK3cCRecxxH39_SKpixUEy90WL20q5HqGf6hgFi4/exec';
 
@@ -19,12 +19,14 @@ function calcOptimalOrder(totalNeeded) {
 
 // GET /api/roti-tawar/preview
 router.get('/preview', async (req, res) => {
-  const tanggal = req.query.tanggal || getReportingDate();
+  // Support legacy ?tanggal= param; prefer order_date / reference_date
+  const orderDate = req.query.order_date || req.query.tanggal || getReportingDate();
+  const referenceDate = req.query.reference_date || req.query.tanggal || resolveRotiReferenceDate(orderDate);
 
-  // Fetch stok dari GAS API (server-side)
+  // Fetch stok dari GAS API menggunakan referenceDate
   let gasData;
   try {
-    const gasRes = await fetch(`${GAS_BASE}?action=getDashboard&tanggal=${tanggal}`, {
+    const gasRes = await fetch(`${GAS_BASE}?action=getDashboard&tanggal=${referenceDate}`, {
       signal: AbortSignal.timeout(15000),
     });
     const gasJson = await gasRes.json();
@@ -40,6 +42,15 @@ router.get('/preview', async (req, res) => {
   const rotiRows = gasData.filter((row) =>
     String(row.nama_bahan || '').toLowerCase().includes('roti tawar')
   );
+
+  // Jika tidak ada data roti sama sekali untuk tanggal referensi, kembalikan error
+  if (rotiRows.length === 0) {
+    return res.status(422).json({
+      error: `Data stok roti untuk tanggal referensi ${referenceDate} belum tersedia. Pastikan data sudah diinput di sistem inventory.`,
+      order_date: orderDate,
+      reference_date: referenceDate,
+    });
+  }
 
   // Load mapping aktif
   const { data: mappings, error: mapErr } = await supabase
@@ -67,9 +78,14 @@ router.get('/preview', async (req, res) => {
     return res.status(400).json({ error: 'No min stock configured' });
   }
 
+  const warnings = [];
+
   // Hitung need per cabang
   const branches = mappings.map((m) => {
     const gasRow = rotiRows.find((r) => r.cabang_id === m.inv_cabang_id);
+    if (!gasRow) {
+      warnings.push(`Data stok cabang "${m.display_name}" tidak ditemukan pada tanggal referensi ${referenceDate}.`);
+    }
     const currentStock = gasRow ? Math.floor(Number(gasRow.stok_akhir)) : 0;
     const minStock = stockMap[m.inv_cabang_id] ?? 0;
     const need = Math.max(0, minStock - currentStock);
@@ -79,6 +95,7 @@ router.get('/preview', async (req, res) => {
       current_stock: currentStock,
       min_stock: minStock,
       need,
+      data_found: !!gasRow,
     };
   });
 
@@ -86,12 +103,15 @@ router.get('/preview', async (req, res) => {
   const { order, bonus, fulfilled } = calcOptimalOrder(totalNeeded);
 
   res.json({
-    tanggal,
+    order_date: orderDate,
+    reference_date: referenceDate,
+    tanggal: referenceDate, // backward compat
     total_needed: totalNeeded,
     optimal_order: order,
     bonus,
     fulfilled,
     branches,
+    warnings,
   });
 });
 

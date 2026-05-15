@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import api, { formatDateID, toInputDate } from '../lib/api';
+import api, { formatDateID, toInputDate, getLocalOperationalDate, getLocalOperationalTomorrow } from '../lib/api';
 import { previewRotiOrder } from '../services/rotiTawarService';
 
 const statusLabel = { draft: 'Draft', sent: 'Terkirim', completed: 'Selesai' };
@@ -12,6 +12,7 @@ export default function OrderEntry() {
   const initialSessionId = searchParams.get('sessionId');
 
   const [orderDate, setOrderDate] = useState(toInputDate());
+  const [rotiReferenceDate, setRotiReferenceDate] = useState(getLocalOperationalDate());
   const [session, setSession] = useState(null);
   const [materials, setMaterials] = useState([]);
   const [outlets, setOutlets] = useState([]);
@@ -86,7 +87,13 @@ export default function OrderEntry() {
 
   const handleDateChange = async (e) => {
     const date = e.target.value;
+    const operationalToday = getLocalOperationalDate();
+    // Jika tanggal order di masa depan, referensi stok tetap hari operasional ini
+    const newRefDate = date > operationalToday ? operationalToday : date;
     setOrderDate(date);
+    setRotiReferenceDate(newRefDate);
+    setRotiDetail(null);
+    setRotiError(null);
     setMatrix({});
     setLoading(true);
     try {
@@ -173,7 +180,7 @@ export default function OrderEntry() {
     setRotiError(null);
     setRotiDetail(null);
     try {
-      const result = await previewRotiOrder(orderDate);
+      const result = await previewRotiOrder({ orderDate, referenceDate: rotiReferenceDate });
 
       const newMatrix = { ...matrix };
       const savePromises = [];
@@ -218,7 +225,8 @@ export default function OrderEntry() {
         await Promise.all(savePromises).finally(() => setSaving(false));
       }
     } catch (e) {
-      setRotiError('Gagal mengambil data stok. Coba lagi.');
+      const msg = e.response?.data?.error;
+      setRotiError(msg || 'Gagal mengambil data stok. Coba lagi.');
     } finally {
       setRotiLoading(false);
     }
@@ -273,9 +281,7 @@ export default function OrderEntry() {
                 type="button"
                 title="Set tanggal ke besok"
                 onClick={() => {
-                  const tomorrow = new Date();
-                  tomorrow.setDate(tomorrow.getDate() + 1);
-                  handleDateChange({ target: { value: tomorrow.toISOString().split('T')[0] } });
+                  handleDateChange({ target: { value: getLocalOperationalTomorrow() } });
                 }}
                 className="px-2 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-orange-50 hover:border-brand-orange hover:text-brand-orange transition-colors"
               >
@@ -490,8 +496,18 @@ export default function OrderEntry() {
               </tbody>
             </table>
           </div>
+          {rotiDetail.warnings && rotiDetail.warnings.length > 0 && (
+            <div className="mt-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+              <p className="font-medium mb-1">Peringatan:</p>
+              {rotiDetail.warnings.map((w, i) => (
+                <p key={i}>{w}</p>
+              ))}
+            </div>
+          )}
           <p className="text-xs text-gray-400 mt-2">
-            Data stok per tanggal {rotiDetail.tanggal}. Nilai sudah diisi otomatis, Anda bisa mengubahnya secara manual.
+            Order untuk tanggal {formatDateID(rotiDetail.order_date || rotiDetail.tanggal)}.
+            Data stok referensi: {formatDateID(rotiDetail.reference_date || rotiDetail.tanggal)}.
+            Nilai sudah diisi otomatis, Anda bisa mengubahnya secara manual.
           </p>
         </div>
       )}

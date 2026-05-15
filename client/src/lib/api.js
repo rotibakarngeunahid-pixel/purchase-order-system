@@ -43,5 +43,28 @@ export function formatDateID(dateStr) {
 }
 
 export function toInputDate(date = new Date()) {
-  return date.toISOString().split('T')[0];
+  // Gunakan WITA (UTC+8) agar tanggal konsisten dengan zona waktu operasional
+  const wita = new Date(date.getTime() + 8 * 3600 * 1000);
+  return wita.toISOString().split('T')[0];
+}
+
+// Tanggal operasional hari ini dalam WITA, dengan cutoff 03:00 (sebelum 03:00 = hari sebelumnya)
+export function getLocalOperationalDate() {
+  const now = new Date();
+  const wita = new Date(now.getTime() + 8 * 3600 * 1000);
+  if (wita.getUTCHours() < 3) {
+    wita.setUTCDate(wita.getUTCDate() - 1);
+  }
+  return wita.toISOString().split('T')[0];
+}
+
+// Tanggal operasional besok dalam WITA (H+1 dari getLocalOperationalDate)
+export function getLocalOperationalTomorrow() {
+  const now = new Date();
+  const wita = new Date(now.getTime() + 8 * 3600 * 1000);
+  if (wita.getUTCHours() < 3) {
+    wita.setUTCDate(wita.getUTCDate() - 1);
+  }
+  wita.setUTCDate(wita.getUTCDate() + 1);
+  return wita.toISOString().split('T')[0];
 }
