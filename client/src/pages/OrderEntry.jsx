@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import api, { formatDateID, toInputDate, getLocalOperationalDate, getLocalOperationalTomorrow } from '../lib/api';
+import api, { formatDateID, toInputDate, getLocalOperationalDate, getLocalOperationalYesterday, getLocalOperationalTomorrow } from '../lib/api';
 import { previewRotiOrder } from '../services/rotiTawarService';
 
 const statusLabel = { draft: 'Draft', sent: 'Terkirim', completed: 'Selesai' };
@@ -120,83 +120,8 @@ export default function OrderEntry() {
     }
   };
 
-  const handleTomorrowClick = async () => {
-    const tomorrow = getLocalOperationalTomorrow();
-    const today = getLocalOperationalDate();
-    const rotiMaterial = materials.find((m) => m.name.toLowerCase().includes('roti tawar'));
-
-    setOrderDate(tomorrow);
-    setRotiReferenceDate(today);
-    setRotiDetail(null);
-    setRotiError(null);
-    setRotiStockMap({});
-    setMatrix({});
-    setLoading(true);
-
-    let loadedSession = null;
-    let loadedMatrix = {};
-
-    try {
-      const res = await api.post('/api/orders/session', { order_date: tomorrow });
-      const fullRes = await api.get(`/api/orders/session/${res.data.id}`);
-      loadedSession = fullRes.data;
-      (fullRes.data.items || []).forEach((item) => {
-        loadedMatrix[`${item.outlet_id}_${item.material_id}`] = item.qty;
-      });
-      setSession(loadedSession);
-      setMatrix(loadedMatrix);
-    } finally {
-      setLoading(false);
-    }
-
-    // Auto-hitung roti hanya jika session draft dan belum ada data roti tersimpan
-    if (!rotiMaterial || loadedSession?.status !== 'draft') return;
-    const hasExistingRoti = (loadedSession.items || []).some(
-      (i) => i.material_id === rotiMaterial.id && i.qty > 0
-    );
-    if (hasExistingRoti) return;
-
-    setRotiLoading(true);
-    try {
-      const result = await previewRotiOrder({ orderDate: tomorrow, referenceDate: today });
-      const newMatrix = { ...loadedMatrix };
-      const savePromises = [];
-      const stockMap = {};
-
-      result.branches.forEach((branch) => {
-        const outlet = outlets.find(
-          (o) => o.name.toLowerCase() === branch.display_name.toLowerCase()
-        );
-        if (!outlet) return;
-        const key = `${outlet.id}_${rotiMaterial.id}`;
-        const isOpen = outletOpen[outlet.id] !== false;
-        const days = outletDays[outlet.id] ?? 2;
-        const qty = !isOpen ? 0 : days === 1 ? Math.ceil(branch.need / 2) : branch.need;
-        newMatrix[key] = qty;
-        stockMap[outlet.id] = { current_stock: branch.current_stock, min_stock: branch.min_stock };
-        savePromises.push(
-          api.post(`/api/orders/session/${loadedSession.id}/request`, {
-            outlet_id: outlet.id,
-            material_id: rotiMaterial.id,
-            qty,
-          })
-        );
-      });
-
-      setMatrix(newMatrix);
-      setRotiDetail(result);
-      setRotiStockMap(stockMap);
-
-      if (savePromises.length > 0) {
-        setSaving(true);
-        await Promise.all(savePromises).finally(() => setSaving(false));
-      }
-    } catch (e) {
-      const msg = e.response?.data?.error;
-      setRotiError(msg || 'Gagal mengambil data stok roti. Coba klik "Hitung Otomatis" secara manual.');
-    } finally {
-      setRotiLoading(false);
-    }
+  const handleTomorrowClick = () => {
+    handleDateChange({ target: { value: getLocalOperationalTomorrow() } });
   };
 
   const handleCellChange = async (outletId, materialId, value) => {
@@ -455,14 +380,47 @@ export default function OrderEntry() {
                       <div className="leading-tight">{mat.name}</div>
                       <div className="text-xs text-brand-orange leading-none">{mat.purchase_unit}</div>
                       {mat.name.toLowerCase().includes('roti tawar') && !isReadOnly && (
-                        <button
-                          type="button"
-                          onClick={handleRotiAutoFill}
-                          disabled={rotiLoading}
-                          className="mt-1 text-xs px-2 py-0.5 rounded border border-brand-red text-brand-red hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                        >
-                          {rotiLoading ? 'Menghitung...' : 'Hitung Otomatis'}
-                        </button>
+                        <div className="mt-1.5 flex flex-col gap-1">
+                          <div className="text-xs text-gray-400">Pakai stok tgl:</div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setRotiReferenceDate(getLocalOperationalYesterday())}
+                              className={`text-xs px-1.5 py-0.5 rounded border transition-colors ${
+                                rotiReferenceDate === getLocalOperationalYesterday()
+                                  ? 'bg-brand-red text-white border-brand-red'
+                                  : 'border-gray-300 text-gray-500 hover:border-brand-red hover:text-brand-red'
+                              }`}
+                            >
+                              Kemarin
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRotiReferenceDate(getLocalOperationalDate())}
+                              className={`text-xs px-1.5 py-0.5 rounded border transition-colors ${
+                                rotiReferenceDate === getLocalOperationalDate()
+                                  ? 'bg-brand-red text-white border-brand-red'
+                                  : 'border-gray-300 text-gray-500 hover:border-brand-red hover:text-brand-red'
+                              }`}
+                            >
+                              Hari Ini
+                            </button>
+                            <input
+                              type="date"
+                              value={rotiReferenceDate}
+                              onChange={(e) => setRotiReferenceDate(e.target.value)}
+                              className="text-xs border border-gray-200 rounded px-1 py-0.5 text-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-red w-[110px]"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleRotiAutoFill}
+                            disabled={rotiLoading}
+                            className="text-xs px-2 py-0.5 rounded border border-brand-red text-brand-red hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+                          >
+                            {rotiLoading ? 'Menghitung...' : 'Hitung Otomatis'}
+                          </button>
+                        </div>
                       )}
                     </td>
                     {outlets.map((outlet) => {

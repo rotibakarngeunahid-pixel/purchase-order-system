@@ -58,6 +58,17 @@ export function getLocalOperationalDate() {
   return wita.toISOString().split('T')[0];
 }
 
+// Tanggal operasional kemarin dalam WITA (H-1 dari getLocalOperationalDate)
+export function getLocalOperationalYesterday() {
+  const now = new Date();
+  const wita = new Date(now.getTime() + 8 * 3600 * 1000);
+  if (wita.getUTCHours() < 3) {
+    wita.setUTCDate(wita.getUTCDate() - 1);
+  }
+  wita.setUTCDate(wita.getUTCDate() - 1);
+  return wita.toISOString().split('T')[0];
+}
+
 // Tanggal operasional besok dalam WITA (H+1 dari getLocalOperationalDate)
 export function getLocalOperationalTomorrow() {
   const now = new Date();
