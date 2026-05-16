@@ -13,8 +13,9 @@ router.get('/:po_id', async (req, res) => {
       supplier:suppliers(id, name, wa_number),
       session:order_sessions(id, order_date),
       items:purchase_order_items(
-        id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit),
+        id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
+        source, adjustment_note, created_at,
+        material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, price_per_purchase_unit)
       )
     `)
@@ -22,6 +23,17 @@ router.get('/:po_id', async (req, res) => {
     .single();
 
   if (error) return res.status(404).json({ error: 'PO tidak ditemukan' });
+
+  // Urutkan: item ordered dulu, lalu adjustment berdasarkan created_at
+  if (po.items) {
+    po.items.sort((a, b) => {
+      const srcA = a.source || 'ordered';
+      const srcB = b.source || 'ordered';
+      if (srcA !== srcB) return srcA === 'ordered' ? -1 : 1;
+      return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+    });
+  }
+
   res.json(po);
 });
 
@@ -44,51 +56,108 @@ router.get('/', async (req, res) => {
   res.json(data);
 });
 
-// PUT catat penerimaan barang
+// PUT catat penerimaan barang (mendukung item adjustment)
 router.put('/:po_id/receive', async (req, res) => {
   const { po_id } = req.params;
-  const { items, notes } = req.body;
+  const { items, deleted_adjustment_item_ids, notes } = req.body;
 
   if (!items || !Array.isArray(items)) {
     return res.status(400).json({ error: 'items wajib berupa array' });
   }
 
-  // Update setiap item (termasuk variant_id jika dipilih)
+  // Validasi payload
   for (const item of items) {
-    const { id, qty_received, price_actual, variant_id } = item;
-    if (!id) continue;
-
-    const updatePayload = { qty_received, price_actual };
-    if (variant_id !== undefined) updatePayload.variant_id = variant_id || null;
-
-    const { error: itemError } = await supabase
-      .from('purchase_order_items')
-      .update(updatePayload)
-      .eq('id', id)
-      .eq('po_id', po_id);
-
-    if (itemError) return res.status(500).json({ error: itemError.message });
+    const source = item.source || 'ordered';
+    if (source === 'ordered' && !item.id) {
+      return res.status(400).json({ error: 'Item PO awal harus memiliki id' });
+    }
+    if (source === 'adjustment' && !item.id && !item.material_id) {
+      return res.status(400).json({ error: 'Item adjustment baru harus memiliki material_id' });
+    }
+    if (source === 'adjustment' && !(Number(item.qty_received) > 0)) {
+      return res.status(400).json({ error: 'Item adjustment harus memiliki qty_received lebih dari 0' });
+    }
   }
 
-  // Hitung total aktual
-  const { data: updatedItems, error: fetchError } = await supabase
+  // Hapus item adjustment yang ditandai deleted
+  if (deleted_adjustment_item_ids && deleted_adjustment_item_ids.length > 0) {
+    const { error: delError } = await supabase
+      .from('purchase_order_items')
+      .delete()
+      .in('id', deleted_adjustment_item_ids)
+      .eq('po_id', po_id)
+      .eq('source', 'adjustment');
+    if (delError) return res.status(500).json({ error: delError.message });
+  }
+
+  // Proses setiap item
+  for (const item of items) {
+    const source = item.source || 'ordered';
+
+    if (source === 'ordered' && item.id) {
+      const updatePayload = {
+        qty_received: item.qty_received,
+        price_actual: item.price_actual,
+      };
+      if (item.variant_id !== undefined) updatePayload.variant_id = item.variant_id || null;
+
+      const { error: itemError } = await supabase
+        .from('purchase_order_items')
+        .update(updatePayload)
+        .eq('id', item.id)
+        .eq('po_id', po_id);
+
+      if (itemError) return res.status(500).json({ error: itemError.message });
+
+    } else if (source === 'adjustment') {
+      if (item.id) {
+        // Update adjustment existing
+        const { error: itemError } = await supabase
+          .from('purchase_order_items')
+          .update({
+            qty_received: item.qty_received,
+            price_actual: item.price_actual,
+            variant_id: item.variant_id || null,
+            adjustment_note: item.adjustment_note || null,
+          })
+          .eq('id', item.id)
+          .eq('po_id', po_id)
+          .eq('source', 'adjustment');
+        if (itemError) return res.status(500).json({ error: itemError.message });
+      } else {
+        // Insert adjustment baru
+        const { error: itemError } = await supabase
+          .from('purchase_order_items')
+          .insert({
+            po_id,
+            material_id: item.material_id,
+            variant_id: item.variant_id || null,
+            qty_ordered: 0,
+            qty_received: item.qty_received,
+            price_actual: item.price_actual,
+            source: 'adjustment',
+            adjustment_note: item.adjustment_note || null,
+          });
+        if (itemError) return res.status(500).json({ error: itemError.message });
+      }
+    }
+  }
+
+  // Hitung ulang total_actual dari DB (semua item termasuk adjustment)
+  const { data: allItems, error: fetchError } = await supabase
     .from('purchase_order_items')
-    .select('qty_received, price_actual')
+    .select('qty_received, price_actual, qty_ordered, source, material:materials(name)')
     .eq('po_id', po_id);
 
   if (fetchError) return res.status(500).json({ error: fetchError.message });
 
-  const totalActual = updatedItems.reduce((sum, item) => {
+  const totalActual = allItems.reduce((sum, item) => {
     return sum + (Number(item.qty_received || 0) * Number(item.price_actual || 0));
   }, 0);
 
-  // Cek discrepancy: item yang qty_received < qty_ordered atau = 0
-  const { data: allItems } = await supabase
-    .from('purchase_order_items')
-    .select('qty_ordered, qty_received, material:materials(name)')
-    .eq('po_id', po_id);
-
-  const discrepancies = (allItems || []).filter(
+  // Cek discrepancy hanya dari item source = ordered
+  const orderedItems = allItems.filter((item) => (item.source || 'ordered') === 'ordered');
+  const discrepancies = orderedItems.filter(
     (item) => Number(item.qty_received ?? item.qty_ordered) < Number(item.qty_ordered)
   );
 
@@ -117,7 +186,7 @@ router.put('/:po_id/receive', async (req, res) => {
 
   if (poError) return res.status(500).json({ error: poError.message });
 
-  // Cek apakah semua PO dalam sesi sudah received/received_partial
+  // Cek apakah semua PO dalam sesi sudah received
   if (po.session_id) {
     const { data: allPOs } = await supabase
       .from('purchase_orders')
@@ -138,7 +207,7 @@ router.put('/:po_id/receive', async (req, res) => {
   res.json({ ...po, has_discrepancy: hasDiscrepancy });
 });
 
-// DELETE hapus PO yang masih pending (belum dicatat penerimaan)
+// DELETE hapus PO yang masih pending/confirmed
 router.delete('/:po_id', async (req, res) => {
   const { po_id } = req.params;
 
@@ -160,7 +229,6 @@ router.delete('/:po_id', async (req, res) => {
 
   if (deleteError) return res.status(500).json({ error: deleteError.message });
 
-  // Kembalikan sesi ke "sent" jika sebelumnya completed
   if (po.session_id) {
     await supabase
       .from('order_sessions')
@@ -172,7 +240,7 @@ router.delete('/:po_id', async (req, res) => {
   res.json({ success: true });
 });
 
-// PUT reset PO ke status pending (hapus data penerimaan)
+// PUT reset PO ke pending (hapus adjustment, kosongkan data penerimaan ordered)
 router.put('/:po_id/reset', async (req, res) => {
   const { po_id } = req.params;
 
@@ -184,13 +252,21 @@ router.put('/:po_id/reset', async (req, res) => {
 
   if (fetchError || !po) return res.status(404).json({ error: 'PO tidak ditemukan' });
 
-  // Reset semua item: qty_received dan price_actual kembali ke null
-  const { data: items } = await supabase
+  // Hapus semua item adjustment
+  await supabase
+    .from('purchase_order_items')
+    .delete()
+    .eq('po_id', po_id)
+    .eq('source', 'adjustment');
+
+  // Reset item ordered: qty_received dan price_actual kembali null
+  const { data: orderedItems } = await supabase
     .from('purchase_order_items')
     .select('id')
-    .eq('po_id', po_id);
+    .eq('po_id', po_id)
+    .eq('source', 'ordered');
 
-  for (const item of (items || [])) {
+  for (const item of (orderedItems || [])) {
     await supabase
       .from('purchase_order_items')
       .update({ qty_received: null, price_actual: null })
@@ -207,7 +283,6 @@ router.put('/:po_id/reset', async (req, res) => {
 
   if (updateError) return res.status(500).json({ error: updateError.message });
 
-  // Jika sesi sudah completed, kembalikan ke sent
   if (po.session_id) {
     await supabase
       .from('order_sessions')
