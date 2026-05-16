@@ -1007,6 +1007,8 @@ export default function PurchaseRecord() {
   const [statusFilter, setStatusFilter] = useState('');
   const [confirmReset, setConfirmReset] = useState(null);
   const [resetting, setResetting] = useState(false);
+  const [openingPOId, setOpeningPOId] = useState(null);
+  const [actionError, setActionError] = useState('');
 
   useEffect(() => {
     loadPOs();
@@ -1026,11 +1028,16 @@ export default function PurchaseRecord() {
   }
 
   const openModal = async (po) => {
+    setOpeningPOId(po.id);
+    setActionError('');
     try {
       const res = await api.get(`/api/purchase/${po.id}`);
       setSelectedPO(res.data);
     } catch (err) {
       console.error(err);
+      setActionError(err.response?.data?.error || 'Gagal membuka detail PO');
+    } finally {
+      setOpeningPOId(null);
     }
   };
 
@@ -1136,6 +1143,12 @@ export default function PurchaseRecord() {
         </select>
       </div>
 
+      {actionError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+          {actionError}
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="w-8 h-8 border-4 border-brand-red border-t-transparent rounded-full animate-spin" />
@@ -1179,10 +1192,16 @@ export default function PurchaseRecord() {
                 </span>
                 {po.status === 'pending' || po.status === 'confirmed' ? (
                   <div className="flex gap-2">
-                    <button onClick={() => openModal(po)} className="btn-primary text-sm">
-                      Catat Penerimaan
+                    <button
+                      type="button"
+                      onClick={() => openModal(po)}
+                      disabled={openingPOId === po.id}
+                      className="btn-primary text-sm"
+                    >
+                      {openingPOId === po.id ? 'Membuka...' : 'Catat Penerimaan'}
                     </button>
                     <button
+                      type="button"
                       onClick={() => setConfirmReset(po)}
                       title="Hapus PO ini dari daftar"
                       className="px-3 py-2 rounded-lg text-sm font-medium text-red-500 border border-red-300 hover:bg-red-50"
@@ -1192,10 +1211,16 @@ export default function PurchaseRecord() {
                   </div>
                 ) : (
                   <div className="flex gap-2">
-                    <button onClick={() => openModal(po)} className="btn-outline text-sm">
-                      Edit
+                    <button
+                      type="button"
+                      onClick={() => openModal(po)}
+                      disabled={openingPOId === po.id}
+                      className="btn-outline text-sm"
+                    >
+                      {openingPOId === po.id ? 'Membuka...' : 'Edit'}
                     </button>
                     <button
+                      type="button"
                       onClick={() => setConfirmReset(po)}
                       title="Reset data penerimaan ke Pending"
                       className="px-3 py-2 rounded-lg text-sm font-medium text-orange-600 border border-orange-300 hover:bg-orange-50"
