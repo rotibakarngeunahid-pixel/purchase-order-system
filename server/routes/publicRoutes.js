@@ -2,6 +2,66 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 
+const FINAL_RECEIPT_STATUSES = ['received', 'received_partial'];
+
+function buildAvailabilityMap(receiptItems) {
+  return (receiptItems || []).reduce((map, item) => {
+    const materialId = item.material_id;
+    if (!materialId) return map;
+
+    if (!map[materialId]) {
+      map[materialId] = { total_received: 0, has_final_receipt: false };
+    }
+
+    map[materialId].total_received += Number(item.qty_received || 0);
+    map[materialId].has_final_receipt = true;
+    return map;
+  }, {});
+}
+
+function isMissingSourceColumnError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('source') && (
+    message.includes('column') ||
+    message.includes('schema cache') ||
+    message.includes('could not find')
+  );
+}
+
+async function getReceiptAvailabilityMap(sessionId) {
+  const { data: finalPOs, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('id')
+    .eq('session_id', sessionId)
+    .in('status', FINAL_RECEIPT_STATUSES);
+
+  if (poError) throw poError;
+
+  const finalPOIds = (finalPOs || []).map((po) => po.id).filter(Boolean);
+  if (finalPOIds.length === 0) return {};
+
+  let receiptQuery = supabase
+    .from('purchase_order_items')
+    .select('material_id, qty_received, source')
+    .in('po_id', finalPOIds)
+    .or('source.eq.ordered,source.is.null');
+
+  let { data: receiptItems, error: receiptError } = await receiptQuery;
+
+  if (receiptError && isMissingSourceColumnError(receiptError)) {
+    const retry = await supabase
+      .from('purchase_order_items')
+      .select('material_id, qty_received')
+      .in('po_id', finalPOIds);
+
+    receiptItems = retry.data;
+    receiptError = retry.error;
+  }
+
+  if (receiptError) throw receiptError;
+  return buildAvailabilityMap(receiptItems);
+}
+
 // Distribusi: publik, tidak perlu login
 router.get('/distribution', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
@@ -24,8 +84,20 @@ router.get('/distribution', async (req, res) => {
 
   if (itemsError) return res.status(500).json({ error: itemsError.message });
 
+  let availabilityMap = {};
+  try {
+    availabilityMap = await getReceiptAvailabilityMap(session.id);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
   const outletMap = {};
   (items || []).forEach((item) => {
+    const availability = availabilityMap[item.material_id];
+    if (availability?.has_final_receipt && availability.total_received <= 0) {
+      return;
+    }
+
     const oid = item.outlet_id;
     if (!outletMap[oid]) {
       outletMap[oid] = { outlet: item.outlet, items: [] };
@@ -39,7 +111,7 @@ router.get('/distribution', async (req, res) => {
     });
   });
 
-  res.json({ date, session, outlets: Object.values(outletMap) });
+  res.json({ date, session, outlets: Object.values(outletMap), availability_applied: true });
 });
 
 // Outlet aktif: publik, untuk dropdown di halaman distribusi
