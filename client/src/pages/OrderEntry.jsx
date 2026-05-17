@@ -286,7 +286,8 @@ export default function OrderEntry() {
   };
 
   const handleRotiAutoFill = async () => {
-    if (session?.status !== 'draft') return;
+    // Hanya block jika sesi sudah dikirim/selesai; izinkan jika sesi belum ada (null = draft baru)
+    if (session && session.status !== 'draft') return;
     const rotiMaterial = materials.find((m) =>
       m.name.toLowerCase().includes('roti tawar')
     );
@@ -305,7 +306,7 @@ export default function OrderEntry() {
       });
 
       const newMatrix = { ...matrix };
-      const savePromises = [];
+      const pendingSaves = []; // kumpulkan dulu, baru save setelah session dipastikan ada
       const stockMap = {};
 
       result.branches.forEach((branch) => {
@@ -336,26 +337,33 @@ export default function OrderEntry() {
         }
         delete pendingValues.current[key];
 
-        if (session && session.status === 'draft') {
-          savePromises.push(
-            api.post(`/api/orders/session/${session.id}/request`, {
-              outlet_id: outlet.id,
-              material_id: rotiMaterial.id,
-              qty,
-            })
-          );
-        }
+        pendingSaves.push({ outletId: outlet.id, materialId: rotiMaterial.id, qty });
       });
 
       setMatrix(newMatrix);
       setRotiDetail(result);
       setRotiStockMap(stockMap);
 
-      if (savePromises.length > 0) {
+      if (pendingSaves.length > 0) {
         setSaveStatus('saving');
         try {
-          await Promise.all(savePromises);
-          showSaved();
+          // Buat session jika belum ada (user langsung klik Hitung Otomatis tanpa input apapun)
+          let sess = sessionRef.current;
+          if (!sess) {
+            sess = await getOrCreateSession(orderDateRef.current);
+          }
+          if (sess.status === 'draft') {
+            await Promise.all(
+              pendingSaves.map((s) =>
+                api.post(`/api/orders/session/${sess.id}/request`, {
+                  outlet_id: s.outletId,
+                  material_id: s.materialId,
+                  qty: s.qty,
+                })
+              )
+            );
+            showSaved();
+          }
         } catch (err) {
           setSaveStatus('error');
           setSaveError('Gagal menyimpan hasil kalkulasi Roti Tawar.');
@@ -363,7 +371,8 @@ export default function OrderEntry() {
       }
 
       // Simpan metadata holiday per outlet per sesi
-      if (session?.id) {
+      const currentSess = sessionRef.current;
+      if (currentSess?.id) {
         const metaRecords = outlets.map((o) => {
           const info = holidayMap[o.id] || null;
           const isOverridden = outletOverride[o.id] || false;
@@ -381,7 +390,7 @@ export default function OrderEntry() {
           };
         });
         try {
-          await saveHolidayMetadataBulk(session.id, metaRecords);
+          await saveHolidayMetadataBulk(currentSess.id, metaRecords);
         } catch {
           // Metadata save failure tidak blokir alur utama
         }

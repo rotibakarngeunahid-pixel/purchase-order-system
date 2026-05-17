@@ -241,8 +241,8 @@ export default function OutletOrderInput({
         {/* ─── Outlet Card ─── */}
         <div className="card overflow-hidden">
 
-          {/* Header outlet */}
-          <div className="px-4 py-3.5 border-b border-gray-100 flex items-center justify-between gap-3">
+          {/* Header outlet — sticky saat scroll agar nama cabang selalu terlihat */}
+          <div className="sticky top-0 z-20 px-4 py-3.5 border-b border-gray-100 bg-white shadow-sm flex items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3
