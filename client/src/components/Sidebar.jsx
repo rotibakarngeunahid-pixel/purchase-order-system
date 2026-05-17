@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   BarChart3,
+  CalendarOff,
   ClipboardCheck,
   ClipboardList,
   Database,
@@ -20,6 +21,7 @@ const navItems = [
   { to: '/distribution', label: 'Distribution Listing', icon: Truck },
   { to: '/reports', label: 'Laporan', icon: FileBarChart },
   { to: '/analytics', label: 'Analitik', icon: BarChart3 },
+  { to: '/holidays', label: 'Hari Libur', icon: CalendarOff },
   { to: '/master', label: 'Master Data', icon: Database },
   { to: '/settings', label: 'Pengaturan', icon: Settings },
 ];

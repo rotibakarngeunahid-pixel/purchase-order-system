@@ -6,6 +6,7 @@ import api, {
   getLocalOperationalTomorrow,
 } from '../lib/api';
 import { previewRotiOrder } from '../services/rotiTawarService';
+import { checkHolidaysBulk, saveHolidayMetadataBulk, getNextDate } from '../services/holidayService';
 import { getMatrixKey } from '../lib/orderHelpers';
 import OrderEntryHeader from '../components/order/OrderEntryHeader';
 import OrderSummaryBar from '../components/order/OrderSummaryBar';
@@ -46,6 +47,10 @@ export default function OrderEntry() {
   const [rotiStockMap, setRotiStockMap] = useState({});
   const [outletOpen, setOutletOpen] = useState({});
   const [outletDays, setOutletDays] = useState({});
+  // Holiday state
+  const [holidayMap, setHolidayMap] = useState({}); // { [outlet_id]: holidayRecord | null }
+  const [outletOverride, setOutletOverride] = useState({}); // { [outlet_id]: true/false }
+  const [pendingOverrideOutletId, setPendingOverrideOutletId] = useState(null); // untuk confirmation modal
   const [inputMode, setInputMode] = useState(
     () => (typeof window !== 'undefined' && window.innerWidth < 1024 ? 'per-outlet' : 'matrix')
   );
@@ -58,6 +63,37 @@ export default function OrderEntry() {
   const orderDateRef = useRef(orderDate);
   sessionRef.current = session;
   orderDateRef.current = orderDate;
+
+  // --- Holiday helpers ---
+  // overrideSnapshot: pass {} saat tanggal baru di-reset, atau outletOverride saat ini untuk kasus lain
+  const applyHolidayMap = (map, activeOutlets, overrideSnapshot) => {
+    const override = overrideSnapshot ?? outletOverride;
+    setHolidayMap(map);
+    // Auto-set outletDays berdasarkan deteksi holiday; tidak mengubah outlet yang sudah di-override
+    setOutletDays((prev) => {
+      const next = { ...prev };
+      (activeOutlets || []).forEach((o) => {
+        const holiday = map[o.id];
+        const isOverridden = override[o.id];
+        if (holiday && !isOverridden) {
+          next[o.id] = 1;
+        } else if (!holiday && !isOverridden) {
+          next[o.id] = 2;
+        }
+      });
+      return next;
+    });
+  };
+
+  const checkHolidays = async (date, activeOutlets, overrideSnapshot) => {
+    try {
+      const nextDate = getNextDate(date);
+      const result = await checkHolidaysBulk(nextDate);
+      applyHolidayMap(result.holidays || {}, activeOutlets, overrideSnapshot);
+    } catch {
+      // Jika holiday check gagal, fallback ke default 2 hari (BR-011)
+    }
+  };
 
   // --- Effects ---
   useEffect(() => {
@@ -97,6 +133,8 @@ export default function OrderEntry() {
       });
       setOutletOpen(openMap);
       setOutletDays(daysMap);
+      // Cek holiday berdasarkan tanggal order saat ini
+      await checkHolidays(orderDateRef.current, activeOutlets);
     } catch (err) {
       console.error('loadMasterData error:', err);
     }
@@ -142,6 +180,8 @@ export default function OrderEntry() {
     setRotiError(null);
     setRotiStockMap({});
     setMatrix({});
+    // Reset override saat tanggal berubah (BR-016: override per transaksi)
+    setOutletOverride({});
 
     // Clear any pending saves for the old session
     Object.keys(saveTimers.current).forEach((k) => {
@@ -152,8 +192,12 @@ export default function OrderEntry() {
 
     setLoading(true);
     try {
-      const res = await api.post('/api/orders/session', { order_date: date });
-      const fullRes = await api.get(`/api/orders/session/${res.data.id}`);
+      const [sessionRes] = await Promise.all([
+        api.post('/api/orders/session', { order_date: date }),
+        // Kirim {} sebagai override karena saat tanggal berubah, semua override di-reset
+        checkHolidays(date, outlets, {}),
+      ]);
+      const fullRes = await api.get(`/api/orders/session/${sessionRes.data.id}`);
       applySession(fullRes.data);
     } finally {
       setLoading(false);
@@ -315,6 +359,29 @@ export default function OrderEntry() {
           setSaveError('Gagal menyimpan hasil kalkulasi Roti Tawar.');
         }
       }
+
+      // Simpan metadata holiday per outlet per sesi
+      if (session?.id) {
+        const metaRecords = outlets.map((o) => {
+          const holiday = holidayMap[o.id] || null;
+          const isOverridden = outletOverride[o.id] || false;
+          const calcDays = outletDays[o.id] ?? 2;
+          return {
+            outlet_id: o.id,
+            holiday_detected: !!holiday,
+            override_holiday: isOverridden,
+            calculation_days: calcDays,
+            holiday_date_detected: holiday ? holiday.holiday_date : null,
+            holiday_name_detected: holiday ? (holiday.holiday_name || null) : null,
+            holiday_id_detected: holiday ? holiday.id : null,
+          };
+        });
+        try {
+          await saveHolidayMetadataBulk(session.id, metaRecords);
+        } catch {
+          // Metadata save failure tidak blokir alur utama
+        }
+      }
     } catch (e) {
       const msg = e.response?.data?.error;
       setRotiError(msg || 'Gagal mengambil data stok. Coba lagi.');
@@ -328,6 +395,26 @@ export default function OrderEntry() {
 
   const handleToggleDays = (id) =>
     setOutletDays((prev) => ({ ...prev, [id]: prev[id] === 1 ? 2 : 1 }));
+
+  // Override: tampilkan confirmation modal
+  const handleRequestOverride = (outletId) => {
+    setPendingOverrideOutletId(outletId);
+  };
+
+  // Override dikonfirmasi: set override aktif, kembalikan ke 2 hari
+  const handleConfirmOverride = () => {
+    const id = pendingOverrideOutletId;
+    if (!id) return;
+    setOutletOverride((prev) => ({ ...prev, [id]: true }));
+    setOutletDays((prev) => ({ ...prev, [id]: 2 }));
+    setPendingOverrideOutletId(null);
+  };
+
+  // Batalkan override: kembali ke 1 hari
+  const handleCancelOverride = (outletId) => {
+    setOutletOverride((prev) => ({ ...prev, [outletId]: false }));
+    setOutletDays((prev) => ({ ...prev, [outletId]: 1 }));
+  };
 
   // --- Derived ---
   const isReadOnly = !!(session?.status && session.status !== 'draft');
@@ -365,6 +452,10 @@ export default function OrderEntry() {
     materials,
     matrix,
     isReadOnly,
+    holidayMap,
+    outletOverride,
+    onRequestOverride: handleRequestOverride,
+    onCancelOverride: handleCancelOverride,
   };
 
   const rotiPanelProps = {
@@ -484,6 +575,57 @@ export default function OrderEntry() {
       <p className="text-xs text-gray-400 mt-4">
         * Kosongkan atau isi 0 untuk tidak memesan bahan tersebut. Data tersimpan otomatis.
       </p>
+
+      {/* Override Confirmation Modal */}
+      {pendingOverrideOutletId && (() => {
+        const outlet = outlets.find((o) => o.id === pendingOverrideOutletId);
+        const holiday = holidayMap[pendingOverrideOutletId];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+              <h3 className="font-semibold text-gray-800 text-lg mb-2">Override Hari Libur?</h3>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm space-y-1">
+                <p className="font-medium text-yellow-800">{outlet?.name}</p>
+                {holiday && (
+                  <>
+                    <p className="text-yellow-700">
+                      Tanggal libur:{' '}
+                      {new Date(`${holiday.holiday_date}T00:00:00`).toLocaleDateString('id-ID', {
+                        day: 'numeric', month: 'long', year: 'numeric',
+                      })}
+                    </p>
+                    {holiday.holiday_name && (
+                      <p className="text-yellow-600">{holiday.holiday_name}</p>
+                    )}
+                  </>
+                )}
+              </div>
+              <p className="text-sm text-gray-600 mb-1">
+                Dengan mengaktifkan override:
+              </p>
+              <ul className="text-sm text-gray-600 list-disc list-inside mb-4 space-y-0.5">
+                <li>Order roti cabang ini akan dihitung untuk <strong>2 hari</strong>.</li>
+                <li>Data kalender hari libur <strong>tidak berubah</strong>.</li>
+                <li>Override hanya berlaku untuk order ini.</li>
+              </ul>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setPendingOverrideOutletId(null)}
+                  className="btn-outline text-sm"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={handleConfirmOverride}
+                  className="btn-primary text-sm"
+                >
+                  Ya, Override 2 Hari
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

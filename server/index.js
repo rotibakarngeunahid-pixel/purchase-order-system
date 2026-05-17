@@ -18,6 +18,7 @@ const settingsRouter = require('./routes/settings');
 const reportsRouter = require('./routes/reports');
 const rotiTawarRouter = require('./routes/rotiTawar');
 const purchaseReportRouter = require('./routes/purchaseReport');
+const holidaysRouter = require('./routes/holidays');
 
 const app = express();
 
@@ -58,6 +59,7 @@ app.use('/api/settings', authMiddleware, settingsRouter);
 app.use('/api/reports', authMiddleware, reportsRouter);
 app.use('/api/roti-tawar', authMiddleware, rotiTawarRouter);
 app.use('/api/purchase-report', authMiddleware, purchaseReportRouter);
+app.use('/api/holidays', authMiddleware, holidaysRouter);
 
 // Global error handler
 app.use((err, req, res, next) => {
