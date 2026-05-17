@@ -20,8 +20,8 @@ const STATUS_LABEL = { draft: 'Draft', sent: 'Terkirim', completed: 'Selesai' };
 const STATUS_CLASS = { draft: 'badge-draft', sent: 'badge-sent', completed: 'badge-completed' };
 
 const INPUT_MODES = [
-  { id: 'matrix', label: 'Matrix' },
   { id: 'per-outlet', label: 'Per Outlet' },
+  { id: 'matrix', label: 'Matrix' },
   { id: 'per-bahan', label: 'Per Bahan' },
 ];
 
@@ -52,9 +52,7 @@ export default function OrderEntry() {
   const [holidayMap, setHolidayMap] = useState({});
   const [outletOverride, setOutletOverride] = useState({}); // { [outlet_id]: true/false }
   const [pendingOverrideOutletId, setPendingOverrideOutletId] = useState(null); // untuk confirmation modal
-  const [inputMode, setInputMode] = useState(
-    () => (typeof window !== 'undefined' && window.innerWidth < 1024 ? 'per-outlet' : 'matrix')
-  );
+  const [inputMode, setInputMode] = useState('per-outlet');
 
   // Refs for use inside async callbacks
   const saveTimers = useRef({});
@@ -569,16 +567,16 @@ export default function OrderEntry() {
           )}
         </div>
 
-        {/* Right sidebar — desktop only */}
+        {/* Right sidebar — desktop only, OutletControls disembunyikan di mode per-outlet karena sudah ada di panel kiri */}
         <div className="w-72 flex-shrink-0 hidden lg:flex flex-col gap-4">
-          <OutletControlsPanel {...outletControlProps} />
+          {inputMode !== 'per-outlet' && <OutletControlsPanel {...outletControlProps} />}
           <RotiTawarPanel {...rotiPanelProps} />
         </div>
       </div>
 
       {/* Mobile/tablet: panels below input */}
       <div className="lg:hidden mt-4 flex flex-col gap-4">
-        <OutletControlsPanel {...outletControlProps} />
+        {inputMode !== 'per-outlet' && <OutletControlsPanel {...outletControlProps} />}
         <RotiTawarPanel {...rotiPanelProps} />
       </div>
 
