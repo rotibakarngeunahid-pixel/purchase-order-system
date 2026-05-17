@@ -49,6 +49,7 @@ export default function OrderEntry() {
   const [outletDays, setOutletDays] = useState({});
   // Holiday state
   // holidayMap: { [outlet_id]: { date1_holiday, date2_holiday, calculation_days } } — hanya outlet yang ada libur
+  const [holidayMap, setHolidayMap] = useState({});
   const [outletOverride, setOutletOverride] = useState({}); // { [outlet_id]: true/false }
   const [pendingOverrideOutletId, setPendingOverrideOutletId] = useState(null); // untuk confirmation modal
   const [inputMode, setInputMode] = useState(
@@ -553,6 +554,10 @@ export default function OrderEntry() {
               outletDays={outletDays}
               onToggleOpen={handleToggleOpen}
               onToggleDays={handleToggleDays}
+              holidayMap={holidayMap}
+              outletOverride={outletOverride}
+              onRequestOverride={handleRequestOverride}
+              onCancelOverride={handleCancelOverride}
             />
           )}
           {inputMode === 'per-bahan' && (

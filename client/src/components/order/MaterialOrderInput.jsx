@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Zap, Loader2 } from 'lucide-react';
 import { getMatrixKey, isRotiTawar } from '../../lib/orderHelpers';
+import StepperInput from './StepperInput';
 
 export default function MaterialOrderInput({
   outlets,
@@ -46,7 +47,9 @@ export default function MaterialOrderInput({
                   active ? 'bg-red-50' : 'hover:bg-gray-50'
                 }`}
               >
-                <span className="text-xs font-mono text-gray-400 w-14 flex-shrink-0">{mat.code}</span>
+                <span className="text-xs font-mono text-gray-400 w-14 flex-shrink-0">
+                  {mat.code}
+                </span>
                 <span
                   className={`flex-1 text-sm font-medium truncate ${
                     active ? 'text-brand-red' : 'text-gray-700'
@@ -62,8 +65,8 @@ export default function MaterialOrderInput({
                 <span className="text-xs text-brand-orange flex-shrink-0">{mat.purchase_unit}</span>
                 {total > 0 && (
                   <span
-                    className={`text-xs tabular-nums flex-shrink-0 ${
-                      active ? 'text-brand-red font-semibold' : 'text-gray-400'
+                    className={`text-xs tabular-nums flex-shrink-0 font-semibold ${
+                      active ? 'text-brand-red' : 'text-gray-400'
                     }`}
                   >
                     {total}
@@ -76,7 +79,7 @@ export default function MaterialOrderInput({
       </div>
 
       {selectedMaterial && (
-        <div className="card">
+        <div className="card overflow-hidden">
           {/* Material header */}
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
             <div>
@@ -120,7 +123,7 @@ export default function MaterialOrderInput({
             </div>
           </div>
 
-          {/* Outlet list */}
+          {/* Outlet list with stepper */}
           <div className="divide-y divide-gray-50">
             {outlets.map((outlet) => {
               const key = getMatrixKey(outlet.id, selectedMaterial.id);
@@ -138,9 +141,7 @@ export default function MaterialOrderInput({
                     >
                       {outlet.name}
                     </div>
-                    {!open && (
-                      <div className="text-xs text-red-400">Tutup</div>
-                    )}
+                    {!open && <div className="text-xs text-red-400">Tutup</div>}
                     {stockInfo && (
                       <div
                         className={`text-xs mt-0.5 ${
@@ -148,17 +149,14 @@ export default function MaterialOrderInput({
                         }`}
                       >
                         Stok: {stockInfo.current_stock} / min {stockInfo.min_stock}
+                        {stockLow && ' ⚠'}
                       </div>
                     )}
                   </div>
-                  <input
-                    type="number"
-                    min="0"
-                    value={val === '' ? '' : val ?? ''}
-                    onChange={(e) => onCellChange(outlet.id, selectedMaterial.id, e.target.value)}
+                  <StepperInput
+                    value={val}
+                    onChange={(v) => onCellChange(outlet.id, selectedMaterial.id, v)}
                     disabled={isReadOnly}
-                    className="w-24 text-center border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red disabled:bg-gray-100 disabled:text-gray-400"
-                    placeholder="0"
                   />
                 </div>
               );
