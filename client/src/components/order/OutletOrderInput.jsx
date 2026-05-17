@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { ChevronLeft, ChevronRight, AlertTriangle, Check, Store } from 'lucide-react';
 import { getMatrixKey, isRotiTawar, calcTotalPerOutlet } from '../../lib/orderHelpers';
 import { DAY_NAMES } from '../../services/holidayService';
+import { getMaterialIcon, getMaterialHue } from '../../lib/materialIcons';
 import StepperInput from './StepperInput';
 
 function fmtDateShort(dateStr) {
@@ -366,45 +367,48 @@ export default function OutletOrderInput({
               const isRoti = isRotiTawar(mat);
               const stockInfo = isRoti ? rotiStockMap[selectedOutlet.id] : null;
               const stockLow = stockInfo && stockInfo.current_stock < stockInfo.min_stock;
+              const icon = getMaterialIcon(mat.name);
+              const hue = getMaterialHue(mat.name);
 
               return (
                 <div
                   key={mat.id}
-                  className={`rounded-xl border p-3 transition-all ${
+                  className={`rounded-xl border p-3.5 transition-all duration-200 hover:scale-[1.015] hover:shadow-md active:scale-100 cursor-default ${
                     isFilled
-                      ? 'border-green-200 bg-green-50'
-                      : 'border-gray-100 bg-gray-50 hover:border-gray-200 hover:bg-white'
+                      ? 'border-green-200 bg-green-50 shadow-sm'
+                      : `${hue.border} ${hue.bg} hover:shadow-sm`
                   }`}
                 >
+                  {/* Baris atas: icon + badge isi */}
+                  <div className="flex items-start justify-between mb-2">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0 ${
+                      isFilled ? 'bg-green-100' : hue.icon
+                    }`}>
+                      {icon}
+                    </div>
+                    {isFilled ? (
+                      <span className="text-xs font-bold bg-green-500 text-white px-2 py-0.5 rounded-full tabular-nums shadow-sm">
+                        ✓ {Number(val)}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-300 font-mono">{mat.code}</span>
+                    )}
+                  </div>
+
                   {/* Info bahan */}
-                  <div className="flex items-start justify-between mb-2.5">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-                        <span className="text-xs font-mono text-gray-400">{mat.code}</span>
-                        {isRoti && (
-                          <span className="text-xs bg-orange-100 text-orange-600 px-1 py-0.5 rounded">
-                            Roti Tawar
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-sm font-semibold text-gray-800 leading-tight">
-                        {mat.name}
-                      </div>
-                      <div className="text-xs text-brand-orange mt-0.5">{mat.purchase_unit}</div>
-                      {stockInfo && (
-                        <div
-                          className={`text-xs mt-0.5 ${
-                            stockLow ? 'text-red-500 font-semibold' : 'text-gray-400'
-                          }`}
-                        >
-                          Stok: {stockInfo.current_stock}/{stockInfo.min_stock}
-                          {stockLow ? ' ⚠' : ''}
-                        </div>
+                  <div className="mb-2.5">
+                    <div className="text-sm font-bold text-gray-800 leading-tight">{mat.name}</div>
+                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                      <span className="text-xs text-brand-orange font-medium">{mat.purchase_unit}</span>
+                      {isRoti && (
+                        <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full">
+                          Roti Tawar
+                        </span>
                       )}
                     </div>
-                    {isFilled && (
-                      <div className="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 ml-2 mt-0.5">
-                        <Check className="w-3 h-3 text-green-600" />
+                    {stockInfo && (
+                      <div className={`text-xs mt-1 flex items-center gap-1 ${stockLow ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>
+                        {stockLow ? '⚠' : '📊'} Stok: {stockInfo.current_stock}/{stockInfo.min_stock}
                       </div>
                     )}
                   </div>

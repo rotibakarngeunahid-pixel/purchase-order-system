@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Zap, Loader2 } from 'lucide-react';
 import { getMatrixKey, isRotiTawar } from '../../lib/orderHelpers';
+import { getMaterialIcon } from '../../lib/materialIcons';
 import StepperInput from './StepperInput';
 
 export default function MaterialOrderInput({
@@ -47,9 +48,7 @@ export default function MaterialOrderInput({
                   active ? 'bg-red-50' : 'hover:bg-gray-50'
                 }`}
               >
-                <span className="text-xs font-mono text-gray-400 w-14 flex-shrink-0">
-                  {mat.code}
-                </span>
+                <span className="text-xl flex-shrink-0 leading-none">{getMaterialIcon(mat.name)}</span>
                 <span
                   className={`flex-1 text-sm font-medium truncate ${
                     active ? 'text-brand-red' : 'text-gray-700'
@@ -65,7 +64,7 @@ export default function MaterialOrderInput({
                 <span className="text-xs text-brand-orange flex-shrink-0">{mat.purchase_unit}</span>
                 {total > 0 && (
                   <span
-                    className={`text-xs tabular-nums flex-shrink-0 font-semibold ${
+                    className={`text-xs tabular-nums flex-shrink-0 font-bold ${
                       active ? 'text-brand-red' : 'text-gray-400'
                     }`}
                   >
@@ -82,17 +81,20 @@ export default function MaterialOrderInput({
         <div className="card overflow-hidden">
           {/* Material header */}
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-xs text-gray-400 font-mono">{selectedMaterial.code}</span>
-                {isRoti && (
-                  <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">
-                    Roti Tawar
-                  </span>
-                )}
+            <div className="flex items-center gap-3">
+              <span className="text-3xl leading-none">{getMaterialIcon(selectedMaterial.name)}</span>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs text-gray-400 font-mono">{selectedMaterial.code}</span>
+                  {isRoti && (
+                    <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded">
+                      Roti Tawar
+                    </span>
+                  )}
+                </div>
+                <h3 className="font-bold text-gray-800">{selectedMaterial.name}</h3>
+                <p className="text-xs text-brand-orange font-medium">{selectedMaterial.purchase_unit}</p>
               </div>
-              <h3 className="font-semibold text-gray-800">{selectedMaterial.name}</h3>
-              <p className="text-xs text-brand-orange">{selectedMaterial.purchase_unit}</p>
             </div>
             <div className="flex items-center gap-2">
               {matTotal > 0 && (
