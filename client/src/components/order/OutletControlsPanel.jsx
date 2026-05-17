@@ -1,11 +1,21 @@
 import { AlertTriangle, Store } from 'lucide-react';
 import { calcTotalPerOutlet } from '../../lib/orderHelpers';
+import { DAY_NAMES } from '../../services/holidayService';
 
-function formatDateShort(dateStr) {
+function fmtDateShort(dateStr) {
   if (!dateStr) return '';
   return new Date(`${dateStr}T00:00:00`).toLocaleDateString('id-ID', {
-    day: 'numeric', month: 'short', year: 'numeric',
+    day: 'numeric', month: 'short',
   });
+}
+
+// Deskripsi satu holiday record (bisa one-time atau weekly)
+function holidayLabel(h) {
+  if (!h) return null;
+  const datePart = h.recurrence_type === 'weekly'
+    ? `Setiap ${DAY_NAMES[h.day_of_week]}`
+    : fmtDateShort(h.holiday_date);
+  return h.holiday_name ? `${datePart} — ${h.holiday_name}` : datePart;
 }
 
 export default function OutletControlsPanel({
@@ -17,7 +27,7 @@ export default function OutletControlsPanel({
   materials,
   matrix,
   isReadOnly,
-  // Holiday props (opsional — backward compatible dengan order lama)
+  // Holiday props (opsional — backward compatible)
   holidayMap = {},
   outletOverride = {},
   onRequestOverride,
@@ -34,22 +44,15 @@ export default function OutletControlsPanel({
           const isOpen = outletOpen[outlet.id] !== false;
           const days = outletDays[outlet.id] ?? 2;
           const total = calcTotalPerOutlet(outlet, materials, matrix);
-          const holiday = holidayMap[outlet.id] || null;
+          const info = holidayMap[outlet.id] || null; // { date1_holiday, date2_holiday, calculation_days }
           const isOverridden = outletOverride[outlet.id] || false;
+          const hasHoliday = !!info;
 
           return (
             <div key={outlet.id} className="rounded-lg border border-gray-200 overflow-hidden">
               {/* Baris utama outlet */}
-              <div
-                className={`flex items-center gap-2 px-3 py-2 transition-colors ${
-                  isOpen ? 'bg-white' : 'bg-gray-50'
-                }`}
-              >
-                <span
-                  className={`flex-1 text-sm font-medium truncate ${
-                    isOpen ? 'text-gray-800' : 'text-gray-400'
-                  }`}
-                >
+              <div className={`flex items-center gap-2 px-3 py-2 transition-colors ${isOpen ? 'bg-white' : 'bg-gray-50'}`}>
+                <span className={`flex-1 text-sm font-medium truncate ${isOpen ? 'text-gray-800' : 'text-gray-400'}`}>
                   {outlet.name}
                 </span>
                 <span className="text-xs text-gray-400 tabular-nums w-6 text-right flex-shrink-0">
@@ -72,32 +75,47 @@ export default function OutletControlsPanel({
                       type="button"
                       onClick={() => onToggleDays(outlet.id)}
                       className={`text-xs px-2 py-0.5 rounded-full border transition-colors whitespace-nowrap flex-shrink-0 ${
-                        days === 1
+                        days === 0
+                          ? 'bg-red-100 text-red-700 border-red-300 hover:bg-red-200'
+                          : days === 1
                           ? 'bg-yellow-100 text-yellow-700 border-yellow-300 hover:bg-yellow-200'
                           : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
                       }`}
                     >
-                      {days === 1 ? '1 Hari' : '2 Hari'}
+                      {days === 0 ? '0 Hari' : days === 1 ? '1 Hari' : '2 Hari'}
                     </button>
                   </>
                 )}
               </div>
 
-              {/* Warning holiday */}
-              {holiday && !isOverridden && (
+              {/* Warning holiday (belum dioverride) */}
+              {hasHoliday && !isOverridden && (
                 <div className="bg-amber-50 border-t border-amber-200 px-3 py-2">
                   <div className="flex items-start gap-1.5 mb-1.5">
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-amber-800">
-                        Besok cabang ini tercatat libur
+                        {info.calculation_days === 0
+                          ? 'Kedua hari ke depan tercatat libur'
+                          : 'Ada hari libur dalam 2 hari ke depan'}
                       </p>
-                      <p className="text-xs text-amber-700">
-                        {formatDateShort(holiday.holiday_date)}
-                        {holiday.holiday_name ? ` — ${holiday.holiday_name}` : ''}
-                      </p>
-                      <p className="text-xs text-amber-600 mt-0.5">
-                        Perhitungan otomatis menggunakan <strong>1 hari</strong>.
+                      {/* Detail hari libur yang terdeteksi */}
+                      <div className="mt-0.5 space-y-0.5">
+                        {info.date1_holiday && (
+                          <p className="text-xs text-amber-700">
+                            H+1: {holidayLabel(info.date1_holiday)}
+                          </p>
+                        )}
+                        {info.date2_holiday && (
+                          <p className="text-xs text-amber-700">
+                            H+2: {holidayLabel(info.date2_holiday)}
+                          </p>
+                        )}
+                      </div>
+                      <p className="text-xs text-amber-600 mt-1">
+                        {info.calculation_days === 0
+                          ? 'Perhitungan otomatis: 0 hari (tidak perlu order).'
+                          : 'Perhitungan otomatis menggunakan 1 hari.'}
                       </p>
                     </div>
                   </div>
@@ -114,15 +132,13 @@ export default function OutletControlsPanel({
               )}
 
               {/* Badge override aktif */}
-              {holiday && isOverridden && (
+              {hasHoliday && isOverridden && (
                 <div className="bg-blue-50 border-t border-blue-200 px-3 py-2 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 whitespace-nowrap flex-shrink-0">
                       Override aktif
                     </span>
-                    <span className="text-xs text-blue-600 truncate">
-                      Dihitung 2 hari
-                    </span>
+                    <span className="text-xs text-blue-600 truncate">Dihitung 2 hari</span>
                   </div>
                   {!isReadOnly && onCancelOverride && (
                     <button
