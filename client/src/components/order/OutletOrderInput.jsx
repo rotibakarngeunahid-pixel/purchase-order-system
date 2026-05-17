@@ -238,65 +238,65 @@ export default function OutletOrderInput({
           </div>
         </div>
 
-        {/* ─── Outlet Card ─── */}
-        <div className="card overflow-hidden">
-
-          {/* Header outlet — sticky saat scroll agar nama cabang selalu terlihat */}
-          <div className="sticky top-0 z-20 px-4 py-3.5 border-b border-gray-100 bg-white shadow-sm flex items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h3
-                  className={`font-bold text-lg leading-tight ${
-                    isOpen ? 'text-gray-800' : 'text-gray-500'
-                  }`}
-                >
-                  {selectedOutlet.name}
-                </h3>
-                {!isOpen && (
-                  <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
-                    Tutup
-                  </span>
-                )}
-                {outletTotal > 0 && (
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold tabular-nums">
-                    ✓ {outletTotal} item
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-gray-400 mt-0.5">
-                <span className="tabular-nums">{clampedIdx + 1}</span> dari{' '}
-                <span className="tabular-nums">{outlets.length}</span> outlet
-              </p>
+        {/* ─── Sticky Header — HARUS di luar overflow-hidden agar sticky bekerja ─── */}
+        <div className="sticky top-0 z-20 bg-white border border-gray-100 border-b-0 rounded-t-lg shadow-sm px-4 py-3.5 flex items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3
+                className={`font-bold text-lg leading-tight ${
+                  isOpen ? 'text-gray-800' : 'text-gray-500'
+                }`}
+              >
+                {selectedOutlet.name}
+              </h3>
+              {!isOpen && (
+                <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
+                  Tutup
+                </span>
+              )}
+              {outletTotal > 0 && (
+                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold tabular-nums">
+                  ✓ {outletTotal} item
+                </span>
+              )}
             </div>
-            {!isReadOnly && (
-              <div className="flex items-center gap-2 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => onToggleOpen(selectedOutlet.id)}
-                  className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                    isOpen
-                      ? 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200'
-                      : 'bg-red-100 text-red-600 border-red-300 hover:bg-red-200'
-                  }`}
-                >
-                  {isOpen ? 'Buka' : 'Tutup'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onToggleDays(selectedOutlet.id)}
-                  className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
-                    days === 0
-                      ? 'bg-red-100 text-red-600 border-red-300 hover:bg-red-200'
-                      : days === 1
-                      ? 'bg-yellow-100 text-yellow-700 border-yellow-300 hover:bg-yellow-200'
-                      : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
-                  }`}
-                >
-                  {days === 0 ? '0 Hari' : days === 1 ? '1 Hari' : '2 Hari'}
-                </button>
-              </div>
-            )}
+            <p className="text-xs text-gray-400 mt-0.5">
+              <span className="tabular-nums">{clampedIdx + 1}</span> dari{' '}
+              <span className="tabular-nums">{outlets.length}</span> outlet
+            </p>
           </div>
+          {!isReadOnly && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => onToggleOpen(selectedOutlet.id)}
+                className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                  isOpen
+                    ? 'bg-green-100 text-green-700 border-green-300 hover:bg-green-200'
+                    : 'bg-red-100 text-red-600 border-red-300 hover:bg-red-200'
+                }`}
+              >
+                {isOpen ? 'Buka' : 'Tutup'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onToggleDays(selectedOutlet.id)}
+                className={`text-xs px-3 py-1.5 rounded-full border font-medium transition-colors ${
+                  days === 0
+                    ? 'bg-red-100 text-red-600 border-red-300 hover:bg-red-200'
+                    : days === 1
+                    ? 'bg-yellow-100 text-yellow-700 border-yellow-300 hover:bg-yellow-200'
+                    : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
+                }`}
+              >
+                {days === 0 ? '0 Hari' : days === 1 ? '1 Hari' : '2 Hari'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ─── Card Body — overflow-hidden di sini TIDAK memblokir sticky di atas ─── */}
+        <div className="overflow-hidden rounded-b-lg border border-gray-100 bg-white shadow-sm">
 
           {/* Holiday warning */}
           {hasHoliday && !isOverridden && (
