@@ -123,13 +123,13 @@ export default function Settings() {
           placeholder="Roti Bakar Ngeunah"
         />
         <Field
-          label="Email Tujuan (penerima laporan purchase order)"
+          label="Email Admin"
           id="admin_email"
           type="email"
           value={settings.admin_email}
           onChange={(e) => set('admin_email', e.target.value)}
           placeholder="rotibakarngeunahid@gmail.com"
-          hint="Email ini akan menerima laporan purchase order setiap kali order dikirim."
+          hint="Dipakai untuk fitur test email dan kebutuhan administrasi. Submit order supplier sekarang menghasilkan gambar, bukan email."
         />
         <button
           onClick={handleTestEmail}

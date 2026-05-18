@@ -60,6 +60,7 @@ function calculatePOs(requestItems, materials) {
       material_id: materialId,
       material_name: material.name,
       material_code: material.code,
+      material_brand: material.brand || null,
       qty_ordered: qtyOrdered,
       purchase_unit: material.purchase_unit,
       package_qty: material.package_qty,

@@ -1156,7 +1156,7 @@ export default function PurchaseRecord() {
       ) : pos.length === 0 ? (
         <div className="card p-10 text-center text-gray-400">
           <p className="font-medium">Tidak ada Purchase Order</p>
-          <p className="text-sm mt-1">PO akan muncul setelah order dikirim via email</p>
+          <p className="text-sm mt-1">PO akan muncul setelah order disubmit dari halaman review</p>
         </div>
       ) : (
         <div className="space-y-3">

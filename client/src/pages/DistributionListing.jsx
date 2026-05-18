@@ -15,6 +15,17 @@ function saveChecks(date, outletId, checks) {
   localStorage.setItem(STORAGE_KEY(date, outletId), JSON.stringify(checks));
 }
 
+function mergeOutletTabs(masterOutlets, distributionOutlets) {
+  const map = new Map((masterOutlets || []).map((outlet) => [String(outlet.id), outlet]));
+  (distributionOutlets || []).forEach((entry) => {
+    const outlet = entry.outlet;
+    if (outlet?.id && !map.has(String(outlet.id))) {
+      map.set(String(outlet.id), outlet);
+    }
+  });
+  return Array.from(map.values());
+}
+
 // Roti Tawar selalu paling atas
 function sortItems(items) {
   return [...items].sort((a, b) => {
@@ -56,6 +67,13 @@ export default function DistributionListing() {
 
   useEffect(() => { loadDistribution(); }, [loadDistribution]);
   useEffect(() => {
+    const merged = mergeOutletTabs(outlets, distributionData?.outlets || []);
+    const selectedExists = merged.some((outlet) => String(outlet.id) === String(selectedOutletId));
+    if ((!selectedOutletId || !selectedExists) && merged.length > 0) {
+      setSelectedOutletId(String(merged[0].id));
+    }
+  }, [outlets, distributionData, selectedOutletId]);
+  useEffect(() => {
     if (selectedOutletId) setChecks(loadChecks(date, selectedOutletId));
   }, [date, selectedOutletId]);
 
@@ -65,15 +83,17 @@ export default function DistributionListing() {
     saveChecks(date, selectedOutletId, next);
   };
 
+  const displayOutlets = mergeOutletTabs(outlets, distributionData?.outlets || []);
   const outletData = distributionData?.outlets?.find(
     (o) => String(o.outlet?.id) === String(selectedOutletId)
   );
+  const isAdjustmentGroup = !!outletData?.is_adjustment_group;
   const rawItems = outletData?.items || [];
   const items = sortItems(rawItems);
   const checkedCount = items.filter((item) => checks[item.id]).length;
   const allDone = items.length > 0 && checkedCount === items.length;
   const progressPct = items.length > 0 ? (checkedCount / items.length) * 100 : 0;
-  const selectedOutletName = outlets.find((o) => String(o.id) === String(selectedOutletId))?.name || '';
+  const selectedOutletName = displayOutlets.find((o) => String(o.id) === String(selectedOutletId))?.name || '';
 
   return (
     // text-[16px] mencegah auto-zoom iOS saat tap input
@@ -104,7 +124,7 @@ export default function DistributionListing() {
             Pilih Cabang
           </p>
           <div className="flex gap-2 overflow-x-auto px-4 pb-1 scrollbar-none">
-            {outlets.map((o) => {
+            {displayOutlets.map((o) => {
               const active = String(o.id) === String(selectedOutletId);
               return (
                 <button
@@ -173,7 +193,7 @@ export default function DistributionListing() {
                 {/* Card header */}
                 <div className="flex items-center justify-between px-4 py-3.5 bg-orange-50 border-b border-orange-100">
                   <h2 className="font-bold text-brand-red text-base">{selectedOutletName}</h2>
-                  <span className="bg-brand-red text-white text-xs font-bold px-3 py-1 rounded-full">
+                  <span className={`${isAdjustmentGroup ? 'bg-blue-600' : 'bg-brand-red'} text-white text-xs font-bold px-3 py-1 rounded-full`}>
                     {items.length} item
                   </span>
                 </div>
@@ -182,11 +202,18 @@ export default function DistributionListing() {
                 {items.map((item, idx) => {
                   const checked = !!checks[item.id];
                   const isRoti = item.material_name?.toLowerCase().includes('roti tawar');
+                  const isAdjustment = item.source === 'adjustment';
                   return (
                     <div
                       key={item.id}
                       className={`flex items-center border-b border-gray-100 last:border-b-0 transition-colors active:bg-gray-50 ${
-                        checked ? 'bg-green-50' : isRoti ? 'bg-orange-50/40' : 'bg-white'
+                        checked
+                          ? 'bg-green-50'
+                          : isAdjustment
+                          ? 'bg-blue-50/50'
+                          : isRoti
+                          ? 'bg-orange-50/40'
+                          : 'bg-white'
                       }`}
                     >
                       {/* Tap area kiri: nomor + nama (flex-1, tinggi 60px min) */}
@@ -201,9 +228,23 @@ export default function DistributionListing() {
                           checked ? 'line-through text-gray-400' : isRoti ? 'text-brand-red font-semibold' : 'text-gray-800'
                         }`}>
                           {item.material_name}
+                          {isAdjustment && !checked && (
+                            <span className="ml-2 text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-full align-middle">
+                              MENYUSUL
+                            </span>
+                          )}
                           {isRoti && !checked && (
                             <span className="ml-2 text-[10px] font-bold bg-brand-red text-white px-1.5 py-0.5 rounded-full align-middle">
                               UTAMA
+                            </span>
+                          )}
+                          {(item.material_brand || item.supplier?.name || item.adjustment_note) && (
+                            <span className={`block mt-1 text-xs font-normal leading-snug ${checked ? 'text-gray-400' : 'text-gray-500'}`}>
+                              {item.material_brand ? `Merk: ${item.material_brand}` : ''}
+                              {item.material_brand && item.supplier?.name ? ' | ' : ''}
+                              {item.supplier?.name ? `Supplier: ${item.supplier.name}` : ''}
+                              {(item.material_brand || item.supplier?.name) && item.adjustment_note ? ' | ' : ''}
+                              {item.adjustment_note || ''}
                             </span>
                           )}
                         </span>
@@ -244,7 +285,9 @@ export default function DistributionListing() {
 
                 {/* Footer */}
                 <div className="bg-brand-red px-4 py-4 flex items-center justify-between">
-                  <span className="text-white text-sm font-semibold">Total Bahan Masuk</span>
+                  <span className="text-white text-sm font-semibold">
+                    {isAdjustmentGroup ? 'Total Bahan Menyusul' : 'Total Bahan Masuk'}
+                  </span>
                   <span className="text-white font-bold">{items.length} item</span>
                 </div>
               </div>

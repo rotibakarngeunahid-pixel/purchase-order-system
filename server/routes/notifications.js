@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const { calculatePOs } = require('../services/calculator');
-const { buildWALink } = require('../services/waLink');
-const { sendOrderEmail } = require('../services/mailer');
 
 // POST /api/orders/session/:id/send-wa
+// Nama endpoint dipertahankan untuk kompatibilitas frontend lama.
+// Output utama sekarang adalah data PO untuk generate gambar order per supplier.
 router.post('/session/:id/send-wa', async (req, res) => {
   const { id } = req.params;
 
@@ -55,11 +55,9 @@ router.post('/session/:id/send-wa', async (req, res) => {
   const businessName = settings.business_name || 'Roti Bakar Ngeunah';
   const greetingText = settings.wa_greeting_text || '';
 
-  // 5. Generate WA links dan buat PO di database
-  const posWithLinks = [];
+  // 5. Buat PO di database
+  const posWithRecords = [];
   for (const po of pos) {
-    const waLink = buildWALink(po.supplier, po.items, session.order_date, businessName, greetingText);
-
     // Insert purchase_order
     const { data: poRecord, error: poError } = await supabase
       .from('purchase_orders')
@@ -88,28 +86,10 @@ router.post('/session/:id/send-wa', async (req, res) => {
 
     if (itemsInsertError) return res.status(500).json({ error: itemsInsertError.message });
 
-    posWithLinks.push({ ...po, wa_link: waLink, po_id: poRecord.id });
+    posWithRecords.push({ ...po, po_id: poRecord.id });
   }
 
-  // 6. Kirim email
-  try {
-    await sendOrderEmail(posWithLinks, session.order_date);
-  } catch (emailErr) {
-    // Jika email gagal, tetap update status tapi return warning
-    await supabase
-      .from('order_sessions')
-      .update({ status: 'sent', sent_at: new Date().toISOString() })
-      .eq('id', id);
-
-    return res.status(207).json({
-      success: false,
-      warning: 'PO berhasil dibuat tapi email gagal dikirim: ' + emailErr.message,
-      po_count: posWithLinks.length,
-      wa_links: posWithLinks.map((p) => ({ supplier: p.supplier.name, wa_link: p.wa_link })),
-    });
-  }
-
-  // 7. Update status sesi
+  // 6. Update status sesi
   await supabase
     .from('order_sessions')
     .update({ status: 'sent', sent_at: new Date().toISOString() })
@@ -117,8 +97,11 @@ router.post('/session/:id/send-wa', async (req, res) => {
 
   res.json({
     success: true,
-    message: 'Email berhasil dikirim! Cek inbox untuk WA links.',
-    po_count: posWithLinks.length,
+    message: 'PO berhasil dibuat. Gambar order supplier siap diunduh.',
+    po_count: posWithRecords.length,
+    business_name: businessName,
+    wa_greeting_text: greetingText,
+    purchase_orders: posWithRecords,
   });
 });
 

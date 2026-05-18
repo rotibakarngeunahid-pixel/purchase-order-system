@@ -28,6 +28,10 @@ function isMissingSourceColumnError(error) {
   );
 }
 
+function getItemBrand(item) {
+  return item?.variant?.brand || item?.material?.brand || null;
+}
+
 async function getReceiptAvailabilityMap(sessionId) {
   const { data: finalPOs, error: poError } = await supabase
     .from('purchase_orders')
@@ -62,6 +66,53 @@ async function getReceiptAvailabilityMap(sessionId) {
   return buildAvailabilityMap(receiptItems);
 }
 
+async function getAdjustmentDistributionItems(sessionId) {
+  const { data: finalPOs, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('id, supplier:suppliers(id, name)')
+    .eq('session_id', sessionId)
+    .in('status', FINAL_RECEIPT_STATUSES);
+
+  if (poError) throw poError;
+
+  const poMap = {};
+  const finalPOIds = (finalPOs || []).map((po) => {
+    poMap[po.id] = po;
+    return po.id;
+  }).filter(Boolean);
+
+  if (finalPOIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('purchase_order_items')
+    .select(`
+      id, po_id, material_id, qty_received, source, adjustment_note, variant_id,
+      material:materials(id, name, brand, purchase_unit),
+      variant:material_variants(id, brand)
+    `)
+    .in('po_id', finalPOIds)
+    .eq('source', 'adjustment')
+    .gt('qty_received', 0);
+
+  if (error && isMissingSourceColumnError(error)) return [];
+  if (error) throw error;
+
+  return (data || []).map((item) => {
+    const po = poMap[item.po_id];
+    return {
+      id: `adjustment-${item.id}`,
+      material_id: item.material_id,
+      material_name: item.material?.name,
+      material_brand: getItemBrand(item),
+      purchase_unit: item.material?.purchase_unit,
+      qty: item.qty_received,
+      source: 'adjustment',
+      adjustment_note: item.adjustment_note,
+      supplier: po?.supplier || null,
+    };
+  });
+}
+
 // Distribusi: publik, tidak perlu login
 router.get('/distribution', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
@@ -77,7 +128,7 @@ router.get('/distribution', async (req, res) => {
 
   const { data: items, error: itemsError } = await supabase
     .from('order_request_items')
-    .select('*, outlet:outlets(id, name), material:materials(id, name, purchase_unit)')
+    .select('*, outlet:outlets(id, name), material:materials(id, name, brand, purchase_unit)')
     .eq('session_id', session.id)
     .gt('qty', 0)
     .order('outlet_id');
@@ -106,12 +157,31 @@ router.get('/distribution', async (req, res) => {
       id: item.id,
       material_id: item.material_id,
       material_name: item.material?.name,
+      material_brand: item.material?.brand || null,
       purchase_unit: item.material?.purchase_unit,
       qty: item.qty,
+      source: 'ordered',
     });
   });
 
-  res.json({ date, session, outlets: Object.values(outletMap), availability_applied: true });
+  let outlets = Object.values(outletMap);
+  try {
+    const adjustmentItems = await getAdjustmentDistributionItems(session.id);
+    if (adjustmentItems.length > 0) {
+      outlets = [
+        ...outlets,
+        {
+          outlet: { id: '__adjustments__', name: 'Bahan Menyusul' },
+          is_adjustment_group: true,
+          items: adjustmentItems,
+        },
+      ];
+    }
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json({ date, session, outlets, availability_applied: true });
 });
 
 // Outlet aktif: publik, untuk dropdown di halaman distribusi
