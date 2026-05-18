@@ -4,17 +4,37 @@ const supabase = require('../services/supabase');
 
 const FINAL_RECEIPT_STATUSES = ['received', 'received_partial'];
 
+function isRotiTawar(name) {
+  return String(name || '').toLowerCase().includes('roti tawar');
+}
+
+function getDistributionAvailableQty(materialName, receivedQty) {
+  const received = Number(receivedQty || 0);
+  if (received <= 0) return 0;
+  if (isRotiTawar(materialName)) {
+    return received + Math.floor(received / 20);
+  }
+  return received;
+}
+
 function buildAvailabilityMap(receiptItems) {
   return (receiptItems || []).reduce((map, item) => {
     const materialId = item.material_id;
     if (!materialId) return map;
 
     if (!map[materialId]) {
-      map[materialId] = { total_received: 0, has_final_receipt: false };
+      map[materialId] = {
+        total_received: 0,
+        has_final_receipt: false,
+        material_name: item.material?.name || null,
+      };
     }
 
     map[materialId].total_received += Number(item.qty_received || 0);
     map[materialId].has_final_receipt = true;
+    if (!map[materialId].material_name && item.material?.name) {
+      map[materialId].material_name = item.material.name;
+    }
     return map;
   }, {});
 }
@@ -42,7 +62,7 @@ async function getReceiptAvailabilityMap(sessionId) {
 
   let receiptQuery = supabase
     .from('purchase_order_items')
-    .select('material_id, qty_received, source')
+    .select('material_id, qty_received, source, material:materials(id, name)')
     .in('po_id', finalPOIds)
     .or('source.eq.ordered,source.is.null');
 
@@ -180,11 +200,35 @@ router.get('/distribution', async (req, res) => {
   }
 
   const outletMap = {};
+  const remainingAvailabilityByMaterial = {};
+
+  function getRemainingAvailability(item) {
+    const availability = availabilityMap[item.material_id];
+    if (!availability?.has_final_receipt) return null;
+
+    if (remainingAvailabilityByMaterial[item.material_id] === undefined) {
+      remainingAvailabilityByMaterial[item.material_id] = getDistributionAvailableQty(
+        availability.material_name || item.material?.name,
+        availability.total_received,
+      );
+    }
+
+    return remainingAvailabilityByMaterial[item.material_id];
+  }
+
   (items || []).forEach((item) => {
     const availability = availabilityMap[item.material_id];
-    if (availability?.has_final_receipt && availability.total_received <= 0) {
-      return;
+    let displayQty = Number(item.qty || 0);
+
+    if (availability?.has_final_receipt) {
+      const remainingAvailability = getRemainingAvailability(item);
+      if (remainingAvailability <= 0) return;
+
+      displayQty = Math.min(displayQty, remainingAvailability);
+      remainingAvailabilityByMaterial[item.material_id] = remainingAvailability - displayQty;
     }
+
+    if (displayQty <= 0) return;
 
     const oid = item.outlet_id;
     if (!outletMap[oid]) {
@@ -195,7 +239,9 @@ router.get('/distribution', async (req, res) => {
       material_id: item.material_id,
       material_name: item.material?.name,
       purchase_unit: item.material?.purchase_unit,
-      qty: item.qty,
+      qty: displayQty,
+      requested_qty: item.qty,
+      availability_limited: availability?.has_final_receipt && displayQty < Number(item.qty || 0),
       source: 'ordered',
     });
   });
