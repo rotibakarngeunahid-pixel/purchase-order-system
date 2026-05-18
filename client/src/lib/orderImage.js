@@ -438,8 +438,9 @@ function drawHeader(ctx, po, orderDate, businessName, contentWidth) {
 }
 
 function measureGreeting(ctx, greetingText, tableWidth) {
-  if (!greetingText) return null;
-  return fitWrappedText(ctx, greetingText, {
+  const footerGreeting = getFooterGreetingText(greetingText);
+  if (!footerGreeting) return null;
+  return fitWrappedText(ctx, footerGreeting, {
     maxWidth: tableWidth,
     maxLines: 2,
     weight: '500',
@@ -447,6 +448,18 @@ function measureGreeting(ctx, greetingText, tableWidth) {
     minSize: 20,
     lineHeightRatio: 1.22,
   });
+}
+
+function getFooterGreetingText(greetingText) {
+  const text = normalizeText(greetingText);
+  if (text === '-') return '';
+
+  const standardMessage = 'Mohon konfirmasi ketersediaan.';
+  if (text.toLowerCase().startsWith(standardMessage.toLowerCase())) {
+    return text.slice(standardMessage.length).trim();
+  }
+
+  return text;
 }
 
 export function getSupplierOrderImageFilename(po, orderDate) {
