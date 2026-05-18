@@ -138,17 +138,11 @@ export default function Analytics() {
       </div>
 
       {/* Summary cards (trends) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
         <div className="stat-card">
           <p className="stat-label">Total PO Selesai</p>
           <p className="stat-value">
             {trendsData.reduce((s, t) => s + t.order_count, 0)}
-          </p>
-        </div>
-        <div className="stat-card">
-          <p className="stat-label">Total Estimasi</p>
-          <p className="stat-value">
-            {formatRupiah(trendsData.reduce((s, t) => s + t.total_estimated, 0))}
           </p>
         </div>
         <div className="stat-card">
@@ -263,18 +257,16 @@ export default function Analytics() {
                 ))}
               </div>
               <div className="table-wrap">
-              <table className="data-table table-fixed" style={{ minWidth: '700px' }}>
+              <table className="data-table table-fixed" style={{ minWidth: '560px' }}>
                 <colgroup>
-                  <col style={{ width: '34%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '26%' }} />
-                  <col style={{ width: '26%' }} />
+                  <col style={{ width: '48%' }} />
+                  <col style={{ width: '20%' }} />
+                  <col style={{ width: '32%' }} />
                 </colgroup>
                 <thead>
                   <tr>
                     <th>Bulan</th>
                     <th className="num-cell">Jml PO</th>
-                    <th className="num-cell">Est. Total</th>
                     <th className="num-cell">Aktual</th>
                   </tr>
                 </thead>
@@ -283,7 +275,6 @@ export default function Analytics() {
                     <tr key={item.month}>
                       <td className="font-medium text-gray-800">{formatMonth(item.month)}</td>
                       <td className="num-cell text-gray-600">{item.order_count}</td>
-                      <td className="num-cell text-gray-700">{formatRupiah(item.total_estimated)}</td>
                       <td className="num-cell font-semibold text-brand-red">{formatRupiah(item.total_actual)}</td>
                     </tr>
                   ))}
@@ -293,9 +284,6 @@ export default function Analytics() {
                     <td className="px-4 py-2.5 font-semibold text-gray-700">Total</td>
                     <td className="num-cell font-bold text-gray-800">
                       {trendsData.reduce((s, t) => s + t.order_count, 0)}
-                    </td>
-                    <td className="num-cell font-bold text-gray-800">
-                      {formatRupiah(trendsData.reduce((s, t) => s + t.total_estimated, 0))}
                     </td>
                     <td className="num-cell font-bold text-brand-red">
                       {formatRupiah(trendsData.reduce((s, t) => s + t.total_actual, 0))}

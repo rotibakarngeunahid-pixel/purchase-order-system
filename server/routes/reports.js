@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 
+const FINAL_RECEIPT_STATUSES = ['received', 'received_partial'];
+
 // GET laporan pengeluaran harian
 router.get('/daily', async (req, res) => {
   const { date_from, date_to, supplier_id } = req.query;
@@ -119,6 +121,86 @@ function getActualSubtotal(row) {
   return Number(row.qty_received || 0) * Number(row.price_actual || 0);
 }
 
+function isMissingSourceColumnError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('source') && (
+    message.includes('column') ||
+    message.includes('schema cache') ||
+    message.includes('could not find')
+  );
+}
+
+function isOrderedReceiptRow(row) {
+  return (row.source || 'ordered') === 'ordered';
+}
+
+function shouldIncludeRequestItem(item, availabilityMap) {
+  const sessionId = item.session?.id;
+  const materialId = item.material_id || item.material?.id;
+  if (!sessionId || !materialId) return true;
+
+  const availability = availabilityMap[makeKey(sessionId, materialId)];
+  return !(availability?.has_final_receipt && availability.total_received <= 0);
+}
+
+async function getReceiptAvailabilityMap(dateFrom, dateTo) {
+  const { data: finalPOs, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('id, session_id, session:order_sessions(id, order_date)')
+    .in('status', FINAL_RECEIPT_STATUSES);
+
+  if (poError) throw poError;
+
+  const poSessionById = {};
+  const poIds = [];
+  for (const po of finalPOs || []) {
+    if (!isWithinDateRange(po.session?.order_date, dateFrom, dateTo)) continue;
+    if (!po.id) continue;
+
+    poSessionById[po.id] = po.session_id || po.session?.id;
+    poIds.push(po.id);
+  }
+
+  if (poIds.length === 0) return {};
+
+  let result = await supabase
+    .from('purchase_order_items')
+    .select(`
+      po_id, material_id, qty_received, source
+    `)
+    .in('po_id', poIds);
+
+  if (result.error && isMissingSourceColumnError(result.error)) {
+    result = await supabase
+      .from('purchase_order_items')
+      .select(`
+        po_id, material_id, qty_received
+      `)
+      .in('po_id', poIds);
+  }
+
+  if (result.error) throw result.error;
+
+  const availabilityMap = {};
+  for (const row of result.data || []) {
+    if (!isOrderedReceiptRow(row)) continue;
+
+    const sessionId = poSessionById[row.po_id];
+    const materialId = row.material_id;
+    if (!sessionId || !materialId) continue;
+
+    const key = makeKey(sessionId, materialId);
+    if (!availabilityMap[key]) {
+      availabilityMap[key] = { has_final_receipt: false, total_received: 0 };
+    }
+
+    availabilityMap[key].has_final_receipt = true;
+    availabilityMap[key].total_received += Number(row.qty_received || 0);
+  }
+
+  return availabilityMap;
+}
+
 async function getRequestQtyMaps(dateFrom, dateTo) {
   const { data, error } = await supabase
     .from('order_request_items')
@@ -156,7 +238,7 @@ router.get('/analytics/materials', async (req, res) => {
   const { data, error } = await supabase
     .from('order_request_items')
     .select(`
-      qty, outlet_id,
+      qty, outlet_id, material_id,
       material:materials(id, name, purchase_unit),
       session:order_sessions(id, order_date, status)
     `)
@@ -175,6 +257,14 @@ router.get('/analytics/materials', async (req, res) => {
       return true;
     });
   }
+
+  let availabilityMap = {};
+  try {
+    availabilityMap = await getReceiptAvailabilityMap(date_from, date_to);
+  } catch (availabilityError) {
+    return res.status(500).json({ error: availabilityError.message });
+  }
+  filtered = filtered.filter((item) => shouldIncludeRequestItem(item, availabilityMap));
 
   const displayItems = outlet_id
     ? filtered.filter((item) => item.outlet_id === outlet_id)
@@ -267,7 +357,8 @@ router.get('/analytics/materials', async (req, res) => {
   // Ambil barang masuk dari purchase_report untuk outlet/tanggal yang sama
   const { data: reportRows, error: reportError } = await supabase
     .from('purchase_report')
-    .select('material_id, qty, price_per_unit, date, outlet_id, material:materials(id, name, purchase_unit)');
+    .select('material_id, qty, price_per_unit, date, outlet_id, material:materials(id, name, purchase_unit)')
+    .gt('qty', 0);
 
   if (reportError) return res.status(500).json({ error: reportError.message });
 
@@ -319,8 +410,8 @@ router.get('/analytics/outlets', async (req, res) => {
   const { data: items, error: itemsError } = await supabase
     .from('order_request_items')
     .select(`
-      qty, outlet_id,
-      session:order_sessions(order_date, status)
+      qty, outlet_id, material_id,
+      session:order_sessions(id, order_date, status)
     `)
     .gt('qty', 0);
 
@@ -337,6 +428,14 @@ router.get('/analytics/outlets', async (req, res) => {
       return true;
     });
   }
+
+  let availabilityMap = {};
+  try {
+    availabilityMap = await getReceiptAvailabilityMap(date_from, date_to);
+  } catch (availabilityError) {
+    return res.status(500).json({ error: availabilityError.message });
+  }
+  filtered = filtered.filter((item) => shouldIncludeRequestItem(item, availabilityMap));
 
   const displayOutlets = outlet_id
     ? (outlets || []).filter((outlet) => outlet.id === outlet_id)
