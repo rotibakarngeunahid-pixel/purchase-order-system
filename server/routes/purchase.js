@@ -54,7 +54,7 @@ async function fetchPODetail(poId) {
       items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
         source, adjustment_note, created_at,
-        material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
+        material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, price_per_purchase_unit)
       )
     `)
@@ -77,7 +77,7 @@ async function fetchPODetail(poId) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual,
-        material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id)
+        material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id)
       )
     `)
     .eq('id', poId)

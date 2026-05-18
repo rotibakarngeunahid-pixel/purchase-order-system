@@ -711,14 +711,16 @@ function ReceiveModal({ po, onClose, onSaved }) {
                               onChange={(e) => handleSelectOrderedVariant(idx, e.target.value)}
                               className="border border-gray-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-36"
                             >
-                              <option value="">— Default —</option>
+                              <option value="">
+                                {item.material?.brand ? `Default - ${item.material.brand}` : 'Default'}
+                              </option>
                               {variants.map((v) => (
                                 <option key={v.id} value={v.id}>{v.brand}</option>
                               ))}
                             </select>
                           ) : (
                             <span className="text-xs text-gray-400">
-                              {item.material?.brand || '—'}
+                              {item.material?.brand || '-'}
                             </span>
                           )}
                         </td>
@@ -862,7 +864,9 @@ function ReceiveModal({ po, onClose, onSaved }) {
                                 }
                                 className="border border-gray-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-36"
                               >
-                                <option value="">— Tanpa merk —</option>
+                                <option value="">
+                                  {mat?.brand ? `Default - ${mat.brand}` : 'Tanpa merk'}
+                                </option>
                                 <option value="__add_new__">+ Tambah Merk Baru</option>
                                 {variants.map((v) => (
                                   <option key={v.id} value={v.id}>{v.brand}</option>
