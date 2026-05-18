@@ -238,15 +238,6 @@ export default function DistributionListing() {
                               UTAMA
                             </span>
                           )}
-                          {(item.material_brand || item.supplier?.name || item.adjustment_note) && (
-                            <span className={`block mt-1 text-xs font-normal leading-snug ${checked ? 'text-gray-400' : 'text-gray-500'}`}>
-                              {item.material_brand ? `Merk: ${item.material_brand}` : ''}
-                              {item.material_brand && item.supplier?.name ? ' | ' : ''}
-                              {item.supplier?.name ? `Supplier: ${item.supplier.name}` : ''}
-                              {(item.material_brand || item.supplier?.name) && item.adjustment_note ? ' | ' : ''}
-                              {item.adjustment_note || ''}
-                            </span>
-                          )}
                         </span>
                       </button>
 

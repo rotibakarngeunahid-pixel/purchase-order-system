@@ -28,10 +28,6 @@ function isMissingSourceColumnError(error) {
   );
 }
 
-function getItemBrand(item) {
-  return item?.variant?.brand || item?.material?.brand || null;
-}
-
 async function getReceiptAvailabilityMap(sessionId) {
   const { data: finalPOs, error: poError } = await supabase
     .from('purchase_orders')
@@ -66,6 +62,34 @@ async function getReceiptAvailabilityMap(sessionId) {
   return buildAvailabilityMap(receiptItems);
 }
 
+async function getPurchaseReportDistributionItems(date) {
+  const { data, error } = await supabase
+    .from('purchase_report')
+    .select(`
+      id, outlet_id, material_id, qty, unit, notes,
+      outlet:outlets(id, name),
+      material:materials(id, name, purchase_unit)
+    `)
+    .eq('date', date)
+    .gt('qty', 0);
+
+  if (error) throw error;
+
+  return (data || []).map((item) => ({
+    outlet: item.outlet,
+    item: {
+      id: `purchase-report-${item.id}`,
+      outlet_id: item.outlet_id,
+      material_id: item.material_id,
+      material_name: item.material?.name,
+      purchase_unit: item.unit || item.material?.purchase_unit,
+      qty: item.qty,
+      source: 'purchase_report',
+      notes: item.notes || null,
+    },
+  }));
+}
+
 async function getAdjustmentDistributionItems(sessionId) {
   const { data: finalPOs, error: poError } = await supabase
     .from('purchase_orders')
@@ -87,8 +111,7 @@ async function getAdjustmentDistributionItems(sessionId) {
     .from('purchase_order_items')
     .select(`
       id, po_id, material_id, qty_received, source, adjustment_note, variant_id,
-      material:materials(id, name, brand, purchase_unit),
-      variant:material_variants(id, brand)
+      material:materials(id, name, purchase_unit)
     `)
     .in('po_id', finalPOIds)
     .eq('source', 'adjustment')
@@ -103,7 +126,6 @@ async function getAdjustmentDistributionItems(sessionId) {
       id: `adjustment-${item.id}`,
       material_id: item.material_id,
       material_name: item.material?.name,
-      material_brand: getItemBrand(item),
       purchase_unit: item.material?.purchase_unit,
       qty: item.qty_received,
       source: 'adjustment',
@@ -117,6 +139,13 @@ async function getAdjustmentDistributionItems(sessionId) {
 router.get('/distribution', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
 
+  let purchaseReportItems = [];
+  try {
+    purchaseReportItems = await getPurchaseReportDistributionItems(date);
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
   const { data: session, error: sessionError } = await supabase
     .from('order_sessions')
     .select('id, order_date, status')
@@ -124,22 +153,30 @@ router.get('/distribution', async (req, res) => {
     .maybeSingle();
 
   if (sessionError) return res.status(500).json({ error: sessionError.message });
-  if (!session) return res.json({ date, session: null, outlets: [] });
+  if (!session && purchaseReportItems.length === 0) {
+    return res.json({ date, session: null, outlets: [] });
+  }
 
-  const { data: items, error: itemsError } = await supabase
-    .from('order_request_items')
-    .select('*, outlet:outlets(id, name), material:materials(id, name, brand, purchase_unit)')
-    .eq('session_id', session.id)
-    .gt('qty', 0)
-    .order('outlet_id');
+  let items = [];
+  if (session) {
+    const { data: requestItems, error: itemsError } = await supabase
+      .from('order_request_items')
+      .select('*, outlet:outlets(id, name), material:materials(id, name, purchase_unit)')
+      .eq('session_id', session.id)
+      .gt('qty', 0)
+      .order('outlet_id');
 
-  if (itemsError) return res.status(500).json({ error: itemsError.message });
+    if (itemsError) return res.status(500).json({ error: itemsError.message });
+    items = requestItems || [];
+  }
 
   let availabilityMap = {};
-  try {
-    availabilityMap = await getReceiptAvailabilityMap(session.id);
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
+  if (session) {
+    try {
+      availabilityMap = await getReceiptAvailabilityMap(session.id);
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
   }
 
   const outletMap = {};
@@ -157,31 +194,47 @@ router.get('/distribution', async (req, res) => {
       id: item.id,
       material_id: item.material_id,
       material_name: item.material?.name,
-      material_brand: item.material?.brand || null,
       purchase_unit: item.material?.purchase_unit,
       qty: item.qty,
       source: 'ordered',
     });
   });
 
-  let outlets = Object.values(outletMap);
-  try {
-    const adjustmentItems = await getAdjustmentDistributionItems(session.id);
-    if (adjustmentItems.length > 0) {
-      outlets = [
-        ...outlets,
-        {
-          outlet: { id: '__adjustments__', name: 'Bahan Menyusul' },
-          is_adjustment_group: true,
-          items: adjustmentItems,
-        },
-      ];
+  purchaseReportItems.forEach(({ outlet, item }) => {
+    if (!outlet?.id) return;
+    const oid = item.outlet_id || outlet.id;
+    if (!outletMap[oid]) {
+      outletMap[oid] = { outlet, items: [] };
     }
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
+    outletMap[oid].items.push(item);
+  });
+
+  let outlets = Object.values(outletMap);
+  if (session) {
+    try {
+      const adjustmentItems = await getAdjustmentDistributionItems(session.id);
+      if (adjustmentItems.length > 0) {
+        outlets = [
+          ...outlets,
+          {
+            outlet: { id: '__adjustments__', name: 'Bahan Menyusul' },
+            is_adjustment_group: true,
+            items: adjustmentItems,
+          },
+        ];
+      }
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
   }
 
-  res.json({ date, session, outlets, availability_applied: true });
+  res.json({
+    date,
+    session: session || { id: null, order_date: date, status: 'purchase_report' },
+    outlets,
+    availability_applied: true,
+    purchase_report_applied: true,
+  });
 });
 
 // Outlet aktif: publik, untuk dropdown di halaman distribusi
