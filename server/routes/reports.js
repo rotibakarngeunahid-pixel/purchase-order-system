@@ -526,23 +526,46 @@ router.get('/analytics/trends', async (req, res) => {
         if (hasOutletExpense) trend.order_count += 1;
       }
     } else {
-      const { data, error } = await supabase
+      const { data: pos, error: poError } = await supabase
         .from('purchase_orders')
-        .select('total_estimated, total_actual, status, session:order_sessions(order_date)')
-        .in('status', ['received', 'received_partial']);
+        .select('id, total_estimated, status, session:order_sessions(order_date)')
+        .in('status', FINAL_RECEIPT_STATUSES);
 
-      if (error) return res.status(500).json({ error: error.message });
+      if (poError) return res.status(500).json({ error: poError.message });
 
-      for (const po of data || []) {
+      const poMonthById = {};
+      for (const po of pos || []) {
         const d = po.session?.order_date;
         if (!isWithinDateRange(d, date_from, date_to)) continue;
 
         const month = getMonthKey(d);
         if (!month) continue;
+
+        poMonthById[po.id] = month;
         const trend = ensureTrendMonth(map, month);
         trend.total_estimated += Number(po.total_estimated || 0);
-        trend.total_actual += Number(po.total_actual || 0);
         trend.order_count += 1;
+      }
+
+      const poIds = Object.keys(poMonthById);
+      if (poIds.length > 0) {
+        const { data: poRows, error: poRowsError } = await supabase
+          .from('purchase_order_items')
+          .select('po_id, qty_received, price_actual, subtotal_actual')
+          .in('po_id', poIds);
+
+        if (poRowsError) return res.status(500).json({ error: poRowsError.message });
+
+        for (const row of poRows || []) {
+          const month = poMonthById[row.po_id];
+          if (!month) continue;
+
+          const actualSubtotal = getActualSubtotal(row);
+          if (actualSubtotal <= 0) continue;
+
+          const trend = ensureTrendMonth(map, month);
+          trend.total_actual += actualSubtotal;
+        }
       }
     }
   } catch (error) {
