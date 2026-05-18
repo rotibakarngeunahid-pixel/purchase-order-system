@@ -83,6 +83,7 @@ export default function Analytics() {
   const maxMaterialQty = Math.max(...materialsData.map((m) => m.total_qty), 1);
   const maxOutletQty = Math.max(...outletsData.map((o) => o.total_qty), 1);
   const maxTrendValue = Math.max(...trendsData.map((t) => t.total_actual), 1);
+  const totalActual = materialsData.reduce((s, item) => s + Number(item.total_expense || 0), 0);
 
   const tabs = [
     { id: 'materials', label: 'Top Bahan' },
@@ -148,7 +149,7 @@ export default function Analytics() {
         <div className="stat-card">
           <p className="stat-label">Total Aktual</p>
           <p className="stat-value text-brand-red">
-            {formatRupiah(trendsData.reduce((s, t) => s + t.total_actual, 0))}
+            {formatRupiah(totalActual)}
           </p>
         </div>
       </div>
