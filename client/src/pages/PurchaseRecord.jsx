@@ -675,11 +675,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
           <div>
             <h4 className="text-sm font-semibold text-gray-700 mb-2">Item PO</h4>
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[900px] text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b">
                     <th className="px-3 py-2 text-left text-gray-600 font-medium">Bahan</th>
-                    <th className="px-3 py-2 text-left text-gray-600 font-medium">Merk</th>
+                    <th className="px-3 py-2 text-left text-gray-600 font-medium min-w-[220px]">Merk</th>
                     <th className="px-3 py-2 text-center text-gray-600 font-medium">Dipesan</th>
                     <th className="px-3 py-2 text-center text-gray-600 font-medium">Diterima</th>
                     <th className="px-3 py-2 text-center text-gray-600 font-medium">Harga/Sat (Rp)</th>
@@ -709,17 +709,21 @@ function ReceiveModal({ po, onClose, onSaved }) {
                             <select
                               value={item.variant_id || ''}
                               onChange={(e) => handleSelectOrderedVariant(idx, e.target.value)}
-                              className="border border-gray-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-36"
+                              title={item.material?.brand || 'Default'}
+                              className="border border-gray-300 rounded-md pl-2 pr-8 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-full min-w-[200px] max-w-[240px]"
                             >
                               <option value="">
-                                {item.material?.brand ? `Default - ${item.material.brand}` : 'Default'}
+                                {item.material?.brand || 'Default'}
                               </option>
                               {variants.map((v) => (
                                 <option key={v.id} value={v.id}>{v.brand}</option>
                               ))}
                             </select>
                           ) : (
-                            <span className="text-xs text-gray-400">
+                            <span
+                              className="inline-block max-w-[220px] text-xs text-gray-500 leading-snug"
+                              title={item.material?.brand || '-'}
+                            >
                               {item.material?.brand || '-'}
                             </span>
                           )}
@@ -792,11 +796,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="w-full min-w-[1040px] text-sm">
                   <thead>
                     <tr className="bg-blue-50 border-b border-blue-100">
                       <th className="px-3 py-2 text-left text-gray-600 font-medium">Bahan</th>
-                      <th className="px-3 py-2 text-left text-gray-600 font-medium">Merk</th>
+                      <th className="px-3 py-2 text-left text-gray-600 font-medium min-w-[220px]">Merk</th>
                       <th className="px-3 py-2 text-center text-gray-600 font-medium">Dipesan</th>
                       <th className="px-3 py-2 text-center text-gray-600 font-medium">Diterima</th>
                       <th className="px-3 py-2 text-center text-gray-600 font-medium">
@@ -862,10 +866,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
                                     adj.material_id
                                   )
                                 }
-                                className="border border-gray-300 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-36"
+                                title={mat?.brand || 'Tanpa merk'}
+                                className="border border-gray-300 rounded-md pl-2 pr-8 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-full min-w-[200px] max-w-[240px]"
                               >
                                 <option value="">
-                                  {mat?.brand ? `Default - ${mat.brand}` : 'Tanpa merk'}
+                                  {mat?.brand || 'Tanpa merk'}
                                 </option>
                                 <option value="__add_new__">+ Tambah Merk Baru</option>
                                 {variants.map((v) => (
