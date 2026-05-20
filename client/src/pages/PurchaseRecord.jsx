@@ -287,6 +287,159 @@ function QuickAddMaterialModal({ defaultSupplierId, suppliers, onSaved, onCancel
   );
 }
 
+// ─── RotiDistributeModal ──────────────────────────────────────────────────────
+
+function RotiDistributeModal({ materials, outlets, variantsMap, loadVariantsForMaterial, onSave, onCancel }) {
+  const rotiMaterials = materials.filter((m) => m.name.toLowerCase().includes('roti'));
+  const [materialId, setMaterialId] = useState(() => rotiMaterials[0]?.id || '');
+  const [variantId, setVariantId] = useState(null);
+  const [priceActual, setPriceActual] = useState(() => {
+    const mat = rotiMaterials[0];
+    return mat?.price_per_purchase_unit != null ? String(mat.price_per_purchase_unit) : '';
+  });
+  const [outletQtys, setOutletQtys] = useState({});
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (materialId) loadVariantsForMaterial(materialId);
+  }, [materialId]);
+
+  const selectedMat = materials.find((m) => m.id === materialId);
+  const variants = variantsMap[materialId] || [];
+  const totalQty = Object.values(outletQtys).reduce((sum, q) => sum + (Number(q) || 0), 0);
+
+  const handleChangeMaterial = (id) => {
+    const mat = materials.find((m) => m.id === id);
+    setMaterialId(id);
+    setVariantId(null);
+    setPriceActual(mat?.price_per_purchase_unit != null ? String(mat.price_per_purchase_unit) : '');
+    setError('');
+  };
+
+  const handleChangeVariant = (vId) => {
+    setVariantId(vId || null);
+    if (vId) {
+      const v = variants.find((v) => v.id === vId);
+      if (v) setPriceActual(String(v.price_per_purchase_unit));
+    } else {
+      setPriceActual(selectedMat?.price_per_purchase_unit != null ? String(selectedMat.price_per_purchase_unit) : '');
+    }
+  };
+
+  const handleSave = () => {
+    if (!materialId) { setError('Pilih bahan roti'); return; }
+    const entries = Object.entries(outletQtys).filter(([, q]) => Number(q) > 0);
+    if (entries.length === 0) { setError('Isi minimal 1 cabang dengan jumlah > 0'); return; }
+    const items = entries.map(([outletId, qty]) => ({
+      source: 'adjustment',
+      material_id: materialId,
+      variant_id: variantId || null,
+      qty_received: Number(qty),
+      price_actual: Number(priceActual) || 0,
+      adjustment_note: `Cabang: ${outlets.find((o) => o.id === outletId)?.name || outletId}`,
+    }));
+    onSave(items);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+        <h3 className="font-semibold text-gray-900 mb-1">Distribusi Roti ke Cabang</h3>
+        <p className="text-xs text-gray-400 mb-4">
+          Tentukan berapa roti yang didistribusikan ke setiap cabang
+        </p>
+
+        {error && (
+          <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 rounded text-sm">{error}</div>
+        )}
+
+        {rotiMaterials.length === 0 ? (
+          <p className="text-sm text-gray-500 text-center py-4">
+            Tidak ada bahan roti di master data. Pastikan nama bahan mengandung kata "roti".
+          </p>
+        ) : (
+          <>
+            {rotiMaterials.length > 1 && (
+              <div className="mb-3">
+                <label className="label">Bahan Roti</label>
+                <select value={materialId} onChange={(e) => handleChangeMaterial(e.target.value)} className="input">
+                  {rotiMaterials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </select>
+              </div>
+            )}
+            {rotiMaterials.length === 1 && (
+              <div className="mb-3">
+                <label className="label">Bahan</label>
+                <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded-md text-sm text-gray-700">
+                  {selectedMat?.name}
+                  <span className="text-xs text-gray-400 ml-1">({selectedMat?.purchase_unit})</span>
+                </div>
+              </div>
+            )}
+
+            {variants.length > 0 && (
+              <div className="mb-3">
+                <label className="label">Merk</label>
+                <select value={variantId || ''} onChange={(e) => handleChangeVariant(e.target.value)} className="input">
+                  <option value="">{selectedMat?.brand || 'Default'}</option>
+                  {variants.map((v) => <option key={v.id} value={v.id}>{v.brand}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <label className="label">Harga/Sat (Rp)</label>
+              <input
+                type="number"
+                min="0"
+                value={priceActual}
+                onChange={(e) => setPriceActual(e.target.value)}
+                className="input"
+                placeholder="0"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="label">Jumlah per Cabang</label>
+              <div className="space-y-2 mt-1">
+                {outlets.map((outlet) => (
+                  <div key={outlet.id} className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-gray-700 flex-1">{outlet.name}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={outletQtys[outlet.id] || ''}
+                      onChange={(e) =>
+                        setOutletQtys((prev) => ({ ...prev, [outlet.id]: e.target.value }))
+                      }
+                      className="w-20 text-center border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red"
+                      placeholder="0"
+                    />
+                  </div>
+                ))}
+              </div>
+              {totalQty > 0 && (
+                <div className="mt-3 text-sm font-semibold text-brand-red">
+                  Total: {totalQty} {selectedMat?.purchase_unit || 'pcs'}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className="btn-outline text-sm">Batal</button>
+          {rotiMaterials.length > 0 && (
+            <button onClick={handleSave} className="btn-primary text-sm">
+              Simpan Distribusi
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── ReceiveModal ─────────────────────────────────────────────────────────────
 
 function ReceiveModal({ po, onClose, onSaved }) {
@@ -302,16 +455,20 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [suppliers, setSuppliers] = useState([]);
   const [quickAddVariantFor, setQuickAddVariantFor] = useState(null);
   const [quickAddMaterialForRowId, setQuickAddMaterialForRowId] = useState(null);
+  const [outlets, setOutlets] = useState([]);
+  const [showRotiDistModal, setShowRotiDistModal] = useState(false);
 
   // Load master data
   useEffect(() => {
     Promise.all([
       api.get('/api/materials').then((r) => r.data.filter((m) => m.is_active)),
       api.get('/api/suppliers').then((r) => r.data.filter((s) => s.is_active)),
+      api.get('/api/outlets').then((r) => r.data.filter((o) => o.is_active)),
     ])
-      .then(([mats, sups]) => {
+      .then(([mats, sups, outs]) => {
         setMaterials(mats);
         setSuppliers(sups);
+        setOutlets(outs);
       })
       .catch(console.error);
   }, []);
@@ -379,6 +536,14 @@ function ReceiveModal({ po, onClose, onSaved }) {
 
   const addAdjustmentRow = () => {
     setAdjustmentItems((prev) => [...prev, newAdjustmentRow()]);
+  };
+
+  const handleRotiDistSave = (items) => {
+    setAdjustmentItems((prev) => [
+      ...prev,
+      ...items.map((item) => ({ ...item, id: null, _tempId: `new-${Date.now()}-${Math.random()}` })),
+    ]);
+    setShowRotiDistModal(false);
   };
 
   const removeAdjustmentRow = (tempId) => {
@@ -647,6 +812,16 @@ function ReceiveModal({ po, onClose, onSaved }) {
           onCancel={() => setQuickAddMaterialForRowId(null)}
         />
       )}
+      {showRotiDistModal && (
+        <RotiDistributeModal
+          materials={materials}
+          outlets={outlets}
+          variantsMap={variantsMap}
+          loadVariantsForMaterial={loadVariantsForMaterial}
+          onSave={handleRotiDistSave}
+          onCancel={() => setShowRotiDistModal(false)}
+        />
+      )}
 
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
         {/* Header */}
@@ -766,7 +941,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
 
           {/* ── Adjustment / Tambahan ── */}
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
               <h4 className="text-sm font-semibold text-gray-700">
                 Tambahan
                 {adjustmentItems.length > 0 && (
@@ -775,12 +950,20 @@ function ReceiveModal({ po, onClose, onSaved }) {
                   </span>
                 )}
               </h4>
-              <button
-                onClick={addAdjustmentRow}
-                className="text-sm text-brand-red border border-brand-red rounded-lg px-3 py-1.5 hover:bg-red-50 font-medium transition-colors"
-              >
-                + Tambah Bahan
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowRotiDistModal(true)}
+                  className="text-sm text-brand-orange border border-brand-orange rounded-lg px-3 py-1.5 hover:bg-orange-50 font-medium transition-colors"
+                >
+                  + Distribusi Roti
+                </button>
+                <button
+                  onClick={addAdjustmentRow}
+                  className="text-sm text-brand-red border border-brand-red rounded-lg px-3 py-1.5 hover:bg-red-50 font-medium transition-colors"
+                >
+                  + Tambah Bahan
+                </button>
+              </div>
             </div>
 
             {adjustmentItems.length === 0 ? (

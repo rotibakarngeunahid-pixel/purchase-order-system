@@ -6,6 +6,7 @@ export default function RotiTawarPanel({
   rotiError,
   rotiDetail,
   onRotiAutoFill,
+  onRotiDist,
   onDismissDetail,
   rotiReferenceDate,
   onRefDateChange,
@@ -71,6 +72,16 @@ export default function RotiTawarPanel({
               </>
             )}
           </button>
+          {onRotiDist && (
+            <button
+              type="button"
+              onClick={onRotiDist}
+              className="w-full mt-2 inline-flex items-center justify-center gap-2 border border-brand-orange text-brand-orange bg-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-orange-50 transition-colors"
+            >
+              <Package className="w-4 h-4" />
+              Distribusi Roti Tambahan
+            </button>
+          )}
         </>
       )}
 

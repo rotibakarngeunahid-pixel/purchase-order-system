@@ -53,6 +53,9 @@ export default function OrderEntry() {
   const [outletOverride, setOutletOverride] = useState({}); // { [outlet_id]: true/false }
   const [pendingOverrideOutletId, setPendingOverrideOutletId] = useState(null); // untuk confirmation modal
   const [inputMode, setInputMode] = useState('per-outlet');
+  // Roti distribution modal state
+  const [showRotiDistModal, setShowRotiDistModal] = useState(false);
+  const [rotiDistQtys, setRotiDistQtys] = useState({});
 
   // Refs for use inside async callbacks
   const saveTimers = useRef({});
@@ -429,6 +432,62 @@ export default function OrderEntry() {
     setOutletDays((prev) => ({ ...prev, [outletId]: 1 }));
   };
 
+  // Handler distribusi roti tambahan (fase order)
+  const handleRotiDistribute = async () => {
+    const rotiMaterial = materials.find((m) => m.name.toLowerCase().includes('roti tawar'));
+    if (!rotiMaterial) {
+      alert('Material "Roti Tawar" tidak ditemukan di master data.');
+      return;
+    }
+    setRotiDistQtys({});
+    setShowRotiDistModal(true);
+  };
+
+  const handleRotiDistConfirm = async (perOutletQtys) => {
+    const rotiMaterial = materials.find((m) => m.name.toLowerCase().includes('roti tawar'));
+    if (!rotiMaterial) return;
+
+    const newMatrix = { ...matrix };
+    const pendingSaves = [];
+
+    Object.entries(perOutletQtys).forEach(([outletId, extraQty]) => {
+      const qty = Number(extraQty) || 0;
+      if (qty <= 0) return;
+      const key = getMatrixKey(outletId, rotiMaterial.id);
+      newMatrix[key] = (Number(newMatrix[key]) || 0) + qty;
+      pendingSaves.push({ outletId, materialId: rotiMaterial.id, qty: newMatrix[key] });
+    });
+
+    setMatrix(newMatrix);
+    setShowRotiDistModal(false);
+    setRotiDistQtys({});
+
+    if (pendingSaves.length > 0 && (!session || session.status === 'draft')) {
+      setSaveStatus('saving');
+      try {
+        let sess = sessionRef.current;
+        if (!sess) {
+          sess = await getOrCreateSession(orderDateRef.current);
+        }
+        if (sess.status === 'draft') {
+          await Promise.all(
+            pendingSaves.map((s) =>
+              api.post(`/api/orders/session/${sess.id}/request`, {
+                outlet_id: s.outletId,
+                material_id: s.materialId,
+                qty: s.qty,
+              })
+            )
+          );
+          showSaved();
+        }
+      } catch {
+        setSaveStatus('error');
+        setSaveError('Gagal menyimpan distribusi roti.');
+      }
+    }
+  };
+
   // --- Derived ---
   const isReadOnly = !!(session?.status && session.status !== 'draft');
 
@@ -476,6 +535,7 @@ export default function OrderEntry() {
     rotiError,
     rotiDetail,
     onRotiAutoFill: handleRotiAutoFill,
+    onRotiDist: isReadOnly ? undefined : handleRotiDistribute,
     onDismissDetail: () => setRotiDetail(null),
     rotiReferenceDate,
     onRefDateChange: setRotiReferenceDate,
@@ -484,6 +544,68 @@ export default function OrderEntry() {
 
   return (
     <div className="page-shell-wide">
+      {/* Modal distribusi roti tambahan */}
+      {showRotiDistModal && (() => {
+        const rotiMaterial = materials.find((m) => m.name.toLowerCase().includes('roti tawar'));
+        const totalDist = Object.values(rotiDistQtys).reduce((s, q) => s + (Number(q) || 0), 0);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+              <h3 className="font-semibold text-gray-900 mb-1">Distribusi Roti Tambahan</h3>
+              <p className="text-xs text-gray-400 mb-4">
+                Masukkan jumlah roti tambahan per cabang. Nilai akan ditambahkan ke order saat ini.
+              </p>
+              <div className="space-y-2 mb-4">
+                {outlets.filter((o) => outletOpen[o.id] !== false).map((outlet) => {
+                  const key = rotiMaterial ? getMatrixKey(outlet.id, rotiMaterial.id) : null;
+                  const current = key ? (Number(matrix[key]) || 0) : 0;
+                  return (
+                    <div key={outlet.id} className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <div className="text-sm text-gray-700">{outlet.name}</div>
+                        {current > 0 && (
+                          <div className="text-xs text-gray-400">Sudah: {current} roti</div>
+                        )}
+                      </div>
+                      <input
+                        type="number"
+                        min="0"
+                        value={rotiDistQtys[outlet.id] || ''}
+                        onChange={(e) =>
+                          setRotiDistQtys((prev) => ({ ...prev, [outlet.id]: e.target.value }))
+                        }
+                        className="w-20 text-center border border-gray-300 rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red"
+                        placeholder="0"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              {totalDist > 0 && (
+                <div className="mb-4 text-sm font-semibold text-brand-red">
+                  Total tambahan: {totalDist} roti
+                </div>
+              )}
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => { setShowRotiDistModal(false); setRotiDistQtys({}); }}
+                  className="btn-outline text-sm"
+                >
+                  Batal
+                </button>
+                <button
+                  onClick={() => handleRotiDistConfirm(rotiDistQtys)}
+                  disabled={totalDist === 0}
+                  className="btn-primary text-sm"
+                >
+                  Terapkan
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Header */}
       <OrderEntryHeader
         orderDate={orderDate}
