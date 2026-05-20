@@ -48,6 +48,46 @@ function isMissingSourceColumnError(error) {
   );
 }
 
+// Bangun map distribusi cabang: { [outlet_id]: { [material_id]: qty } }
+// Sumber: purchase_item_branch_distribution yang tersimpan saat catat penerimaan
+async function getBranchDistributionMap(sessionId) {
+  const { data: finalPOs, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('id')
+    .eq('session_id', sessionId)
+    .in('status', FINAL_RECEIPT_STATUSES);
+
+  if (poError) throw poError;
+  const finalPOIds = (finalPOs || []).map((po) => po.id).filter(Boolean);
+  if (finalPOIds.length === 0) return {};
+
+  const { data: poItems, error: itemsError } = await supabase
+    .from('purchase_order_items')
+    .select('id, material_id, branch_distributions:purchase_item_branch_distribution(outlet_id, qty)')
+    .in('po_id', finalPOIds)
+    .or('source.eq.ordered,source.is.null');
+
+  if (itemsError) {
+    // Tabel belum ada (migration belum dijalankan) — kembalikan map kosong
+    if (String(itemsError.message || '').toLowerCase().includes('purchase_item_branch_distribution')) {
+      return {};
+    }
+    throw itemsError;
+  }
+
+  // map: { [outlet_id]: { [material_id]: qty } }
+  const map = {};
+  (poItems || []).forEach((poItem) => {
+    (poItem.branch_distributions || []).forEach((d) => {
+      if (!map[d.outlet_id]) map[d.outlet_id] = {};
+      map[d.outlet_id][poItem.material_id] =
+        (map[d.outlet_id][poItem.material_id] || 0) + Number(d.qty || 0);
+    });
+  });
+
+  return map;
+}
+
 async function getReceiptAvailabilityMap(sessionId) {
   const { data: finalPOs, error: poError } = await supabase
     .from('purchase_orders')
@@ -191,13 +231,25 @@ router.get('/distribution', async (req, res) => {
   }
 
   let availabilityMap = {};
+  let branchDistMap = {};
   if (session) {
     try {
       availabilityMap = await getReceiptAvailabilityMap(session.id);
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }
+    try {
+      branchDistMap = await getBranchDistributionMap(session.id);
+    } catch {
+      // Non-fatal: jika gagal, fallback ke logika order_request_items
+    }
   }
+
+  // material_id mana saja yang sudah punya distribusi cabang (mapping manual)
+  const materialIdsWithDist = new Set();
+  Object.values(branchDistMap).forEach((outletDist) => {
+    Object.keys(outletDist).forEach((mid) => materialIdsWithDist.add(mid));
+  });
 
   const outletMap = {};
   const remainingAvailabilityByMaterial = {};
@@ -219,13 +271,21 @@ router.get('/distribution', async (req, res) => {
   (items || []).forEach((item) => {
     const availability = availabilityMap[item.material_id];
     let displayQty = Number(item.qty || 0);
+    let availabilityLimited = false;
 
-    if (availability?.has_final_receipt) {
+    if (materialIdsWithDist.has(item.material_id)) {
+      // Pakai distribusi cabang yang sudah di-mapping secara manual
+      displayQty = branchDistMap[item.outlet_id]?.[item.material_id] ?? 0;
+      // Outlet yang tidak mendapat distribusi dilewati
+      if (displayQty <= 0) return;
+    } else if (availability?.has_final_receipt) {
+      // Belum ada distribusi manual: bagi otomatis berdasarkan qty diterima
       const remainingAvailability = getRemainingAvailability(item);
       if (remainingAvailability <= 0) return;
 
       displayQty = Math.min(displayQty, remainingAvailability);
       remainingAvailabilityByMaterial[item.material_id] = remainingAvailability - displayQty;
+      availabilityLimited = displayQty < Number(item.qty || 0);
     }
 
     if (displayQty <= 0) return;
@@ -241,7 +301,7 @@ router.get('/distribution', async (req, res) => {
       purchase_unit: item.material?.purchase_unit,
       qty: displayQty,
       requested_qty: item.qty,
-      availability_limited: availability?.has_final_receipt && displayQty < Number(item.qty || 0),
+      availability_limited: availabilityLimited,
       source: 'ordered',
     });
   });

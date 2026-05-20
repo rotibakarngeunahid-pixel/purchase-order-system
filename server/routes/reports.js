@@ -201,6 +201,52 @@ async function getReceiptAvailabilityMap(dateFrom, dateTo) {
   return availabilityMap;
 }
 
+// Bangun map distribusi cabang untuk analitik:
+// { makeKey(session_id, outlet_id, material_id) → qty }
+// Dipakai untuk mengganti order_request_items.qty dengan qty distribusi aktual.
+async function getBranchDistributionMapForAnalytics(sessionIds) {
+  if (!sessionIds || sessionIds.length === 0) return {};
+
+  const { data: finalPOs, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('id, session_id')
+    .in('session_id', sessionIds)
+    .in('status', FINAL_RECEIPT_STATUSES);
+
+  if (poError) return {}; // Non-fatal
+
+  const poSessionMap = {};
+  const poIds = (finalPOs || []).map((p) => {
+    poSessionMap[p.id] = p.session_id;
+    return p.id;
+  }).filter(Boolean);
+
+  if (poIds.length === 0) return {};
+
+  let result = await supabase
+    .from('purchase_order_items')
+    .select('id, po_id, material_id, branch_distributions:purchase_item_branch_distribution(outlet_id, qty)')
+    .in('po_id', poIds)
+    .or('source.eq.ordered,source.is.null');
+
+  if (result.error) {
+    // Tabel belum ada atau error lain → non-fatal, fallback ke order_request_items
+    return {};
+  }
+
+  const map = {};
+  (result.data || []).forEach((item) => {
+    const sessionId = poSessionMap[item.po_id];
+    if (!sessionId) return;
+    (item.branch_distributions || []).forEach((d) => {
+      const key = makeKey(sessionId, d.outlet_id, item.material_id);
+      map[key] = (map[key] || 0) + Number(d.qty || 0);
+    });
+  });
+
+  return map;
+}
+
 async function getRequestQtyMaps(dateFrom, dateTo) {
   const { data, error } = await supabase
     .from('order_request_items')
@@ -437,15 +483,33 @@ router.get('/analytics/outlets', async (req, res) => {
   }
   filtered = filtered.filter((item) => shouldIncludeRequestItem(item, availabilityMap));
 
+  // Load distribusi cabang aktual (purchase_item_branch_distribution)
+  const sessionIds = [...new Set(filtered.map((i) => i.session?.id).filter(Boolean))];
+  let branchDistMap = {};
+  try {
+    branchDistMap = await getBranchDistributionMapForAnalytics(sessionIds);
+  } catch {
+    // Non-fatal: jika gagal, tetap pakai order_request_items.qty
+  }
+
   const displayOutlets = outlet_id
     ? (outlets || []).filter((outlet) => outlet.id === outlet_id)
     : (outlets || []);
 
   const result = displayOutlets.map((outlet) => {
     const outletItems = filtered.filter((item) => item.outlet_id === outlet.id);
+    const total_qty = outletItems.reduce((sum, item) => {
+      const sessionId = item.session?.id;
+      const distKey = makeKey(sessionId, outlet.id, item.material_id);
+      // Pakai distribusi aktual jika ada, fallback ke qty yang dipesan
+      const qty = branchDistMap[distKey] !== undefined
+        ? branchDistMap[distKey]
+        : Number(item.qty || 0);
+      return sum + qty;
+    }, 0);
     return {
       outlet,
-      total_qty: outletItems.reduce((sum, i) => sum + Number(i.qty), 0),
+      total_qty,
       order_count: outletItems.length,
     };
   }).sort((a, b) => b.total_qty - a.total_qty);
