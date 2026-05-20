@@ -19,6 +19,7 @@ const reportsRouter = require('./routes/reports');
 const rotiTawarRouter = require('./routes/rotiTawar');
 const purchaseReportRouter = require('./routes/purchaseReport');
 const holidaysRouter = require('./routes/holidays');
+const financePortalRouter = require('./routes/financePortal');
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use('/api/auth', authRouter);
 
 // Public routes (no auth required)
 app.use('/api/public', publicRouter);
+app.use('/api/finance-portal', financePortalRouter);
 
 // Protected routes
 app.use('/api/suppliers', authMiddleware, suppliersRouter);
