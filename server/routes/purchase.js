@@ -8,6 +8,7 @@ const OPTIONAL_PO_ITEM_COLUMNS = [
   'adjustment_note',
   'created_at',
   'material_variants',
+  'purchase_item_branch_distribution',
 ];
 
 function isMissingColumnError(error, columns = OPTIONAL_PO_ITEM_COLUMNS) {
@@ -45,7 +46,34 @@ function normalizeAndSortPOItems(po) {
 }
 
 async function fetchPODetail(poId) {
+  // Coba dengan semua kolom + distribusi cabang
   let result = await supabase
+    .from('purchase_orders')
+    .select(`
+      *,
+      supplier:suppliers(id, name, wa_number),
+      session:order_sessions(id, order_date),
+      items:purchase_order_items(
+        id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
+        source, adjustment_note, created_at,
+        material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
+        variant:material_variants(id, brand, price_per_purchase_unit),
+        branch_distributions:purchase_item_branch_distribution(outlet_id, qty)
+      )
+    `)
+    .eq('id', poId)
+    .single();
+
+  if (!result.error) {
+    return { data: normalizeAndSortPOItems(result.data), error: null };
+  }
+
+  if (!isMissingColumnError(result.error)) {
+    return result;
+  }
+
+  // Fallback: tanpa distribusi cabang (tabel belum ada)
+  result = await supabase
     .from('purchase_orders')
     .select(`
       *,
@@ -69,6 +97,7 @@ async function fetchPODetail(poId) {
     return result;
   }
 
+  // Fallback: tanpa variant dan distribusi
   result = await supabase
     .from('purchase_orders')
     .select(`
@@ -194,10 +223,10 @@ router.get('/', async (req, res) => {
   res.json(data);
 });
 
-// PUT catat penerimaan barang (mendukung item adjustment)
+// PUT catat penerimaan barang (mendukung item adjustment + distribusi cabang)
 router.put('/:po_id/receive', async (req, res) => {
   const { po_id } = req.params;
-  const { items, deleted_adjustment_item_ids, notes } = req.body;
+  const { items, deleted_adjustment_item_ids, notes, branch_distributions } = req.body;
 
   if (!items || !Array.isArray(items)) {
     return res.status(400).json({ error: 'items wajib berupa array' });
@@ -266,6 +295,23 @@ router.put('/:po_id/receive', async (req, res) => {
             adjustment_note: item.adjustment_note || null,
           });
         if (itemError) return res.status(500).json({ error: itemError.message });
+      }
+    }
+  }
+
+  // Simpan distribusi roti per cabang (jika ada)
+  if (Array.isArray(branch_distributions) && branch_distributions.length > 0) {
+    const distRows = branch_distributions
+      .filter((d) => d.po_item_id && d.outlet_id && Number(d.qty) >= 0)
+      .map((d) => ({ po_item_id: d.po_item_id, outlet_id: d.outlet_id, qty: Number(d.qty) || 0 }));
+
+    if (distRows.length > 0) {
+      const { error: distError } = await supabase
+        .from('purchase_item_branch_distribution')
+        .upsert(distRows, { onConflict: 'po_item_id,outlet_id' });
+      if (distError) {
+        // Non-fatal: log saja, jangan gagalkan penerimaan utama
+        console.error('Distribusi cabang gagal disimpan:', distError.message);
       }
     }
   }
@@ -376,13 +422,22 @@ router.put('/:po_id/reset', async (req, res) => {
 
   if (fetchError || !po) return res.status(404).json({ error: 'PO tidak ditemukan' });
 
-  // Hapus semua item adjustment
+  // Hapus semua item adjustment (distribusi adjustment terhapus via CASCADE)
   const deleteAdjustmentError = await deleteAdjustmentItems(po_id);
   if (deleteAdjustmentError) return res.status(500).json({ error: deleteAdjustmentError.message });
 
   // Reset item ordered: qty_received dan price_actual kembali null
   const { data: orderedItems, error: orderedItemsError } = await fetchOrderedItemIds(po_id);
   if (orderedItemsError) return res.status(500).json({ error: orderedItemsError.message });
+
+  // Hapus distribusi cabang untuk semua item ordered (reset bersih)
+  if ((orderedItems || []).length > 0) {
+    const orderedItemIds = orderedItems.map((i) => i.id);
+    await supabase
+      .from('purchase_item_branch_distribution')
+      .delete()
+      .in('po_item_id', orderedItemIds);
+  }
 
   for (const item of (orderedItems || [])) {
     await supabase
