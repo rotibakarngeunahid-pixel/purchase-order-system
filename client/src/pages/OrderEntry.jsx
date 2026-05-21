@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, {
   toInputDate,
@@ -7,7 +7,7 @@ import api, {
 } from '../lib/api';
 import { previewRotiOrder } from '../services/rotiTawarService';
 import { checkHolidaysBulk, saveHolidayMetadataBulk } from '../services/holidayService';
-import { getMatrixKey } from '../lib/orderHelpers';
+import { buildRotiTawarLiveSummary, getMatrixKey } from '../lib/orderHelpers';
 import OrderEntryHeader from '../components/order/OrderEntryHeader';
 import OrderSummaryBar from '../components/order/OrderSummaryBar';
 import OutletControlsPanel from '../components/order/OutletControlsPanel';
@@ -490,6 +490,10 @@ export default function OrderEntry() {
 
   // --- Derived ---
   const isReadOnly = !!(session?.status && session.status !== 'draft');
+  const rotiLiveSummary = useMemo(
+    () => buildRotiTawarLiveSummary({ materials, outlets, matrix, rotiDetail }),
+    [materials, outlets, matrix, rotiDetail]
+  );
 
   // --- Loading screen ---
   if (loading) {
@@ -534,6 +538,7 @@ export default function OrderEntry() {
     rotiLoading,
     rotiError,
     rotiDetail,
+    rotiLiveSummary,
     onRotiAutoFill: handleRotiAutoFill,
     onRotiDist: isReadOnly ? undefined : handleRotiDistribute,
     onDismissDetail: () => setRotiDetail(null),
