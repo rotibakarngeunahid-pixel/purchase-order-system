@@ -247,6 +247,50 @@ async function getBranchDistributionMapForAnalytics(sessionIds) {
   return map;
 }
 
+// Bangun map distribusi roti TAMBAHAN (source=adjustment) per outlet:
+// { outlet_id → total_adj_roti_qty }
+// Dipakai untuk menambahkan qty roti tambahan ke total analitik per outlet.
+async function getAdjRotiDistByOutlet(sessionIds, dateFrom, dateTo) {
+  if (!sessionIds || sessionIds.length === 0) return {};
+
+  const { data: finalPOs, error: poError } = await supabase
+    .from('purchase_orders')
+    .select('id, session_id, session:order_sessions(order_date)')
+    .in('session_id', sessionIds)
+    .in('status', FINAL_RECEIPT_STATUSES);
+
+  if (poError) return {};
+
+  const poIds = (finalPOs || [])
+    .filter((p) => isWithinDateRange(p.session?.order_date, dateFrom, dateTo))
+    .map((p) => p.id)
+    .filter(Boolean);
+
+  if (poIds.length === 0) return {};
+
+  const result = await supabase
+    .from('purchase_order_items')
+    .select(`
+      material_id,
+      material:materials(name),
+      branch_distributions:purchase_item_branch_distribution(outlet_id, qty)
+    `)
+    .in('po_id', poIds)
+    .eq('source', 'adjustment');
+
+  if (result.error) return {};
+
+  const map = {};
+  for (const item of result.data || []) {
+    if (!item.material?.name?.toLowerCase().includes('roti')) continue;
+    for (const dist of item.branch_distributions || []) {
+      if (!dist.outlet_id || !Number(dist.qty)) continue;
+      map[dist.outlet_id] = (map[dist.outlet_id] || 0) + Number(dist.qty);
+    }
+  }
+  return map;
+}
+
 async function getRequestQtyMaps(dateFrom, dateTo) {
   const { data, error } = await supabase
     .from('order_request_items')
@@ -492,13 +536,21 @@ router.get('/analytics/outlets', async (req, res) => {
     // Non-fatal: jika gagal, tetap pakai order_request_items.qty
   }
 
+  // Load distribusi roti tambahan (adj) per outlet
+  let adjRotiByOutlet = {};
+  try {
+    adjRotiByOutlet = await getAdjRotiDistByOutlet(sessionIds, date_from, date_to);
+  } catch {
+    // Non-fatal
+  }
+
   const displayOutlets = outlet_id
     ? (outlets || []).filter((outlet) => outlet.id === outlet_id)
     : (outlets || []);
 
   const result = displayOutlets.map((outlet) => {
     const outletItems = filtered.filter((item) => item.outlet_id === outlet.id);
-    const total_qty = outletItems.reduce((sum, item) => {
+    const orderedQty = outletItems.reduce((sum, item) => {
       const sessionId = item.session?.id;
       const distKey = makeKey(sessionId, outlet.id, item.material_id);
       // Pakai distribusi aktual jika ada, fallback ke qty yang dipesan
@@ -507,9 +559,11 @@ router.get('/analytics/outlets', async (req, res) => {
         : Number(item.qty || 0);
       return sum + qty;
     }, 0);
+    // Tambahkan distribusi roti tambahan (adj) jika ada
+    const adjQty = adjRotiByOutlet[outlet.id] || 0;
     return {
       outlet,
-      total_qty,
+      total_qty: orderedQty + adjQty,
       order_count: outletItems.length,
     };
   }).sort((a, b) => b.total_qty - a.total_qty);

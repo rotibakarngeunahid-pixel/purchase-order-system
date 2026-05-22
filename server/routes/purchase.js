@@ -281,8 +281,8 @@ router.put('/:po_id/receive', async (req, res) => {
           .eq('source', 'adjustment');
         if (itemError) return res.status(500).json({ error: itemError.message });
       } else {
-        // Insert adjustment baru
-        const { error: itemError } = await supabase
+        // Insert adjustment baru — ambil id untuk simpan inline_branch_distributions
+        const { data: insertedAdj, error: itemError } = await supabase
           .from('purchase_order_items')
           .insert({
             po_id,
@@ -293,8 +293,33 @@ router.put('/:po_id/receive', async (req, res) => {
             price_actual: item.price_actual,
             source: 'adjustment',
             adjustment_note: item.adjustment_note || null,
-          });
+          })
+          .select('id')
+          .single();
         if (itemError) return res.status(500).json({ error: itemError.message });
+
+        // Simpan inline_branch_distributions jika ada (untuk adj roti baru) — non-fatal
+        if (
+          insertedAdj?.id &&
+          Array.isArray(item.inline_branch_distributions) &&
+          item.inline_branch_distributions.length > 0
+        ) {
+          const distRows = item.inline_branch_distributions
+            .filter((d) => d.outlet_id && Number(d.qty) >= 0)
+            .map((d) => ({
+              po_item_id: insertedAdj.id,
+              outlet_id: d.outlet_id,
+              qty: Number(d.qty) || 0,
+            }));
+          if (distRows.length > 0) {
+            const { error: inlineDistError } = await supabase
+              .from('purchase_item_branch_distribution')
+              .upsert(distRows, { onConflict: 'po_item_id,outlet_id' });
+            if (inlineDistError) {
+              console.error('Inline distribusi adj gagal disimpan:', inlineDistError.message);
+            }
+          }
+        }
       }
     }
   }

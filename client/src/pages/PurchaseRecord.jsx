@@ -303,12 +303,12 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [quickAddVariantFor, setQuickAddVariantFor] = useState(null);
   const [quickAddMaterialForRowId, setQuickAddMaterialForRowId] = useState(null);
   const [outlets, setOutlets] = useState([]);
-  // branchDistributions: { [po_item_id]: { [outlet_id]: qty_string } }
+  // branchDistributions: { [po_item_id | _tempId]: { [outlet_id]: qty_string } }
+  // Digunakan untuk ORDERED items (keyed by po_item_id) dan ADJ items (keyed by _tempId/id)
   const [branchDistributions, setBranchDistributions] = useState(() => {
     const map = {};
     (po.items || [])
-      .filter((item) => (item.source || 'ordered') === 'ordered' &&
-                        item.material?.name?.toLowerCase().includes('roti') &&
+      .filter((item) => item.material?.name?.toLowerCase().includes('roti') &&
                         item.branch_distributions?.length > 0)
       .forEach((item) => {
         map[item.id] = {};
@@ -318,6 +318,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
       });
     return map;
   });
+  // Data order per outlet per material dari sesi order awal (untuk auto-populate distribusi)
+  const [sessionRotiOrders, setSessionRotiOrders] = useState({});
 
   // Load master data
   useEffect(() => {
@@ -333,6 +335,51 @@ function ReceiveModal({ po, onClose, onSaved }) {
       })
       .catch(console.error);
   }, []);
+
+  // Load data order per outlet dari sesi awal untuk auto-populate distribusi roti
+  useEffect(() => {
+    const sessionId = po.session?.id;
+    if (!sessionId) return;
+    api.get(`/api/orders/session/${sessionId}`)
+      .then((res) => {
+        // Buat map: material_id → { outlet_id: qty } untuk semua bahan roti
+        const byMaterial = {};
+        (res.data.items || []).forEach((item) => {
+          if (!item.material?.name?.toLowerCase().includes('roti')) return;
+          if (!item.material_id || !item.outlet_id || !Number(item.qty)) return;
+          if (!byMaterial[item.material_id]) byMaterial[item.material_id] = {};
+          byMaterial[item.material_id][item.outlet_id] = Number(item.qty);
+        });
+        setSessionRotiOrders(byMaterial);
+      })
+      .catch(() => {}); // non-fatal
+  }, [po.session?.id]);
+
+  // Auto-populate branchDistributions dari data order sesi untuk ordered roti items
+  // Hanya mengisi jika belum ada distribusi tersimpan sebelumnya
+  useEffect(() => {
+    if (Object.keys(sessionRotiOrders).length === 0) return;
+    setBranchDistributions((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      (po.items || [])
+        .filter((item) => (item.source || 'ordered') === 'ordered' &&
+                          item.material?.name?.toLowerCase().includes('roti'))
+        .forEach((item) => {
+          const existingDist = next[item.id];
+          const hasExisting =
+            existingDist && Object.values(existingDist).some((v) => Number(v) > 0);
+          if (hasExisting) return; // jangan timpa data yang sudah tersimpan
+          const orderMap = sessionRotiOrders[item.material_id];
+          if (!orderMap || Object.keys(orderMap).length === 0) return;
+          next[item.id] = Object.fromEntries(
+            Object.entries(orderMap).map(([outletId, qty]) => [outletId, String(qty)])
+          );
+          changed = true;
+        });
+      return changed ? next : prev;
+    });
+  }, [sessionRotiOrders, po.items]);
 
   // Load variants untuk semua bahan di PO (ordered + adjustment existing)
   useEffect(() => {
@@ -586,6 +633,34 @@ function ReceiveModal({ po, onClose, onSaved }) {
     setNotes(po.notes || '');
     setError('');
     setRowErrors({});
+    // Reset branchDistributions: kembali ke data tersimpan + re-apply auto-populate dari sesi
+    setBranchDistributions(() => {
+      const base = {};
+      (po.items || [])
+        .filter((item) => item.material?.name?.toLowerCase().includes('roti') &&
+                          item.branch_distributions?.length > 0)
+        .forEach((item) => {
+          base[item.id] = {};
+          (item.branch_distributions || []).forEach((d) => {
+            base[item.id][d.outlet_id] = String(d.qty);
+          });
+        });
+      // Terapkan auto-populate dari sesi untuk ordered roti tanpa distribusi tersimpan
+      (po.items || [])
+        .filter((item) => (item.source || 'ordered') === 'ordered' &&
+                          item.material?.name?.toLowerCase().includes('roti'))
+        .forEach((item) => {
+          const hasExisting = base[item.id] &&
+            Object.values(base[item.id]).some((v) => Number(v) > 0);
+          if (hasExisting) return;
+          const orderMap = sessionRotiOrders[item.material_id];
+          if (!orderMap || Object.keys(orderMap).length === 0) return;
+          base[item.id] = Object.fromEntries(
+            Object.entries(orderMap).map(([outletId, qty]) => [outletId, String(qty)])
+          );
+        });
+      return base;
+    });
   };
 
   const handleSave = async () => {
@@ -618,12 +693,24 @@ function ReceiveModal({ po, onClose, onSaved }) {
     setSaving(true);
     setError('');
     try {
-      // Bangun array distribusi cabang dari state branchDistributions
+      // Bangun array distribusi cabang untuk ordered items dan adj items yang sudah punya ID
       const branch_distributions = [];
-      Object.entries(branchDistributions).forEach(([itemId, outletQtys]) => {
-        Object.entries(outletQtys).forEach(([outletId, qty]) => {
+      orderedItems.forEach((item) => {
+        const distMap = branchDistributions[item.id] || {};
+        Object.entries(distMap).forEach(([outletId, qty]) => {
           branch_distributions.push({
-            po_item_id: itemId,
+            po_item_id: item.id,
+            outlet_id: outletId,
+            qty: Number(qty) || 0,
+          });
+        });
+      });
+      // Adj items yang sudah punya ID real (bukan baru) juga masuk branch_distributions biasa
+      adjustmentItems.filter((adj) => adj.id).forEach((item) => {
+        const distMap = branchDistributions[item.id] || {};
+        Object.entries(distMap).forEach(([outletId, qty]) => {
+          branch_distributions.push({
+            po_item_id: item.id,
             outlet_id: outletId,
             qty: Number(qty) || 0,
           });
@@ -639,15 +726,29 @@ function ReceiveModal({ po, onClose, onSaved }) {
             price_actual: Number(item.price_actual || 0),
             variant_id: item.variant_id || null,
           })),
-          ...adjustmentItems.map((item) => ({
-            ...(item.id ? { id: item.id } : {}),
-            source: 'adjustment',
-            material_id: item.material_id,
-            variant_id: item.variant_id || null,
-            qty_received: Number(item.qty_received || 0),
-            price_actual: Number(item.price_actual || 0),
-            adjustment_note: item.adjustment_note || null,
-          })),
+          ...adjustmentItems.map((item) => {
+            const isRoti = (() => {
+              const mat = materials.find((m) => m.id === item.material_id);
+              return mat?.name?.toLowerCase().includes('roti') ||
+                     item.material?.name?.toLowerCase().includes('roti');
+            })();
+            // Adj roti baru (belum punya ID) → kirim inline_branch_distributions
+            const inlineDist = (!item.id && isRoti)
+              ? Object.entries(branchDistributions[item._tempId] || {})
+                  .filter(([, qty]) => Number(qty) > 0)
+                  .map(([outletId, qty]) => ({ outlet_id: outletId, qty: Number(qty) || 0 }))
+              : undefined;
+            return {
+              ...(item.id ? { id: item.id } : {}),
+              source: 'adjustment',
+              material_id: item.material_id,
+              variant_id: item.variant_id || null,
+              qty_received: Number(item.qty_received || 0),
+              price_actual: Number(item.price_actual || 0),
+              adjustment_note: item.adjustment_note || null,
+              ...(inlineDist !== undefined ? { inline_branch_distributions: inlineDist } : {}),
+            };
+          }),
         ],
         deleted_adjustment_item_ids: deletedAdjustmentItemIds,
         notes,
@@ -802,7 +903,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* ── Distribusi Roti ke Cabang ── */}
+          {/* ── Distribusi Roti ke Cabang (Ordered) ── */}
           {(() => {
             const rotiItems = orderedItems.filter((item) =>
               item.material?.name?.toLowerCase().includes('roti')
@@ -814,7 +915,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
                   Distribusi Roti ke Cabang
                 </h4>
                 <p className="text-xs text-gray-400 mb-3">
-                  Masukkan berapa pcs yang dikirim ke setiap cabang. Total distribusi idealnya sama dengan jumlah yang diterima.
+                  Distribusi otomatis dari order awal. Sesuaikan jika ada perubahan aktual.
                 </p>
                 <div className="space-y-4">
                   {rotiItems.map((item) => {
@@ -826,15 +927,27 @@ function ReceiveModal({ po, onClose, onSaved }) {
                     const remaining = received - totalDist;
                     const isBalanced = remaining === 0;
                     const isOver = remaining < 0;
+                    // Cek apakah distribusi ini auto-filled dari session order
+                    const sessionOrderMap = sessionRotiOrders[item.material_id];
+                    const isAutoFilled = sessionOrderMap &&
+                      !item.branch_distributions?.length &&
+                      Object.keys(distMap).length > 0;
                     return (
                       <div key={item.id} className="border border-orange-200 rounded-xl p-4 bg-orange-50/50">
-                        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                          <span className="text-sm font-semibold text-gray-800">
-                            {item.material?.name}
-                            <span className="text-xs text-gray-400 ml-1 font-normal">
-                              ({item.material?.purchase_unit})
+                        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-semibold text-gray-800">
+                              {item.material?.name}
+                              <span className="text-xs text-gray-400 ml-1 font-normal">
+                                ({item.material?.purchase_unit})
+                              </span>
                             </span>
-                          </span>
+                            {isAutoFilled && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-green-100 text-green-700 border border-green-200">
+                                Otomatis dari order
+                              </span>
+                            )}
+                          </div>
                           <div className="text-xs">
                             <span className="text-gray-500">Diterima: </span>
                             <span className="font-semibold text-gray-700">{received}</span>
@@ -864,6 +977,91 @@ function ReceiveModal({ po, onClose, onSaved }) {
                                 min="0"
                                 value={distMap[outlet.id] || ''}
                                 onChange={(e) => updateBranchDist(item.id, outlet.id, e.target.value)}
+                                className="w-16 text-center border border-gray-300 rounded-md px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red bg-white"
+                                placeholder="0"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Distribusi Roti Tambahan ke Cabang (Adjustment) ── */}
+          {(() => {
+            const adjRotiItems = adjustmentItems.filter((item) => {
+              const mat = materials.find((m) => m.id === item.material_id);
+              return mat?.name?.toLowerCase().includes('roti') ||
+                     item.material?.name?.toLowerCase().includes('roti');
+            });
+            if (adjRotiItems.length === 0 || outlets.length === 0) return null;
+            return (
+              <div>
+                <h4 className="text-sm font-semibold text-gray-700 mb-1">
+                  Distribusi Roti Tambahan ke Cabang
+                </h4>
+                <p className="text-xs text-gray-400 mb-3">
+                  Roti tambahan di luar order awal wajib dimapping manual ke setiap cabang.
+                </p>
+                <div className="space-y-4">
+                  {adjRotiItems.map((item) => {
+                    const key = item.id || item._tempId;
+                    const mat = materials.find((m) => m.id === item.material_id);
+                    const distMap = branchDistributions[key] || {};
+                    const totalDist = Object.values(distMap).reduce(
+                      (s, q) => s + (Number(q) || 0), 0
+                    );
+                    const received = Number(item.qty_received) || 0;
+                    const remaining = received - totalDist;
+                    const isBalanced = remaining === 0;
+                    const isOver = remaining < 0;
+                    return (
+                      <div key={key} className="border border-blue-200 rounded-xl p-4 bg-blue-50/50">
+                        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-gray-800">
+                              {mat?.name || '—'}
+                              <span className="text-xs text-gray-400 ml-1 font-normal">
+                                ({mat?.purchase_unit})
+                              </span>
+                            </span>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                              Tambahan
+                            </span>
+                          </div>
+                          <div className="text-xs">
+                            <span className="text-gray-500">Qty Tambahan: </span>
+                            <span className="font-semibold text-gray-700">{received}</span>
+                            <span className="mx-2 text-gray-300">|</span>
+                            <span className="text-gray-500">Terdistribusi: </span>
+                            <span className={`font-semibold ${isBalanced ? 'text-green-600' : isOver ? 'text-red-600' : 'text-brand-orange'}`}>
+                              {totalDist}
+                            </span>
+                            {!isBalanced && (
+                              <span className={`ml-1 ${isOver ? 'text-red-600' : 'text-brand-orange'}`}>
+                                ({isOver ? `melebihi ${Math.abs(remaining)}` : `sisa ${remaining}`})
+                              </span>
+                            )}
+                            {isBalanced && totalDist > 0 && (
+                              <span className="ml-1 text-green-600">✓</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+                          {outlets.map((outlet) => (
+                            <div key={outlet.id} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 flex-1 truncate" title={outlet.name}>
+                                {outlet.name}
+                              </span>
+                              <input
+                                type="number"
+                                min="0"
+                                value={distMap[outlet.id] || ''}
+                                onChange={(e) => updateBranchDist(key, outlet.id, e.target.value)}
                                 className="w-16 text-center border border-gray-300 rounded-md px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red bg-white"
                                 placeholder="0"
                               />

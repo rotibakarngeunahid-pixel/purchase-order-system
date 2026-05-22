@@ -15,6 +15,7 @@ import OrderMatrixInput from '../components/order/OrderMatrixInput';
 import OutletOrderInput from '../components/order/OutletOrderInput';
 import MaterialOrderInput from '../components/order/MaterialOrderInput';
 import RotiTawarPanel from '../components/order/RotiTawarPanel';
+import OrderItemsSidebar from '../components/order/OrderItemsSidebar';
 
 const STATUS_LABEL = { draft: 'Draft', sent: 'Terkirim', completed: 'Selesai' };
 const STATUS_CLASS = { draft: 'badge-draft', sent: 'badge-sent', completed: 'badge-completed' };
@@ -53,6 +54,8 @@ export default function OrderEntry() {
   const [outletOverride, setOutletOverride] = useState({}); // { [outlet_id]: true/false }
   const [pendingOverrideOutletId, setPendingOverrideOutletId] = useState(null); // untuk confirmation modal
   const [inputMode, setInputMode] = useState('per-outlet');
+  // Index outlet yang sedang dipilih di mode per-outlet (lifted state agar sidebar bisa sync)
+  const [selectedOutletIdx, setSelectedOutletIdx] = useState(0);
   // Roti distribution modal state
   const [showRotiDistModal, setShowRotiDistModal] = useState(false);
   const [rotiDistQtys, setRotiDistQtys] = useState({});
@@ -692,6 +695,8 @@ export default function OrderEntry() {
               outletOverride={outletOverride}
               onRequestOverride={handleRequestOverride}
               onCancelOverride={handleCancelOverride}
+              selectedOutletIdx={selectedOutletIdx}
+              onSelectOutletIdx={setSelectedOutletIdx}
             />
           )}
           {inputMode === 'per-bahan' && (
@@ -703,8 +708,17 @@ export default function OrderEntry() {
           )}
         </div>
 
-        {/* Right sidebar — desktop only, OutletControls disembunyikan di mode per-outlet karena sudah ada di panel kiri */}
+        {/* Right sidebar — desktop only */}
         <div className="w-72 flex-shrink-0 hidden lg:flex flex-col gap-4">
+          {/* Sidebar per-outlet: tampilkan ringkasan bahan per cabang yang sedang dipilih */}
+          {inputMode === 'per-outlet' && (
+            <OrderItemsSidebar
+              outlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
+              materials={materials}
+              matrix={matrix}
+            />
+          )}
+          {/* Mode matrix/per-bahan: tampilkan OutletControlsPanel (OutletControls sudah di panel kiri di per-outlet) */}
           {inputMode !== 'per-outlet' && <OutletControlsPanel {...outletControlProps} />}
           <RotiTawarPanel {...rotiPanelProps} />
         </div>
@@ -712,6 +726,13 @@ export default function OrderEntry() {
 
       {/* Mobile/tablet: panels below input */}
       <div className="lg:hidden mt-4 flex flex-col gap-4">
+        {inputMode === 'per-outlet' && (
+          <OrderItemsSidebar
+            outlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
+            materials={materials}
+            matrix={matrix}
+          />
+        )}
         {inputMode !== 'per-outlet' && <OutletControlsPanel {...outletControlProps} />}
         <RotiTawarPanel {...rotiPanelProps} />
       </div>

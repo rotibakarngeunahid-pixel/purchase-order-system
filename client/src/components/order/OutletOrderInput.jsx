@@ -36,8 +36,18 @@ export default function OutletOrderInput({
   outletOverride = {},
   onRequestOverride,
   onCancelOverride,
+  // Controlled state dari parent (opsional — jika tidak diberikan, pakai local state)
+  selectedOutletIdx,
+  onSelectOutletIdx,
 }) {
-  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [localIdx, setLocalIdx] = useState(0);
+  // Gunakan controlled state jika disediakan parent, otherwise local
+  const selectedIdx = selectedOutletIdx !== undefined ? selectedOutletIdx : localIdx;
+  const setSelectedIdx = (val) => {
+    const idx = typeof val === 'function' ? val(selectedIdx) : val;
+    if (onSelectOutletIdx) onSelectOutletIdx(idx);
+    setLocalIdx(idx);
+  };
   const clampedIdx = Math.min(selectedIdx, outlets.length - 1);
   const selectedOutlet = outlets[clampedIdx];
   const isOpen = selectedOutlet ? outletOpen[selectedOutlet.id] !== false : true;
