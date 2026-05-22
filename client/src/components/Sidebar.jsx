@@ -11,6 +11,7 @@ import {
   LogOut,
   PackagePlus,
   Settings,
+  Trash2,
   Truck,
 } from 'lucide-react';
 
@@ -26,14 +27,17 @@ const navItems = [
   { to: '/holidays', label: 'Hari Libur', icon: CalendarOff },
   { to: '/master', label: 'Master Data', icon: Database },
   { to: '/settings', label: 'Pengaturan', icon: Settings },
+  { to: '/data-deletion', label: 'Hapus Data', icon: Trash2, danger: true },
 ];
 
-function SidebarIcon({ icon: Icon, active = false }) {
+function SidebarIcon({ icon: Icon, active = false, danger = false }) {
   return (
     <span
       className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${
         active
           ? 'bg-brand-red text-white shadow-sm'
+          : danger
+          ? 'bg-red-50 text-red-500 group-hover:bg-red-100 group-hover:text-red-700'
           : 'bg-gray-100 text-gray-500 group-hover:bg-red-50 group-hover:text-brand-red'
       }`}
     >
@@ -89,13 +93,15 @@ export default function Sidebar() {
               `group flex h-12 flex-shrink-0 items-center gap-3 rounded-lg px-3 text-sm font-semibold whitespace-nowrap transition-all md:w-full ${
                 isActive
                   ? 'bg-red-50 text-brand-red shadow-sm ring-1 ring-red-100'
+                  : item.danger
+                  ? 'text-red-500 hover:bg-red-50 hover:text-red-700'
                   : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               }`
             }
           >
             {({ isActive }) => (
               <>
-                <SidebarIcon icon={item.icon} active={isActive} />
+                <SidebarIcon icon={item.icon} active={isActive} danger={!isActive && item.danger} />
                 <span>{item.label}</span>
               </>
             )}
