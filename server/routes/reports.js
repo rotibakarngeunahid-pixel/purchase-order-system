@@ -336,8 +336,26 @@ router.get('/analytics/materials', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Hanya sesi yang sudah selesai semua PO-nya (completed)
-  let filtered = (data || []).filter((item) => item.session?.status === 'completed');
+  // Hitung availability dulu agar bisa filter sesi 'sent' yang materialnya sudah diterima
+  let availabilityMap = {};
+  try {
+    availabilityMap = await getReceiptAvailabilityMap(date_from, date_to);
+  } catch (availabilityError) {
+    return res.status(500).json({ error: availabilityError.message });
+  }
+
+  // Sertakan sesi 'completed' DAN sesi 'sent' di mana material ini sudah diterima
+  let filtered = (data || []).filter((item) => {
+    const status = item.session?.status;
+    if (status === 'completed') return true;
+    if (status === 'sent') {
+      const sessionId = item.session?.id;
+      const materialId = item.material_id || item.material?.id;
+      const avail = availabilityMap[makeKey(sessionId, materialId)];
+      return avail?.has_final_receipt === true && avail.total_received > 0;
+    }
+    return false;
+  });
   if (date_from || date_to) {
     filtered = filtered.filter((item) => {
       const d = item.session?.order_date;
@@ -346,13 +364,6 @@ router.get('/analytics/materials', async (req, res) => {
       if (date_to && d > date_to) return false;
       return true;
     });
-  }
-
-  let availabilityMap = {};
-  try {
-    availabilityMap = await getReceiptAvailabilityMap(date_from, date_to);
-  } catch (availabilityError) {
-    return res.status(500).json({ error: availabilityError.message });
   }
   filtered = filtered.filter((item) => shouldIncludeRequestItem(item, availabilityMap));
 
@@ -507,8 +518,26 @@ router.get('/analytics/outlets', async (req, res) => {
 
   if (itemsError) return res.status(500).json({ error: itemsError.message });
 
-  // Hanya sesi yang sudah selesai semua PO-nya (completed)
-  let filtered = (items || []).filter((item) => item.session?.status === 'completed');
+  // Hitung availability dulu agar bisa filter sesi 'sent' yang materialnya sudah diterima
+  let availabilityMap = {};
+  try {
+    availabilityMap = await getReceiptAvailabilityMap(date_from, date_to);
+  } catch (availabilityError) {
+    return res.status(500).json({ error: availabilityError.message });
+  }
+
+  // Sertakan sesi 'completed' DAN sesi 'sent' di mana material ini sudah diterima
+  let filtered = (items || []).filter((item) => {
+    const status = item.session?.status;
+    if (status === 'completed') return true;
+    if (status === 'sent') {
+      const sessionId = item.session?.id;
+      const materialId = item.material_id;
+      const avail = availabilityMap[makeKey(sessionId, materialId)];
+      return avail?.has_final_receipt === true && avail.total_received > 0;
+    }
+    return false;
+  });
   if (date_from || date_to) {
     filtered = filtered.filter((item) => {
       const d = item.session?.order_date;
@@ -517,13 +546,6 @@ router.get('/analytics/outlets', async (req, res) => {
       if (date_to && d > date_to) return false;
       return true;
     });
-  }
-
-  let availabilityMap = {};
-  try {
-    availabilityMap = await getReceiptAvailabilityMap(date_from, date_to);
-  } catch (availabilityError) {
-    return res.status(500).json({ error: availabilityError.message });
   }
   filtered = filtered.filter((item) => shouldIncludeRequestItem(item, availabilityMap));
 
