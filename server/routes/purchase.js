@@ -226,10 +226,35 @@ router.get('/', async (req, res) => {
 // PUT catat penerimaan barang (mendukung item adjustment + distribusi cabang)
 router.put('/:po_id/receive', async (req, res) => {
   const { po_id } = req.params;
-  const { items, deleted_adjustment_item_ids, notes, branch_distributions } = req.body;
+  const {
+    items,
+    deleted_adjustment_item_ids,
+    notes,
+    branch_distributions,
+    supplier_id,
+  } = req.body;
 
   if (!items || !Array.isArray(items)) {
     return res.status(400).json({ error: 'items wajib berupa array' });
+  }
+
+  let supplierIdUpdate;
+  if (supplier_id !== undefined) {
+    if (!supplier_id) {
+      return res.status(400).json({ error: 'Supplier penerimaan wajib dipilih' });
+    }
+
+    const { data: supplier, error: supplierError } = await supabase
+      .from('suppliers')
+      .select('id')
+      .eq('id', supplier_id)
+      .single();
+
+    if (supplierError || !supplier) {
+      return res.status(400).json({ error: 'Supplier penerimaan tidak ditemukan' });
+    }
+
+    supplierIdUpdate = supplier_id;
   }
 
   // Validasi payload
@@ -372,9 +397,16 @@ router.put('/:po_id/receive', async (req, res) => {
   }
 
   // Update PO
+  const poUpdates = {
+    status: poStatus,
+    total_actual: totalActual,
+    notes: autoNotes || null,
+  };
+  if (supplierIdUpdate !== undefined) poUpdates.supplier_id = supplierIdUpdate;
+
   const { data: po, error: poError } = await supabase
     .from('purchase_orders')
-    .update({ status: poStatus, total_actual: totalActual, notes: autoNotes || null })
+    .update(poUpdates)
     .eq('id', po_id)
     .select('*, supplier:suppliers(id, name)')
     .single();

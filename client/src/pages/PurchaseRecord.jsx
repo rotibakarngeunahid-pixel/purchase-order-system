@@ -294,6 +294,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [adjustmentItems, setAdjustmentItems] = useState(() => buildInitialAdjustmentItems(po.items));
   const [deletedAdjustmentItemIds, setDeletedAdjustmentItemIds] = useState([]);
   const [notes, setNotes] = useState(po.notes || '');
+  const [supplierId, setSupplierId] = useState(po.supplier_id || po.supplier?.id || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [rowErrors, setRowErrors] = useState({});
@@ -325,7 +326,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
   useEffect(() => {
     Promise.all([
       api.get('/api/materials').then((r) => r.data.filter((m) => m.is_active)),
-      api.get('/api/suppliers').then((r) => r.data.filter((s) => s.is_active)),
+      api.get('/api/suppliers').then((r) => r.data || []),
       api.get('/api/outlets').then((r) => r.data.filter((o) => o.is_active)),
     ])
       .then(([mats, sups, outs]) => {
@@ -526,13 +527,13 @@ function ReceiveModal({ po, onClose, onSaved }) {
     // Peringatan supplier berbeda
     if (
       material?.supplier_id &&
-      po.supplier_id &&
-      material.supplier_id !== po.supplier_id
+      supplierId &&
+      material.supplier_id !== supplierId
     ) {
       const supplierName = suppliers.find((s) => s.id === material.supplier_id)?.name || '';
       setRowErrors((prev) => ({
         ...prev,
-        [tempId]: `Peringatan: supplier bahan ini (${supplierName}) berbeda dari supplier PO. Pastikan ini disengaja.`,
+        [tempId]: `Peringatan: supplier bahan ini (${supplierName}) berbeda dari supplier penerimaan. Pastikan ini disengaja.`,
       }));
     }
   };
@@ -631,6 +632,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
     setAdjustmentItems(buildInitialAdjustmentItems(po.items));
     setDeletedAdjustmentItemIds([]);
     setNotes(po.notes || '');
+    setSupplierId(po.supplier_id || po.supplier?.id || '');
     setError('');
     setRowErrors({});
     // Reset branchDistributions: kembali ke data tersimpan + re-apply auto-populate dari sesi
@@ -664,6 +666,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
   };
 
   const handleSave = async () => {
+    if (!supplierId) {
+      setError('Pilih supplier penerimaan terlebih dahulu');
+      return;
+    }
+
     // Validasi baris adjustment
     const errors = {};
     let hasErrors = false;
@@ -751,6 +758,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
           }),
         ],
         deleted_adjustment_item_ids: deletedAdjustmentItemIds,
+        supplier_id: supplierId,
         notes,
         branch_distributions,
       });
@@ -764,6 +772,14 @@ function ReceiveModal({ po, onClose, onSaved }) {
   };
 
   const poSupplier = po.supplier;
+  const selectedSupplier = suppliers.find((s) => s.id === supplierId) || poSupplier;
+  const supplierOptionsBase = suppliers.filter(
+    (s) => s.is_active || s.id === supplierId || s.id === po.supplier_id
+  );
+  const supplierOptions =
+    selectedSupplier && !supplierOptionsBase.some((s) => s.id === selectedSupplier.id)
+      ? [selectedSupplier, ...supplierOptionsBase]
+      : supplierOptionsBase;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -772,16 +788,16 @@ function ReceiveModal({ po, onClose, onSaved }) {
         <QuickAddVariantModal
           materialId={quickAddVariantFor.materialId}
           materialName={quickAddVariantFor.materialName}
-          defaultSupplierId={poSupplier?.id}
-          suppliers={suppliers}
+          defaultSupplierId={supplierId}
+          suppliers={supplierOptions}
           onSaved={handleVariantSaved}
           onCancel={() => setQuickAddVariantFor(null)}
         />
       )}
       {quickAddMaterialForRowId && (
         <QuickAddMaterialModal
-          defaultSupplierId={poSupplier?.id}
-          suppliers={suppliers}
+          defaultSupplierId={supplierId}
+          suppliers={supplierOptions}
           onSaved={handleMaterialSaved}
           onCancel={() => setQuickAddMaterialForRowId(null)}
         />
@@ -792,7 +808,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
         <div className="bg-brand-red px-6 py-4 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
           <div>
             <h3 className="text-white font-semibold text-lg">Catat Penerimaan</h3>
-            <p className="text-red-200 text-sm">{poSupplier?.name}</p>
+            <p className="text-red-200 text-sm">{selectedSupplier?.name}</p>
           </div>
           <button
             onClick={onClose}
@@ -809,6 +825,30 @@ function ReceiveModal({ po, onClose, onSaved }) {
               {error}
             </div>
           )}
+
+          {/* Supplier penerimaan */}
+          <div className="grid gap-2 sm:grid-cols-[minmax(220px,360px)_1fr] sm:items-end">
+            <div>
+              <label className="label">Supplier Penerimaan</label>
+              <select
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+                className="input"
+              >
+                <option value="">Pilih supplier</option>
+                {supplierOptions.map((supplier) => (
+                  <option key={supplier.id} value={supplier.id}>
+                    {supplier.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {po.supplier_id && supplierId && supplierId !== po.supplier_id && (
+              <p className="text-xs text-orange-600 pb-2">
+                Supplier awal: {poSupplier?.name || '-'}
+              </p>
+            )}
+          </div>
 
           {/* ── Item PO ── */}
           <div>
