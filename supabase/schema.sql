@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS purchase_order_items (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   po_id           UUID REFERENCES purchase_orders(id) ON DELETE CASCADE,
   material_id     UUID REFERENCES materials(id),
+  supplier_id     UUID REFERENCES suppliers(id),
   qty_ordered     NUMERIC NOT NULL,
   qty_received    NUMERIC,
   price_actual    NUMERIC,

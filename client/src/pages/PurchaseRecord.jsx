@@ -3,7 +3,18 @@ import api, { formatRupiah, formatDateID } from '../lib/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function buildInitialOrderedItems(poItems) {
+function resolveItemSupplierId(item, defaultSupplierId = '') {
+  return (
+    item.supplier_id ||
+    item.item_supplier?.id ||
+    item.variant?.supplier_id ||
+    item.material?.supplier_id ||
+    defaultSupplierId ||
+    ''
+  );
+}
+
+function buildInitialOrderedItems(poItems, defaultSupplierId = '') {
   return (poItems || [])
     .filter((item) => (item.source || 'ordered') === 'ordered')
     .map((item) => ({
@@ -15,10 +26,11 @@ function buildInitialOrderedItems(poItems) {
         item.material?.price_per_purchase_unit ??
         0,
       variant_id: item.variant_id ?? null,
+      supplier_id: resolveItemSupplierId(item, defaultSupplierId),
     }));
 }
 
-function buildInitialAdjustmentItems(poItems) {
+function buildInitialAdjustmentItems(poItems, defaultSupplierId = '') {
   return (poItems || [])
     .filter((item) => item.source === 'adjustment')
     .map((item) => ({
@@ -26,16 +38,18 @@ function buildInitialAdjustmentItems(poItems) {
       qty_received: item.qty_received ?? 0,
       price_actual: item.price_actual ?? 0,
       variant_id: item.variant_id ?? null,
+      supplier_id: resolveItemSupplierId(item, defaultSupplierId),
       adjustment_note: item.adjustment_note ?? '',
       _tempId: item.id,
     }));
 }
 
-function newAdjustmentRow() {
+function newAdjustmentRow(defaultSupplierId = '') {
   return {
     id: null,
     material_id: '',
     variant_id: null,
+    supplier_id: defaultSupplierId,
     qty_received: '',
     price_actual: '',
     adjustment_note: '',
@@ -290,11 +304,11 @@ function QuickAddMaterialModal({ defaultSupplierId, suppliers, onSaved, onCancel
 // ─── ReceiveModal ─────────────────────────────────────────────────────────────
 
 function ReceiveModal({ po, onClose, onSaved }) {
-  const [orderedItems, setOrderedItems] = useState(() => buildInitialOrderedItems(po.items));
-  const [adjustmentItems, setAdjustmentItems] = useState(() => buildInitialAdjustmentItems(po.items));
+  const defaultSupplierId = po.supplier_id || po.supplier?.id || '';
+  const [orderedItems, setOrderedItems] = useState(() => buildInitialOrderedItems(po.items, defaultSupplierId));
+  const [adjustmentItems, setAdjustmentItems] = useState(() => buildInitialAdjustmentItems(po.items, defaultSupplierId));
   const [deletedAdjustmentItemIds, setDeletedAdjustmentItemIds] = useState([]);
   const [notes, setNotes] = useState(po.notes || '');
-  const [supplierId, setSupplierId] = useState(po.supplier_id || po.supplier?.id || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [rowErrors, setRowErrors] = useState({});
@@ -433,6 +447,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
       next[idx] = {
         ...next[idx],
         variant_id: variantId || null,
+        supplier_id:
+          chosen?.supplier_id ||
+          item.supplier_id ||
+          item.material?.supplier_id ||
+          defaultSupplierId,
         price_actual: chosen
           ? chosen.price_per_purchase_unit
           : item.material?.price_per_purchase_unit ?? 0,
@@ -444,7 +463,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
   // ── Adjustment items ──
 
   const addAdjustmentRow = () => {
-    setAdjustmentItems((prev) => [...prev, newAdjustmentRow()]);
+    setAdjustmentItems((prev) => [...prev, newAdjustmentRow(defaultSupplierId)]);
   };
 
   const updateBranchDist = (itemId, outletId, qty) => {
@@ -502,6 +521,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
       return;
     }
     const material = materials.find((m) => m.id === materialId);
+    const currentItem = adjustmentItems.find((item) => item._tempId === tempId);
+    const nextSupplierId = material?.supplier_id || currentItem?.supplier_id || defaultSupplierId;
     setAdjustmentItems((prev) =>
       prev.map((item) =>
         item._tempId === tempId
@@ -509,6 +530,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
               ...item,
               material_id: materialId,
               variant_id: null,
+              supplier_id: nextSupplierId,
               price_actual: material?.price_per_purchase_unit ?? '',
             }
           : item
@@ -523,25 +545,18 @@ function ReceiveModal({ po, onClose, onSaved }) {
       return next;
     });
     checkDuplicateWarning(tempId, materialId, null);
-
-    // Peringatan supplier berbeda
-    if (
-      material?.supplier_id &&
-      supplierId &&
-      material.supplier_id !== supplierId
-    ) {
-      const supplierName = suppliers.find((s) => s.id === material.supplier_id)?.name || '';
-      setRowErrors((prev) => ({
-        ...prev,
-        [tempId]: `Peringatan: supplier bahan ini (${supplierName}) berbeda dari supplier penerimaan. Pastikan ini disengaja.`,
-      }));
-    }
   };
 
   const handleSelectAdjustmentVariant = (tempId, variantId, materialId) => {
     if (variantId === '__add_new__') {
       const material = materials.find((m) => m.id === materialId);
-      setQuickAddVariantFor({ materialId, materialName: material?.name || '', rowTempId: tempId });
+      const row = adjustmentItems.find((item) => item._tempId === tempId);
+      setQuickAddVariantFor({
+        materialId,
+        materialName: material?.name || '',
+        rowTempId: tempId,
+        defaultSupplierId: row?.supplier_id || material?.supplier_id || defaultSupplierId,
+      });
       return;
     }
     const variants = variantsMap[materialId] || [];
@@ -553,6 +568,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
           ? {
               ...item,
               variant_id: variantId || null,
+              supplier_id:
+                chosen?.supplier_id ||
+                item.supplier_id ||
+                material?.supplier_id ||
+                defaultSupplierId,
               price_actual: chosen
                 ? chosen.price_per_purchase_unit
                 : material?.price_per_purchase_unit ?? '',
@@ -578,6 +598,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
             ? {
                 ...item,
                 variant_id: newVariant.id,
+                supplier_id: newVariant.supplier_id || item.supplier_id || defaultSupplierId,
                 price_actual: newVariant.price_per_purchase_unit ?? item.price_actual,
               }
             : item
@@ -602,6 +623,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
                 ...item,
                 material_id: newMaterial.id,
                 variant_id: null,
+                supplier_id: newMaterial.supplier_id || item.supplier_id || defaultSupplierId,
                 price_actual: newMaterial.price_per_purchase_unit ?? '',
               }
             : item
@@ -628,11 +650,10 @@ function ReceiveModal({ po, onClose, onSaved }) {
   // ── Actions ──
 
   const handleResetForm = () => {
-    setOrderedItems(buildInitialOrderedItems(po.items));
-    setAdjustmentItems(buildInitialAdjustmentItems(po.items));
+    setOrderedItems(buildInitialOrderedItems(po.items, defaultSupplierId));
+    setAdjustmentItems(buildInitialAdjustmentItems(po.items, defaultSupplierId));
     setDeletedAdjustmentItemIds([]);
     setNotes(po.notes || '');
-    setSupplierId(po.supplier_id || po.supplier?.id || '');
     setError('');
     setRowErrors({});
     // Reset branchDistributions: kembali ke data tersimpan + re-apply auto-populate dari sesi
@@ -666,8 +687,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
   };
 
   const handleSave = async () => {
-    if (!supplierId) {
-      setError('Pilih supplier penerimaan terlebih dahulu');
+    if (orderedItems.some((item) => !item.supplier_id)) {
+      setError('Pilih supplier untuk semua item PO');
       return;
     }
 
@@ -680,6 +701,9 @@ function ReceiveModal({ po, onClose, onSaved }) {
         hasErrors = true;
       } else if (!adj.qty_received || Number(adj.qty_received) <= 0) {
         errors[adj._tempId] = 'Qty diterima harus lebih dari 0';
+        hasErrors = true;
+      } else if (!adj.supplier_id) {
+        errors[adj._tempId] = 'Pilih supplier terlebih dahulu';
         hasErrors = true;
       }
     }
@@ -732,6 +756,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
             qty_received: Number(item.qty_received || 0),
             price_actual: Number(item.price_actual || 0),
             variant_id: item.variant_id || null,
+            supplier_id: item.supplier_id || null,
           })),
           ...adjustmentItems.map((item) => {
             const isRoti = (() => {
@@ -750,6 +775,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
               source: 'adjustment',
               material_id: item.material_id,
               variant_id: item.variant_id || null,
+              supplier_id: item.supplier_id || null,
               qty_received: Number(item.qty_received || 0),
               price_actual: Number(item.price_actual || 0),
               adjustment_note: item.adjustment_note || null,
@@ -758,7 +784,6 @@ function ReceiveModal({ po, onClose, onSaved }) {
           }),
         ],
         deleted_adjustment_item_ids: deletedAdjustmentItemIds,
-        supplier_id: supplierId,
         notes,
         branch_distributions,
       });
@@ -772,14 +797,17 @@ function ReceiveModal({ po, onClose, onSaved }) {
   };
 
   const poSupplier = po.supplier;
-  const selectedSupplier = suppliers.find((s) => s.id === supplierId) || poSupplier;
-  const supplierOptionsBase = suppliers.filter(
-    (s) => s.is_active || s.id === supplierId || s.id === po.supplier_id
-  );
-  const supplierOptions =
-    selectedSupplier && !supplierOptionsBase.some((s) => s.id === selectedSupplier.id)
-      ? [selectedSupplier, ...supplierOptionsBase]
-      : supplierOptionsBase;
+  const activeSupplierOptions = suppliers.filter((s) => s.is_active);
+  const getSupplierOptions = (selectedId) => {
+    if (!selectedId || activeSupplierOptions.some((s) => s.id === selectedId)) {
+      return activeSupplierOptions;
+    }
+    const selected = suppliers.find((s) => s.id === selectedId);
+    return selected ? [selected, ...activeSupplierOptions] : activeSupplierOptions;
+  };
+  const quickAddMaterialSupplierId =
+    adjustmentItems.find((item) => item._tempId === quickAddMaterialForRowId)?.supplier_id ||
+    defaultSupplierId;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -788,16 +816,16 @@ function ReceiveModal({ po, onClose, onSaved }) {
         <QuickAddVariantModal
           materialId={quickAddVariantFor.materialId}
           materialName={quickAddVariantFor.materialName}
-          defaultSupplierId={supplierId}
-          suppliers={supplierOptions}
+          defaultSupplierId={quickAddVariantFor.defaultSupplierId || defaultSupplierId}
+          suppliers={getSupplierOptions(quickAddVariantFor.defaultSupplierId)}
           onSaved={handleVariantSaved}
           onCancel={() => setQuickAddVariantFor(null)}
         />
       )}
       {quickAddMaterialForRowId && (
         <QuickAddMaterialModal
-          defaultSupplierId={supplierId}
-          suppliers={supplierOptions}
+          defaultSupplierId={quickAddMaterialSupplierId}
+          suppliers={getSupplierOptions(quickAddMaterialSupplierId)}
           onSaved={handleMaterialSaved}
           onCancel={() => setQuickAddMaterialForRowId(null)}
         />
@@ -808,7 +836,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
         <div className="bg-brand-red px-6 py-4 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
           <div>
             <h3 className="text-white font-semibold text-lg">Catat Penerimaan</h3>
-            <p className="text-red-200 text-sm">{selectedSupplier?.name}</p>
+            <p className="text-red-200 text-sm">PO awal: {poSupplier?.name}</p>
           </div>
           <button
             onClick={onClose}
@@ -826,39 +854,16 @@ function ReceiveModal({ po, onClose, onSaved }) {
             </div>
           )}
 
-          {/* Supplier penerimaan */}
-          <div className="grid gap-2 sm:grid-cols-[minmax(220px,360px)_1fr] sm:items-end">
-            <div>
-              <label className="label">Supplier Penerimaan</label>
-              <select
-                value={supplierId}
-                onChange={(e) => setSupplierId(e.target.value)}
-                className="input"
-              >
-                <option value="">Pilih supplier</option>
-                {supplierOptions.map((supplier) => (
-                  <option key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {po.supplier_id && supplierId && supplierId !== po.supplier_id && (
-              <p className="text-xs text-orange-600 pb-2">
-                Supplier awal: {poSupplier?.name || '-'}
-              </p>
-            )}
-          </div>
-
           {/* ── Item PO ── */}
           <div>
             <h4 className="text-sm font-semibold text-gray-700 mb-2">Item PO</h4>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[900px] text-sm">
+              <table className="w-full min-w-[1040px] text-sm">
                 <thead>
                   <tr className="bg-gray-50 border-b">
                     <th className="px-3 py-2 text-left text-gray-600 font-medium">Bahan</th>
                     <th className="px-3 py-2 text-left text-gray-600 font-medium min-w-[220px]">Merk</th>
+                    <th className="px-3 py-2 text-left text-gray-600 font-medium min-w-[190px]">Supplier</th>
                     <th className="px-3 py-2 text-center text-gray-600 font-medium">Dipesan</th>
                     <th className="px-3 py-2 text-center text-gray-600 font-medium">Diterima</th>
                     <th className="px-3 py-2 text-center text-gray-600 font-medium">Harga/Sat (Rp)</th>
@@ -906,6 +911,20 @@ function ReceiveModal({ po, onClose, onSaved }) {
                               {item.material?.brand || '-'}
                             </span>
                           )}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <select
+                            value={item.supplier_id || ''}
+                            onChange={(e) => updateOrdered(idx, 'supplier_id', e.target.value)}
+                            className="border border-gray-300 rounded-md pl-2 pr-8 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-full min-w-[170px] max-w-[210px]"
+                          >
+                            <option value="">Pilih supplier</option>
+                            {getSupplierOptions(item.supplier_id).map((supplier) => (
+                              <option key={supplier.id} value={supplier.id}>
+                                {supplier.name}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                         <td className="px-3 py-2.5 text-center text-gray-500">
                           {item.qty_ordered}
@@ -1148,11 +1167,12 @@ function ReceiveModal({ po, onClose, onSaved }) {
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[1040px] text-sm">
+                <table className="w-full min-w-[1180px] text-sm">
                   <thead>
                     <tr className="bg-blue-50 border-b border-blue-100">
                       <th className="px-3 py-2 text-left text-gray-600 font-medium">Bahan</th>
                       <th className="px-3 py-2 text-left text-gray-600 font-medium min-w-[220px]">Merk</th>
+                      <th className="px-3 py-2 text-left text-gray-600 font-medium min-w-[190px]">Supplier</th>
                       <th className="px-3 py-2 text-center text-gray-600 font-medium">Dipesan</th>
                       <th className="px-3 py-2 text-center text-gray-600 font-medium">Diterima</th>
                       <th className="px-3 py-2 text-center text-gray-600 font-medium">
@@ -1232,6 +1252,26 @@ function ReceiveModal({ po, onClose, onSaved }) {
                             ) : (
                               <span className="text-xs text-gray-300">—</span>
                             )}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <select
+                              value={adj.supplier_id || ''}
+                              onChange={(e) =>
+                                updateAdjustment(adj._tempId, 'supplier_id', e.target.value)
+                              }
+                              className={`border rounded-md pl-2 pr-8 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-full min-w-[170px] max-w-[210px] ${
+                                !adj.supplier_id && rowError && !isWarning
+                                  ? 'border-red-400'
+                                  : 'border-gray-300'
+                              }`}
+                            >
+                              <option value="">Pilih supplier</option>
+                              {getSupplierOptions(adj.supplier_id).map((supplier) => (
+                                <option key={supplier.id} value={supplier.id}>
+                                  {supplier.name}
+                                </option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-3 py-2.5 text-center">
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">

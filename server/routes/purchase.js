@@ -7,6 +7,8 @@ const OPTIONAL_PO_ITEM_COLUMNS = [
   'source',
   'adjustment_note',
   'created_at',
+  'supplier_id',
+  'item_supplier',
   'material_variants',
   'purchase_item_branch_distribution',
 ];
@@ -26,6 +28,8 @@ function normalizePOItem(item) {
     ...item,
     variant_id: item.variant_id ?? null,
     variant: item.variant ?? null,
+    supplier_id: item.supplier_id ?? item.item_supplier?.id ?? null,
+    item_supplier: item.item_supplier ?? null,
     source: item.source || 'ordered',
     adjustment_note: item.adjustment_note ?? null,
     created_at: item.created_at ?? null,
@@ -54,10 +58,37 @@ async function fetchPODetail(poId) {
       supplier:suppliers(id, name, wa_number),
       session:order_sessions(id, order_date),
       items:purchase_order_items(
+        id, material_id, supplier_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
+        source, adjustment_note, created_at,
+        material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
+        variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
+        item_supplier:suppliers(id, name),
+        branch_distributions:purchase_item_branch_distribution(outlet_id, qty)
+      )
+    `)
+    .eq('id', poId)
+    .single();
+
+  if (!result.error) {
+    return { data: normalizeAndSortPOItems(result.data), error: null };
+  }
+
+  if (!isMissingColumnError(result.error)) {
+    return result;
+  }
+
+  // Fallback: tanpa supplier aktual item (kolom migrasi belum ada)
+  result = await supabase
+    .from('purchase_orders')
+    .select(`
+      *,
+      supplier:suppliers(id, name, wa_number),
+      session:order_sessions(id, order_date),
+      items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
         source, adjustment_note, created_at,
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
-        variant:material_variants(id, brand, price_per_purchase_unit),
+        variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
         branch_distributions:purchase_item_branch_distribution(outlet_id, qty)
       )
     `)
@@ -80,10 +111,36 @@ async function fetchPODetail(poId) {
       supplier:suppliers(id, name, wa_number),
       session:order_sessions(id, order_date),
       items:purchase_order_items(
+        id, material_id, supplier_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
+        source, adjustment_note, created_at,
+        material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
+        variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
+        item_supplier:suppliers(id, name)
+      )
+    `)
+    .eq('id', poId)
+    .single();
+
+  if (!result.error) {
+    return { data: normalizeAndSortPOItems(result.data), error: null };
+  }
+
+  if (!isMissingColumnError(result.error)) {
+    return result;
+  }
+
+  // Fallback: tanpa supplier item dan distribusi
+  result = await supabase
+    .from('purchase_orders')
+    .select(`
+      *,
+      supplier:suppliers(id, name, wa_number),
+      session:order_sessions(id, order_date),
+      items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
         source, adjustment_note, created_at,
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
-        variant:material_variants(id, brand, price_per_purchase_unit)
+        variant:material_variants(id, brand, supplier_id, price_per_purchase_unit)
       )
     `)
     .eq('id', poId)
@@ -122,6 +179,7 @@ async function updateOrderedPOItem(poId, item) {
     price_actual: item.price_actual,
   };
   if (item.variant_id !== undefined) updatePayload.variant_id = item.variant_id || null;
+  if (item.supplier_id !== undefined) updatePayload.supplier_id = item.supplier_id || null;
 
   let result = await supabase
     .from('purchase_order_items')
@@ -129,8 +187,9 @@ async function updateOrderedPOItem(poId, item) {
     .eq('id', item.id)
     .eq('po_id', poId);
 
-  if (result.error && isMissingColumnError(result.error, ['variant_id'])) {
-    delete updatePayload.variant_id;
+  if (result.error && isMissingColumnError(result.error, ['variant_id', 'supplier_id'])) {
+    if (isMissingColumnError(result.error, ['variant_id'])) delete updatePayload.variant_id;
+    if (isMissingColumnError(result.error, ['supplier_id'])) delete updatePayload.supplier_id;
     result = await supabase
       .from('purchase_order_items')
       .update(updatePayload)
@@ -238,6 +297,31 @@ router.put('/:po_id/receive', async (req, res) => {
     return res.status(400).json({ error: 'items wajib berupa array' });
   }
 
+  const itemSupplierIds = [
+    ...new Set(items.map((item) => item.supplier_id).filter(Boolean)),
+  ];
+  const hasEmptyItemSupplier = items.some(
+    (item) => item.supplier_id !== undefined && !item.supplier_id
+  );
+  if (hasEmptyItemSupplier) {
+    return res.status(400).json({ error: 'Supplier setiap item penerimaan wajib dipilih' });
+  }
+
+  if (itemSupplierIds.length > 0) {
+    const { data: validSuppliers, error: itemSupplierError } = await supabase
+      .from('suppliers')
+      .select('id')
+      .in('id', itemSupplierIds);
+
+    if (itemSupplierError) return res.status(500).json({ error: itemSupplierError.message });
+
+    const validSupplierIds = new Set((validSuppliers || []).map((supplier) => supplier.id));
+    const hasInvalidSupplier = itemSupplierIds.some((id) => !validSupplierIds.has(id));
+    if (hasInvalidSupplier) {
+      return res.status(400).json({ error: 'Supplier item penerimaan tidak ditemukan' });
+    }
+  }
+
   let supplierIdUpdate;
   if (supplier_id !== undefined) {
     if (!supplier_id) {
@@ -293,35 +377,59 @@ router.put('/:po_id/receive', async (req, res) => {
     } else if (source === 'adjustment') {
       if (item.id) {
         // Update adjustment existing
-        const { error: itemError } = await supabase
+        const updatePayload = {
+          qty_received: item.qty_received,
+          price_actual: item.price_actual,
+          variant_id: item.variant_id || null,
+          supplier_id: item.supplier_id || null,
+          adjustment_note: item.adjustment_note || null,
+        };
+
+        let result = await supabase
           .from('purchase_order_items')
-          .update({
-            qty_received: item.qty_received,
-            price_actual: item.price_actual,
-            variant_id: item.variant_id || null,
-            adjustment_note: item.adjustment_note || null,
-          })
+          .update(updatePayload)
           .eq('id', item.id)
           .eq('po_id', po_id)
           .eq('source', 'adjustment');
-        if (itemError) return res.status(500).json({ error: itemError.message });
+        if (result.error && isMissingColumnError(result.error, ['supplier_id'])) {
+          delete updatePayload.supplier_id;
+          result = await supabase
+            .from('purchase_order_items')
+            .update(updatePayload)
+            .eq('id', item.id)
+            .eq('po_id', po_id)
+            .eq('source', 'adjustment');
+        }
+        if (result.error) return res.status(500).json({ error: result.error.message });
       } else {
         // Insert adjustment baru — ambil id untuk simpan inline_branch_distributions
-        const { data: insertedAdj, error: itemError } = await supabase
+        const insertPayload = {
+          po_id,
+          material_id: item.material_id,
+          variant_id: item.variant_id || null,
+          supplier_id: item.supplier_id || null,
+          qty_ordered: 0,
+          qty_received: item.qty_received,
+          price_actual: item.price_actual,
+          source: 'adjustment',
+          adjustment_note: item.adjustment_note || null,
+        };
+
+        let result = await supabase
           .from('purchase_order_items')
-          .insert({
-            po_id,
-            material_id: item.material_id,
-            variant_id: item.variant_id || null,
-            qty_ordered: 0,
-            qty_received: item.qty_received,
-            price_actual: item.price_actual,
-            source: 'adjustment',
-            adjustment_note: item.adjustment_note || null,
-          })
+          .insert(insertPayload)
           .select('id')
           .single();
-        if (itemError) return res.status(500).json({ error: itemError.message });
+        if (result.error && isMissingColumnError(result.error, ['supplier_id'])) {
+          delete insertPayload.supplier_id;
+          result = await supabase
+            .from('purchase_order_items')
+            .insert(insertPayload)
+            .select('id')
+            .single();
+        }
+        if (result.error) return res.status(500).json({ error: result.error.message });
+        const insertedAdj = result.data;
 
         // Simpan inline_branch_distributions jika ada (untuk adj roti baru) — non-fatal
         if (
@@ -497,10 +605,17 @@ router.put('/:po_id/reset', async (req, res) => {
   }
 
   for (const item of (orderedItems || [])) {
-    await supabase
+    let result = await supabase
       .from('purchase_order_items')
-      .update({ qty_received: null, price_actual: null })
+      .update({ qty_received: null, price_actual: null, supplier_id: null })
       .eq('id', item.id);
+
+    if (result.error && isMissingColumnError(result.error, ['supplier_id'])) {
+      await supabase
+        .from('purchase_order_items')
+        .update({ qty_received: null, price_actual: null })
+        .eq('id', item.id);
+    }
   }
 
   // Reset PO ke pending
