@@ -12,10 +12,9 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 
-// ─── Tabel yang BOLEH dihapus (operasional/transaksional) ─────────────────────
-// Master data seperti outlets, suppliers, materials, material_variants,
-// settings, finance_portal_config, dan branch_holidays weekly TIDAK termasuk.
-// ─────────────────────────────────────────────────────────────────────────────
+const PAGE_SIZE = 1000;
+/** Batas aman untuk filter .in() di PostgREST (UUID panjang) */
+const IN_CHUNK = 80;
 
 function isValidDate(str) {
   if (!str || !/^\d{4}-\d{2}-\d{2}$/.test(str)) return false;
@@ -27,6 +26,34 @@ function nextDay(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const date = new Date(Date.UTC(y, m - 1, d + 1));
   return date.toISOString().split('T')[0];
+}
+
+/** Ambil semua baris dengan paginasi (menghindari batas default 1000 baris Supabase). */
+async function fetchPaged(buildQuery) {
+  const rows = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return rows;
+}
+
+/** Hapus baris dalam batch agar filter .in() tidak melebihi batas URL PostgREST. */
+async function deleteInChunks(table, column, ids) {
+  if (!ids.length) return;
+
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    const { error } = await supabase.from(table).delete().in(column, chunk);
+    if (error) throw error;
+  }
 }
 
 /** Hitung jumlah baris di tabel dengan filter tertentu. Mengembalikan 0 jika tabel tidak ada. */
@@ -42,37 +69,90 @@ async function safeCount(table, filterFn) {
   }
 }
 
+async function countByIds(table, column, ids, filterFn) {
+  if (!ids.length) return 0;
+
+  let total = 0;
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    const chunk = ids.slice(i, i + IN_CHUNK);
+    let query = supabase.from(table).select('*', { count: 'exact', head: true }).in(column, chunk);
+    if (filterFn) query = filterFn(query);
+    const { count, error } = await query;
+    if (error) return 0;
+    total += count || 0;
+  }
+  return total;
+}
+
+/**
+ * Ambil semua PO dalam rentang tanggal order (halaman Catat Penerimaan).
+ * Menggunakan inner join ke order_sessions agar filter tanggal konsisten.
+ */
+async function fetchPurchaseOrdersInRange(dateFrom, dateTo) {
+  try {
+    return await fetchPaged(() =>
+      supabase
+        .from('purchase_orders')
+        .select('id, session_id, session:order_sessions!inner(order_date)')
+        .gte('session.order_date', dateFrom)
+        .lte('session.order_date', dateTo)
+        .order('id')
+    );
+  } catch (joinError) {
+    console.warn('[DataDeletion] PO join query fallback:', joinError.message);
+    return [];
+  }
+}
+
 /**
  * Kumpulkan ID sesi, PO, dan item PO yang masuk dalam rentang tanggal.
  * Dipakai baik untuk preview maupun eksekusi.
  */
 async function gatherIds(dateFrom, dateTo) {
-  // Sesi order dalam rentang tanggal
-  const { data: sessions } = await supabase
-    .from('order_sessions')
-    .select('id')
-    .gte('order_date', dateFrom)
-    .lte('order_date', dateTo);
-  const sessionIds = (sessions || []).map((s) => s.id);
-
-  // PO yang terkait sesi tersebut
-  let poIds = [];
-  if (sessionIds.length > 0) {
-    const { data: pos } = await supabase
-      .from('purchase_orders')
+  const sessions = await fetchPaged(() =>
+    supabase
+      .from('order_sessions')
       .select('id')
-      .in('session_id', sessionIds);
-    poIds = (pos || []).map((p) => p.id);
+      .gte('order_date', dateFrom)
+      .lte('order_date', dateTo)
+      .order('id')
+  );
+
+  const posInRange = await fetchPurchaseOrdersInRange(dateFrom, dateTo);
+
+  const sessionIdSet = new Set([
+    ...sessions.map((s) => s.id),
+    ...posInRange.map((p) => p.session_id).filter(Boolean),
+  ]);
+  const sessionIds = [...sessionIdSet];
+
+  let poIds = [...new Set(posInRange.map((p) => p.id))];
+
+  // Cadangan: PO yang terhubung ke sesi dalam rentang (jika join filter tidak tersedia)
+  if (sessionIds.length > 0) {
+    for (let i = 0; i < sessionIds.length; i += IN_CHUNK) {
+      const chunk = sessionIds.slice(i, i + IN_CHUNK);
+      const { data: pos, error } = await supabase
+        .from('purchase_orders')
+        .select('id')
+        .in('session_id', chunk);
+
+      if (error) throw error;
+      (pos || []).forEach((p) => poIds.push(p.id));
+    }
+    poIds = [...new Set(poIds)];
   }
 
-  // Item PO dari PO-PO tersebut
   let poItemIds = [];
   if (poIds.length > 0) {
-    const { data: items } = await supabase
-      .from('purchase_order_items')
-      .select('id')
-      .in('po_id', poIds);
-    poItemIds = (items || []).map((i) => i.id);
+    for (let i = 0; i < poIds.length; i += IN_CHUNK) {
+      const chunk = poIds.slice(i, i + IN_CHUNK);
+      const items = await fetchPaged(() =>
+        supabase.from('purchase_order_items').select('id').in('po_id', chunk).order('id')
+      );
+      poItemIds.push(...items.map((item) => item.id));
+    }
+    poItemIds = [...new Set(poItemIds)];
   }
 
   return { sessionIds, poIds, poItemIds };
@@ -94,29 +174,16 @@ async function buildPreview(dateFrom, dateTo) {
     branchHolidaysOnetimeCount,
     financePortalLogsCount,
   ] = await Promise.all([
-    // Permintaan cabang yang terkait sesi
-    sessionIds.length > 0
-      ? safeCount('order_request_items', (q) => q.in('session_id', sessionIds))
-      : 0,
-    // Metadata hari libur per sesi
-    sessionIds.length > 0
-      ? safeCount('order_outlet_holiday_metadata', (q) => q.in('session_id', sessionIds))
-      : 0,
-    // Distribusi roti ke cabang
-    poItemIds.length > 0
-      ? safeCount('purchase_item_branch_distribution', (q) => q.in('po_item_id', poItemIds))
-      : 0,
-    // Laporan barang masuk (purchase_report)
+    countByIds('order_request_items', 'session_id', sessionIds),
+    countByIds('order_outlet_holiday_metadata', 'session_id', sessionIds),
+    countByIds('purchase_item_branch_distribution', 'po_item_id', poItemIds),
     safeCount('purchase_report', (q) => q.gte('date', dateFrom).lte('date', dateTo)),
-    // Catatan reset laporan
     safeCount('report_resets', (q) =>
       q.gte('reset_at', dateFrom).lt('reset_at', nextDay(dateTo))),
-    // Hari libur spesifik (one-time, bukan mingguan)
     safeCount('branch_holidays', (q) =>
       q.eq('recurrence_type', 'none')
         .gte('holiday_date', dateFrom)
         .lte('holiday_date', dateTo)),
-    // Log akses portal keuangan
     safeCount('finance_portal_access_logs', (q) =>
       q.gte('accessed_at', dateFrom).lt('accessed_at', nextDay(dateTo))),
   ]);
@@ -179,7 +246,6 @@ router.post('/execute', async (req, res) => {
   }
 
   try {
-    // Hitung dulu (untuk laporan ringkasan setelah hapus)
     const { preview: counts } = await buildPreview(date_from, date_to);
 
     if (Object.values(counts).every((v) => v === 0)) {
@@ -194,63 +260,40 @@ router.post('/execute', async (req, res) => {
       });
     }
 
-    // Kumpulkan ID yang akan dihapus
     const { sessionIds, poIds, poItemIds } = await gatherIds(date_from, date_to);
 
     // ── Urutan hapus: anak dulu, baru induk ─────────────────────────────────
 
     // 1. Distribusi roti per cabang (anak dari purchase_order_items)
     if (poItemIds.length > 0) {
-      const { error } = await supabase
-        .from('purchase_item_branch_distribution')
-        .delete()
-        .in('po_item_id', poItemIds);
-      if (error) console.error('[DataDeletion] branch_distribution:', error.message);
+      try {
+        await deleteInChunks('purchase_item_branch_distribution', 'po_item_id', poItemIds);
+      } catch (error) {
+        console.error('[DataDeletion] branch_distribution:', error.message);
+      }
     }
 
     // 2. Item PO (anak dari purchase_orders)
     if (poIds.length > 0) {
-      const { error } = await supabase
-        .from('purchase_order_items')
-        .delete()
-        .in('po_id', poIds);
-      if (error) {
-        console.error('[DataDeletion] purchase_order_items:', error.message);
-        return res.status(500).json({ error: 'Gagal menghapus item PO: ' + error.message });
-      }
+      await deleteInChunks('purchase_order_items', 'po_id', poIds);
     }
 
-    // 3. Purchase Orders (anak dari order_sessions)
-    if (sessionIds.length > 0) {
-      const { error } = await supabase
-        .from('purchase_orders')
-        .delete()
-        .in('session_id', sessionIds);
-      if (error) {
-        console.error('[DataDeletion] purchase_orders:', error.message);
-        return res.status(500).json({ error: 'Gagal menghapus purchase order: ' + error.message });
-      }
+    // 3. Purchase Orders — sumber data halaman Catat Penerimaan
+    if (poIds.length > 0) {
+      await deleteInChunks('purchase_orders', 'id', poIds);
+    } else if (sessionIds.length > 0) {
+      await deleteInChunks('purchase_orders', 'session_id', sessionIds);
     }
 
     // 4. Permintaan item cabang (anak dari order_sessions)
     if (sessionIds.length > 0) {
-      const { error } = await supabase
-        .from('order_request_items')
-        .delete()
-        .in('session_id', sessionIds);
-      if (error) {
-        console.error('[DataDeletion] order_request_items:', error.message);
-        return res.status(500).json({ error: 'Gagal menghapus permintaan cabang: ' + error.message });
-      }
+      await deleteInChunks('order_request_items', 'session_id', sessionIds);
     }
 
     // 5. Metadata hari libur sesi (non-fatal — tabel mungkin belum ada)
     if (sessionIds.length > 0) {
       try {
-        await supabase
-          .from('order_outlet_holiday_metadata')
-          .delete()
-          .in('session_id', sessionIds);
+        await deleteInChunks('order_outlet_holiday_metadata', 'session_id', sessionIds);
       } catch (e) {
         console.warn('[DataDeletion] order_outlet_holiday_metadata skip:', e.message);
       }
@@ -258,14 +301,7 @@ router.post('/execute', async (req, res) => {
 
     // 6. Sesi order
     if (sessionIds.length > 0) {
-      const { error } = await supabase
-        .from('order_sessions')
-        .delete()
-        .in('id', sessionIds);
-      if (error) {
-        console.error('[DataDeletion] order_sessions:', error.message);
-        return res.status(500).json({ error: 'Gagal menghapus sesi order: ' + error.message });
-      }
+      await deleteInChunks('order_sessions', 'id', sessionIds);
     }
 
     // 7. Laporan barang masuk (purchase_report) — tabel independen
@@ -318,6 +354,7 @@ router.post('/execute', async (req, res) => {
     console.log(
       `[DataDeletion] Berhasil menghapus ${totalDeleted} record` +
       ` untuk periode ${date_from} s/d ${date_to}` +
+      ` (${poIds.length} PO / Catat Penerimaan)` +
       ` oleh user ${req.user?.role || 'admin'}`
     );
 

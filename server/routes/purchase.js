@@ -605,15 +605,24 @@ router.put('/:po_id/reset', async (req, res) => {
   }
 
   for (const item of (orderedItems || [])) {
+    const updatePayload = {
+      qty_received: null,
+      price_actual: null,
+      supplier_id: null,
+      variant_id: null,
+    };
+
     let result = await supabase
       .from('purchase_order_items')
-      .update({ qty_received: null, price_actual: null, supplier_id: null })
+      .update(updatePayload)
       .eq('id', item.id);
 
-    if (result.error && isMissingColumnError(result.error, ['supplier_id'])) {
+    if (result.error && isMissingColumnError(result.error, ['variant_id', 'supplier_id'])) {
+      if (isMissingColumnError(result.error, ['variant_id'])) delete updatePayload.variant_id;
+      if (isMissingColumnError(result.error, ['supplier_id'])) delete updatePayload.supplier_id;
       await supabase
         .from('purchase_order_items')
-        .update({ qty_received: null, price_actual: null })
+        .update(updatePayload)
         .eq('id', item.id);
     }
   }

@@ -23,8 +23,8 @@ const TABLE_LABELS = {
   order_sessions:                   'Sesi Order',
   order_request_items:              'Permintaan Bahan per Cabang',
   order_outlet_holiday_metadata:    'Metadata Hari Libur Sesi',
-  purchase_orders:                  'Purchase Order (PO)',
-  purchase_order_items:             'Item Detail PO',
+  purchase_orders:                  'Catat Penerimaan (Purchase Order)',
+  purchase_order_items:             'Item Penerimaan PO',
   purchase_item_branch_distribution:'Distribusi Roti ke Cabang',
   purchase_report:                  'Laporan Barang Masuk',
   report_resets:                    'Catatan Reset Laporan',
@@ -301,7 +301,9 @@ export default function DataDeletion() {
 
       {/* Peringatan master data aman */}
       <AlertBox type="info" icon={Info} title="Master data tidak ikut terhapus">
-        Fitur ini hanya menghapus data operasional (order, penerimaan, laporan, log).
+        Fitur ini menghapus data operasional termasuk{' '}
+        <strong>Catat Penerimaan</strong> (PO), input order, dan laporan barang masuk.
+        PO di luar rentang tanggal yang dipilih tidak ikut terhapus.
         Data master seperti <strong>Produk, Bahan Baku, Outlet/Cabang, Supplier, dan Pengaturan</strong> tidak
         akan terhapus dalam kondisi apa pun.
       </AlertBox>
