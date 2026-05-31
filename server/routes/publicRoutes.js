@@ -354,4 +354,21 @@ router.get('/outlets', async (req, res) => {
   res.json(data);
 });
 
+// Data setup POS: outlet + material — untuk auto-populate mapping di admin POS
+// Tidak butuh auth karena hanya berisi nama dan UUID (bukan data sensitif)
+router.get('/pos-setup-data', async (req, res) => {
+  const [outletsRes, materialsRes] = await Promise.all([
+    supabase.from('outlets').select('id, name').eq('is_active', true).order('name'),
+    supabase.from('materials').select('id, name, purchase_unit').eq('is_active', true).order('name'),
+  ]);
+
+  if (outletsRes.error) return res.status(500).json({ error: outletsRes.error.message });
+  if (materialsRes.error) return res.status(500).json({ error: materialsRes.error.message });
+
+  res.json({
+    outlets:   outletsRes.data  || [],
+    materials: materialsRes.data || [],
+  });
+});
+
 module.exports = router;

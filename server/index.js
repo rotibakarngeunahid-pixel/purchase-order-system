@@ -26,9 +26,23 @@ const app = express();
 
 app.use(helmet());
 app.use(compression());
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  // Admin panel POS — boleh baca endpoint publik untuk setup mapping
+  'https://pos-system.rotibakarngeunah.my.id',
+  'https://rotibakarngeunah.my.id',
+  'http://localhost',
+  'http://127.0.0.1',
+];
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      // Izinkan jika origin ada di whitelist, atau tidak ada origin (server-to-server)
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+      // Izinkan semua subdomain rotibakarngeunah.my.id
+      if (/^https?:\/\/[a-z0-9-]+\.rotibakarngeunah\.my\.id$/.test(origin)) return callback(null, true);
+      callback(new Error('Not allowed by CORS'));
+    },
     credentials: true,
   })
 );
