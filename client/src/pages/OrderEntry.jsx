@@ -70,7 +70,7 @@ export default function OrderEntry() {
   orderDateRef.current = orderDate;
 
   // --- Holiday helpers ---
-  // holidayMap format baru: { [outlet_id]: { date1_holiday, date2_holiday, calculation_days } }
+  // holidayMap format: { [outlet_id]: { date1_holiday, calculation_days } }
   // overrideSnapshot: pass {} saat tanggal berubah (override di-reset), undefined pakai state saat ini
   const applyHolidayMap = (map, activeOutlets, overrideSnapshot) => {
     const override = overrideSnapshot ?? outletOverride;
@@ -78,11 +78,11 @@ export default function OrderEntry() {
     setOutletDays((prev) => {
       const next = { ...prev };
       (activeOutlets || []).forEach((o) => {
-        const info = map[o.id]; // { calculation_days: 0|1|2, ... } atau undefined
+        const info = map[o.id]; // { calculation_days: 0|1, ... } atau undefined
         const isOverridden = override[o.id];
         if (!isOverridden) {
-          // calculation_days: jumlah hari yang tidak libur dari order_date+1 dan order_date+2
-          next[o.id] = info != null ? info.calculation_days : 2;
+          // calculation_days: 0 jika H+1 libur, 1 jika H+1 buka (default)
+          next[o.id] = info != null ? info.calculation_days : 1;
         }
       });
       return next;
@@ -91,11 +91,10 @@ export default function OrderEntry() {
 
   const checkHolidays = async (date, activeOutlets, overrideSnapshot) => {
     try {
-      // Server menghitung date+1 dan date+2 secara internal
       const result = await checkHolidaysBulk(date);
       applyHolidayMap(result.holidays || {}, activeOutlets, overrideSnapshot);
     } catch {
-      // Jika holiday check gagal, fallback ke default 2 hari (BR-011)
+      // Jika holiday check gagal, fallback ke default 1 hari
     }
   };
 
@@ -133,7 +132,7 @@ export default function OrderEntry() {
       const daysMap = {};
       activeOutlets.forEach((o) => {
         openMap[o.id] = true;
-        daysMap[o.id] = 2;
+        daysMap[o.id] = 1;
       });
       setOutletOpen(openMap);
       setOutletDays(daysMap);
@@ -323,12 +322,9 @@ export default function OrderEntry() {
 
         const key = getMatrixKey(outlet.id, rotiMaterial.id);
         const isOpen = outletOpen[outlet.id] !== false;
-        const days = outletDays[outlet.id] ?? 2;
-        // days 0 = kedua hari libur, 1 = 1 hari buka, 2 = 2 hari buka (default)
-        const qty = !isOpen ? 0
-          : days === 0 ? 0
-          : days === 1 ? Math.ceil(branch.need / 2)
-          : branch.need;
+        const days = outletDays[outlet.id] ?? 1;
+        // days 0 = H+1 libur, 1 = H+1 buka (default)
+        const qty = !isOpen || days === 0 ? 0 : branch.need;
 
         newMatrix[key] = qty;
         stockMap[outlet.id] = {
@@ -382,9 +378,8 @@ export default function OrderEntry() {
         const metaRecords = outlets.map((o) => {
           const info = holidayMap[o.id] || null;
           const isOverridden = outletOverride[o.id] || false;
-          const calcDays = outletDays[o.id] ?? 2;
-          // Gunakan hari libur pertama yang terdeteksi untuk field metadata (date1 didahulukan)
-          const primaryHol = info?.date1_holiday || info?.date2_holiday || null;
+          const calcDays = outletDays[o.id] ?? 1;
+          const primaryHol = info?.date1_holiday || null;
           return {
             outlet_id: o.id,
             holiday_detected: !!info,
@@ -413,26 +408,27 @@ export default function OrderEntry() {
     setOutletOpen((prev) => ({ ...prev, [id]: !prev[id] }));
 
   const handleToggleDays = (id) =>
-    setOutletDays((prev) => ({ ...prev, [id]: prev[id] === 1 ? 2 : 1 }));
+    setOutletDays((prev) => ({ ...prev, [id]: prev[id] === 0 ? 1 : 0 }));
 
   // Override: tampilkan confirmation modal
   const handleRequestOverride = (outletId) => {
     setPendingOverrideOutletId(outletId);
   };
 
-  // Override dikonfirmasi: set override aktif, kembalikan ke 2 hari
+  // Override dikonfirmasi: set override aktif, hitung 1 hari meski libur
   const handleConfirmOverride = () => {
     const id = pendingOverrideOutletId;
     if (!id) return;
     setOutletOverride((prev) => ({ ...prev, [id]: true }));
-    setOutletDays((prev) => ({ ...prev, [id]: 2 }));
+    setOutletDays((prev) => ({ ...prev, [id]: 1 }));
     setPendingOverrideOutletId(null);
   };
 
-  // Batalkan override: kembali ke 1 hari
+  // Batalkan override: kembali ke calculation_days dari server
   const handleCancelOverride = (outletId) => {
+    const autoCalcDays = holidayMap[outletId]?.calculation_days ?? 1;
     setOutletOverride((prev) => ({ ...prev, [outletId]: false }));
-    setOutletDays((prev) => ({ ...prev, [outletId]: 1 }));
+    setOutletDays((prev) => ({ ...prev, [outletId]: autoCalcDays }));
   };
 
   // Handler distribusi roti tambahan (fase order)
@@ -752,7 +748,7 @@ export default function OrderEntry() {
             day: 'numeric', month: 'long', year: 'numeric',
           });
         };
-        const holidays = [info?.date1_holiday, info?.date2_holiday].filter(Boolean);
+        const holidays = [info?.date1_holiday].filter(Boolean);
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
@@ -770,7 +766,7 @@ export default function OrderEntry() {
               </div>
               <p className="text-sm text-gray-600 mb-1">Dengan mengaktifkan override:</p>
               <ul className="text-sm text-gray-600 list-disc list-inside mb-4 space-y-0.5">
-                <li>Order roti cabang ini dihitung untuk <strong>2 hari</strong>.</li>
+                <li>Order roti cabang ini dihitung untuk <strong>1 hari</strong>.</li>
                 <li>Data kalender hari libur <strong>tidak berubah</strong>.</li>
                 <li>Override hanya berlaku untuk order ini.</li>
               </ul>
@@ -779,7 +775,7 @@ export default function OrderEntry() {
                   Batal
                 </button>
                 <button onClick={handleConfirmOverride} className="btn-primary text-sm">
-                  Ya, Override 2 Hari
+                  Ya, Override 1 Hari
                 </button>
               </div>
             </div>

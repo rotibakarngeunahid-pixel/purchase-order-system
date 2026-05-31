@@ -76,47 +76,31 @@ router.get('/', async (req, res) => {
 });
 
 // ─── GET /api/holidays/check-bulk?order_date=YYYY-MM-DD ────────────────────
-// Cek order_date+1 DAN order_date+2 untuk semua outlet
-// Returns holiday info per outlet + calculation_days (0, 1, atau 2)
+// Cek order_date+1 untuk semua outlet
+// Returns holiday info per outlet + calculation_days (0 atau 1)
 router.get('/check-bulk', async (req, res) => {
   const { order_date } = req.query;
   if (!order_date) return res.status(400).json({ error: 'Parameter order_date wajib diisi' });
 
   const date1 = addDays(order_date, 1); // order_date + 1
-  const date2 = addDays(order_date, 2); // order_date + 2
 
-  const [hols1, hols2] = await Promise.all([
-    fetchHolidaysForDate(date1),
-    fetchHolidaysForDate(date2),
-  ]);
+  const hols1 = await fetchHolidaysForDate(date1);
 
-  // Bangun map per outlet
+  // Bangun map per outlet — hanya outlet yang ada libur di H+1
   const holidayMap = {};
 
-  const process = (rows, dateStr, field) => {
-    rows.forEach((h) => {
-      if (!holidayMap[h.outlet_id]) {
-        holidayMap[h.outlet_id] = { date1_holiday: null, date2_holiday: null };
-      }
-      holidayMap[h.outlet_id][field] = h;
-    });
-  };
-  process(hols1, date1, 'date1_holiday');
-  process(hols2, date2, 'date2_holiday');
-
-  // Hitung calculation_days: jumlah hari yang TIDAK libur
-  Object.keys(holidayMap).forEach((outletId) => {
-    const info = holidayMap[outletId];
-    const openDay1 = info.date1_holiday ? 0 : 1;
-    const openDay2 = info.date2_holiday ? 0 : 1;
-    info.calculation_days = openDay1 + openDay2;
+  hols1.forEach((h) => {
+    if (!holidayMap[h.outlet_id]) {
+      holidayMap[h.outlet_id] = { date1_holiday: null };
+    }
+    holidayMap[h.outlet_id].date1_holiday = h;
+    holidayMap[h.outlet_id].calculation_days = 0; // H+1 libur → 0 hari buka
   });
 
   res.json({
     order_date,
     date1,
-    date2,
-    holidays: holidayMap, // hanya outlet yang ada minimal 1 hari libur
+    holidays: holidayMap, // hanya outlet yang ada libur di H+1
   });
 });
 
@@ -264,7 +248,7 @@ router.post('/metadata/bulk', async (req, res) => {
     outlet_id: r.outlet_id,
     holiday_detected: Boolean(r.holiday_detected),
     override_holiday: Boolean(r.override_holiday),
-    calculation_days: Number(r.calculation_days) >= 0 ? Number(r.calculation_days) : 2,
+    calculation_days: Number(r.calculation_days) >= 0 ? Number(r.calculation_days) : 1,
     holiday_date_detected: r.holiday_date_detected || null,
     holiday_name_detected: r.holiday_name_detected || null,
     holiday_id_detected: r.holiday_id_detected || null,

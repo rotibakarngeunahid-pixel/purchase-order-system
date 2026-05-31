@@ -42,7 +42,7 @@ export default function OutletControlsPanel({
       <div className="space-y-2">
         {outlets.map((outlet) => {
           const isOpen = outletOpen[outlet.id] !== false;
-          const days = outletDays[outlet.id] ?? 2;
+          const days = outletDays[outlet.id] ?? 1;
           const total = calcTotalPerOutlet(outlet, materials, matrix);
           const info = holidayMap[outlet.id] || null; // { date1_holiday, date2_holiday, calculation_days }
           const isOverridden = outletOverride[outlet.id] || false;
@@ -77,12 +77,10 @@ export default function OutletControlsPanel({
                       className={`text-xs px-2 py-0.5 rounded-full border transition-colors whitespace-nowrap flex-shrink-0 ${
                         days === 0
                           ? 'bg-red-100 text-red-700 border-red-300 hover:bg-red-200'
-                          : days === 1
-                          ? 'bg-yellow-100 text-yellow-700 border-yellow-300 hover:bg-yellow-200'
                           : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
                       }`}
                     >
-                      {days === 0 ? '0 Hari' : days === 1 ? '1 Hari' : '2 Hari'}
+                      {days === 0 ? '0 Hari' : '1 Hari'}
                     </button>
                   </>
                 )}
@@ -95,27 +93,17 @@ export default function OutletControlsPanel({
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-amber-800">
-                        {info.calculation_days === 0
-                          ? 'Kedua hari ke depan tercatat libur'
-                          : 'Ada hari libur dalam 2 hari ke depan'}
+                        Besok (H+1) tercatat libur
                       </p>
-                      {/* Detail hari libur yang terdeteksi */}
                       <div className="mt-0.5 space-y-0.5">
                         {info.date1_holiday && (
                           <p className="text-xs text-amber-700">
                             H+1: {holidayLabel(info.date1_holiday)}
                           </p>
                         )}
-                        {info.date2_holiday && (
-                          <p className="text-xs text-amber-700">
-                            H+2: {holidayLabel(info.date2_holiday)}
-                          </p>
-                        )}
                       </div>
                       <p className="text-xs text-amber-600 mt-1">
-                        {info.calculation_days === 0
-                          ? 'Perhitungan otomatis: 0 hari (tidak perlu order).'
-                          : 'Perhitungan otomatis menggunakan 1 hari.'}
+                        Perhitungan otomatis: 0 hari (tidak perlu order).
                       </p>
                     </div>
                   </div>
@@ -125,7 +113,7 @@ export default function OutletControlsPanel({
                       onClick={() => onRequestOverride(outlet.id)}
                       className="w-full text-xs px-2 py-1 rounded border border-amber-300 bg-white text-amber-700 hover:bg-amber-100 transition-colors font-medium"
                     >
-                      Override: cabang tetap buka, hitung 2 hari
+                      Override: cabang tetap buka, hitung 1 hari
                     </button>
                   )}
                 </div>
@@ -138,7 +126,7 @@ export default function OutletControlsPanel({
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 whitespace-nowrap flex-shrink-0">
                       Override aktif
                     </span>
-                    <span className="text-xs text-blue-600 truncate">Dihitung 2 hari</span>
+                    <span className="text-xs text-blue-600 truncate">Dihitung 1 hari</span>
                   </div>
                   {!isReadOnly && onCancelOverride && (
                     <button
