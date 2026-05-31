@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
+const posStockSync = require('../services/posStockSync');
 
 const OPTIONAL_PO_ITEM_COLUMNS = [
   'variant_id',
@@ -540,6 +541,9 @@ router.put('/:po_id/receive', async (req, res) => {
   }
 
   res.json({ ...po, has_discrepancy: hasDiscrepancy });
+
+  // Fire-and-forget: sinkronisasi stok ke POS (tidak memblokir response)
+  posStockSync.syncPOReceiveToInventory(po_id, poStatus).catch(() => {});
 });
 
 // DELETE hapus PO yang masih pending/confirmed
@@ -646,6 +650,9 @@ router.put('/:po_id/reset', async (req, res) => {
   }
 
   res.json(updated);
+
+  // Fire-and-forget: rollback stok POS untuk PO yang di-reset ke pending
+  posStockSync.syncPOCancelToInventory(po_id).catch(() => {});
 });
 
 module.exports = router;
