@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('./services/env').loadEnv();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -47,6 +47,12 @@ app.use(
   })
 );
 app.use(express.json());
+
+// Cegah browser cache API response (hindari 304 stale data)
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
 
 // Rate limit untuk notifikasi
 const notifLimiter = rateLimit({

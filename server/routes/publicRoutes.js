@@ -345,22 +345,38 @@ router.get('/distribution', async (req, res) => {
 
 // Outlet aktif: publik, untuk dropdown di halaman distribusi
 router.get('/outlets', async (req, res) => {
-  const { data, error } = await supabase
-    .from('outlets')
-    .select('id, name')
-    .eq('is_active', true)
-    .order('name');
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  const configError = supabase.getConfigError?.();
+  if (configError) return res.status(500).json({ error: configError });
+
+  try {
+    const { data, error } = await supabase
+      .from('outlets')
+      .select('id, name')
+      .eq('is_active', true)
+      .order('name');
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: `Gagal menghubungi Supabase: ${error.message}` });
+  }
 });
 
 // Data setup POS: outlet + material — untuk auto-populate mapping di admin POS
 // Tidak butuh auth karena hanya berisi nama dan UUID (bukan data sensitif)
 router.get('/pos-setup-data', async (req, res) => {
-  const [outletsRes, materialsRes] = await Promise.all([
-    supabase.from('outlets').select('id, name').eq('is_active', true).order('name'),
-    supabase.from('materials').select('id, name, purchase_unit').eq('is_active', true).order('name'),
-  ]);
+  const configError = supabase.getConfigError?.();
+  if (configError) return res.status(500).json({ error: configError });
+
+  let outletsRes;
+  let materialsRes;
+  try {
+    [outletsRes, materialsRes] = await Promise.all([
+      supabase.from('outlets').select('id, name').eq('is_active', true).order('name'),
+      supabase.from('materials').select('id, name, purchase_unit').eq('is_active', true).order('name'),
+    ]);
+  } catch (error) {
+    return res.status(500).json({ error: `Gagal menghubungi Supabase: ${error.message}` });
+  }
 
   if (outletsRes.error) return res.status(500).json({ error: outletsRes.error.message });
   if (materialsRes.error) return res.status(500).json({ error: materialsRes.error.message });
