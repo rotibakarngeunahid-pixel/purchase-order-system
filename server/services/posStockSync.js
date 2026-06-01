@@ -3,8 +3,8 @@
 /**
  * posStockSync.js — Service untuk sinkronisasi stok POS setelah PO diterima.
  *
- * Dipanggil fire-and-forget dari routes/purchase.js setelah PO berhasil di-receive.
- * Tidak boleh memblokir response HTTP utama.
+ * Dipanggil dan ditunggu dari routes/purchase.js setelah PO berhasil di-receive
+ * agar reliable di environment serverless.
  *
  * Env vars yang dibutuhkan:
  *   POS_API_URL  — URL api.php POS (mis. https://rbn.cpanel.net/api/api.php)
@@ -13,7 +13,16 @@
 
 const supabase = require('./supabase');
 
-const POS_API_URL = process.env.POS_API_URL || '';
+const POS_API_URL_ALIASES = {
+  'https://pos-system.rotibakarngeunah.my.id/api/api.php': 'https://api.rotibakarngeunah.my.id/api/api.php',
+};
+
+function normalizePosApiUrl(url) {
+  const trimmed = String(url || '').trim().replace(/\/+$/, '');
+  return POS_API_URL_ALIASES[trimmed] || trimmed;
+}
+
+const POS_API_URL = normalizePosApiUrl(process.env.POS_API_URL);
 const POS_API_KEY = process.env.POS_API_KEY || '';
 
 // ── Fetch data PO lengkap dari Supabase ───────────────────────────────────────
@@ -83,7 +92,7 @@ async function fetchPODataForSync(poId) {
 async function callPosSyncRpc(poId, poStatus, triggerType, syncItems, triggeredByPosUserId) {
   if (!POS_API_URL || !POS_API_KEY) {
     console.warn('[POS Sync] POS_API_URL atau POS_API_KEY belum dikonfigurasi — sync dilewati.');
-    return null;
+    return { status: 'skipped', summary: { success: 0, skipped: syncItems.length, errors: 0 } };
   }
 
   const payload = {
@@ -119,14 +128,15 @@ async function syncPOReceiveToInventory(poId, poStatus, triggeredByPosUserId = n
 
     if (!syncItems.length) {
       console.log(`[POS Sync] PO ${poId}: tidak ada item untuk disinkronkan`);
-      return;
+      return { ok: true, result: { status: 'skipped', summary: { success: 0, skipped: 0, errors: 0 } } };
     }
 
     const result = await callPosSyncRpc(poId, poStatus, 'po_received', syncItems, triggeredByPosUserId);
     console.log(`[POS Sync] PO ${poId} receive: status=${result?.status}, summary=`, result?.summary);
+    return { ok: true, result };
   } catch (err) {
-    // Fire-and-forget: jangan throw, cukup log
     console.error(`[POS Sync] Gagal sync PO ${poId} ke stok POS:`, err.message);
+    return { ok: false, error: err.message };
   }
 }
 
@@ -137,13 +147,15 @@ async function syncPOCancelToInventory(poId, triggeredByPosUserId = null) {
 
     if (!syncItems.length) {
       console.log(`[POS Sync] PO ${poId}: tidak ada item untuk di-rollback`);
-      return;
+      return { ok: true, result: { status: 'skipped', summary: { success: 0, skipped: 0, errors: 0 } } };
     }
 
     const result = await callPosSyncRpc(poId, po.status, 'po_cancelled', syncItems, triggeredByPosUserId);
     console.log(`[POS Sync] PO ${poId} cancel: status=${result?.status}, summary=`, result?.summary);
+    return { ok: true, result };
   } catch (err) {
     console.error(`[POS Sync] Gagal rollback stok PO ${poId}:`, err.message);
+    return { ok: false, error: err.message };
   }
 }
 
@@ -154,13 +166,15 @@ async function syncPOReviseToInventory(poId, poStatus, triggeredByPosUserId = nu
 
     if (!syncItems.length) {
       console.log(`[POS Sync] PO ${poId}: tidak ada item untuk direvisi`);
-      return;
+      return { ok: true, result: { status: 'skipped', summary: { success: 0, skipped: 0, errors: 0 } } };
     }
 
     const result = await callPosSyncRpc(poId, poStatus, 'po_revised', syncItems, triggeredByPosUserId);
     console.log(`[POS Sync] PO ${poId} revisi: status=${result?.status}, summary=`, result?.summary);
+    return { ok: true, result };
   } catch (err) {
     console.error(`[POS Sync] Gagal sync revisi PO ${poId}:`, err.message);
+    return { ok: false, error: err.message };
   }
 }
 

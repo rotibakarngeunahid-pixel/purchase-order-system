@@ -540,10 +540,8 @@ router.put('/:po_id/receive', async (req, res) => {
     }
   }
 
-  res.json({ ...po, has_discrepancy: hasDiscrepancy });
-
-  // Fire-and-forget: sinkronisasi stok ke POS (tidak memblokir response)
-  posStockSync.syncPOReceiveToInventory(po_id, poStatus).catch(() => {});
+  const posSync = await posStockSync.syncPOReceiveToInventory(po_id, poStatus);
+  res.json({ ...po, has_discrepancy: hasDiscrepancy, pos_sync: posSync });
 });
 
 // DELETE hapus PO yang masih pending/confirmed
@@ -590,6 +588,8 @@ router.put('/:po_id/reset', async (req, res) => {
     .single();
 
   if (fetchError || !po) return res.status(404).json({ error: 'PO tidak ditemukan' });
+
+  const posSync = await posStockSync.syncPOCancelToInventory(po_id);
 
   // Hapus semua item adjustment (distribusi adjustment terhapus via CASCADE)
   const deleteAdjustmentError = await deleteAdjustmentItems(po_id);
@@ -649,10 +649,7 @@ router.put('/:po_id/reset', async (req, res) => {
       .eq('status', 'completed');
   }
 
-  res.json(updated);
-
-  // Fire-and-forget: rollback stok POS untuk PO yang di-reset ke pending
-  posStockSync.syncPOCancelToInventory(po_id).catch(() => {});
+  res.json({ ...updated, pos_sync: posSync });
 });
 
 module.exports = router;
