@@ -18,10 +18,11 @@ const POS_API_KEY = process.env.POS_API_KEY || '';
 
 // ── Fetch data PO lengkap dari Supabase ───────────────────────────────────────
 async function fetchPODataForSync(poId) {
-  // Fetch PO header + outlet
+  // Fetch PO header. purchase_orders is supplier/session based; target cabang
+  // comes from purchase_item_branch_distribution, not from purchase_orders.
   const { data: po, error: poErr } = await supabase
     .from('purchase_orders')
-    .select('id, status, outlet_id, outlets(id, name)')
+    .select('id, status, session_id')
     .eq('id', poId)
     .single();
 
@@ -42,10 +43,11 @@ async function fetchPODataForSync(poId) {
   const itemIds = (items || []).map((i) => i.id).filter(Boolean);
   let distributions = [];
   if (itemIds.length > 0) {
-    const { data: distData } = await supabase
+    const { data: distData, error: distErr } = await supabase
       .from('purchase_item_branch_distribution')
       .select('po_item_id, outlet_id, qty, outlets(id, name)')
       .in('po_item_id', itemIds);
+    if (distErr) throw new Error(`Gagal ambil distribusi cabang PO ${poId}: ${distErr.message}`);
     distributions = distData || [];
   }
 
@@ -60,9 +62,6 @@ async function fetchPODataForSync(poId) {
     });
   }
 
-  const outletId   = po.outlet_id || '';
-  const outletName = po.outlets?.name || outletId;
-
   // Bangun array items untuk payload sync
   const syncItems = (items || [])
     .filter((item) => item.material_id) // abaikan item tanpa material
@@ -72,8 +71,8 @@ async function fetchPODataForSync(poId) {
       po_material_name:     item.materials?.name || item.material_id,
       po_item_source:       item.source || 'ordered',
       qty_received:         Number(item.qty_received ?? 0),
-      outlet_id:            outletId,
-      outlet_name:          outletName,
+      outlet_id:            '',
+      outlet_name:          '',
       branch_distributions: distByItem[item.id] || [],
     }));
 
