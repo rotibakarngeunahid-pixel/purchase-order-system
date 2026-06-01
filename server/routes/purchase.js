@@ -298,6 +298,16 @@ router.put('/:po_id/receive', async (req, res) => {
     return res.status(400).json({ error: 'items wajib berupa array' });
   }
 
+  const { data: existingPO, error: existingPOError } = await supabase
+    .from('purchase_orders')
+    .select('id, status')
+    .eq('id', po_id)
+    .single();
+
+  if (existingPOError || !existingPO) {
+    return res.status(404).json({ error: 'PO tidak ditemukan' });
+  }
+
   const itemSupplierIds = [
     ...new Set(items.map((item) => item.supplier_id).filter(Boolean)),
   ];
@@ -540,7 +550,10 @@ router.put('/:po_id/receive', async (req, res) => {
     }
   }
 
-  const posSync = await posStockSync.syncPOReceiveToInventory(po_id, poStatus);
+  const wasAlreadyReceived = ['received', 'received_partial'].includes(existingPO.status);
+  const posSync = wasAlreadyReceived
+    ? await posStockSync.syncPOReviseToInventory(po_id, poStatus)
+    : await posStockSync.syncPOReceiveToInventory(po_id, poStatus);
   res.json({ ...po, has_discrepancy: hasDiscrepancy, pos_sync: posSync });
 });
 
