@@ -323,8 +323,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [branchDistributions, setBranchDistributions] = useState(() => {
     const map = {};
     (po.items || [])
-      .filter((item) => item.material?.name?.toLowerCase().includes('roti') &&
-                        item.branch_distributions?.length > 0)
+      .filter((item) => item.branch_distributions?.length > 0)
       .forEach((item) => {
         map[item.id] = {};
         (item.branch_distributions || []).forEach((d) => {
@@ -334,7 +333,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
     return map;
   });
   // Data order per outlet per material dari sesi order awal (untuk auto-populate distribusi)
-  const [sessionRotiOrders, setSessionRotiOrders] = useState({});
+  const [sessionOrders, setSessionOrders] = useState({});
 
   // Load master data
   useEffect(() => {
@@ -351,41 +350,39 @@ function ReceiveModal({ po, onClose, onSaved }) {
       .catch(console.error);
   }, []);
 
-  // Load data order per outlet dari sesi awal untuk auto-populate distribusi roti
+  // Load data order per outlet dari sesi awal untuk auto-populate distribusi semua bahan
   useEffect(() => {
     const sessionId = po.session?.id;
     if (!sessionId) return;
     api.get(`/api/orders/session/${sessionId}`)
       .then((res) => {
-        // Buat map: material_id → { outlet_id: qty } untuk semua bahan roti
+        // Buat map: material_id → { outlet_id: qty } untuk semua bahan
         const byMaterial = {};
         (res.data.items || []).forEach((item) => {
-          if (!item.material?.name?.toLowerCase().includes('roti')) return;
           if (!item.material_id || !item.outlet_id || !Number(item.qty)) return;
           if (!byMaterial[item.material_id]) byMaterial[item.material_id] = {};
           byMaterial[item.material_id][item.outlet_id] = Number(item.qty);
         });
-        setSessionRotiOrders(byMaterial);
+        setSessionOrders(byMaterial);
       })
       .catch(() => {}); // non-fatal
   }, [po.session?.id]);
 
-  // Auto-populate branchDistributions dari data order sesi untuk ordered roti items
+  // Auto-populate branchDistributions dari data order sesi untuk semua ordered items
   // Hanya mengisi jika belum ada distribusi tersimpan sebelumnya
   useEffect(() => {
-    if (Object.keys(sessionRotiOrders).length === 0) return;
+    if (Object.keys(sessionOrders).length === 0) return;
     setBranchDistributions((prev) => {
       let changed = false;
       const next = { ...prev };
       (po.items || [])
-        .filter((item) => (item.source || 'ordered') === 'ordered' &&
-                          item.material?.name?.toLowerCase().includes('roti'))
+        .filter((item) => (item.source || 'ordered') === 'ordered')
         .forEach((item) => {
           const existingDist = next[item.id];
           const hasExisting =
             existingDist && Object.values(existingDist).some((v) => Number(v) > 0);
           if (hasExisting) return; // jangan timpa data yang sudah tersimpan
-          const orderMap = sessionRotiOrders[item.material_id];
+          const orderMap = sessionOrders[item.material_id];
           if (!orderMap || Object.keys(orderMap).length === 0) return;
           next[item.id] = Object.fromEntries(
             Object.entries(orderMap).map(([outletId, qty]) => [outletId, String(qty)])
@@ -394,7 +391,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
         });
       return changed ? next : prev;
     });
-  }, [sessionRotiOrders, po.items]);
+  }, [sessionOrders, po.items]);
 
   // Load variants untuk semua bahan di PO (ordered + adjustment existing)
   useEffect(() => {
@@ -660,23 +657,21 @@ function ReceiveModal({ po, onClose, onSaved }) {
     setBranchDistributions(() => {
       const base = {};
       (po.items || [])
-        .filter((item) => item.material?.name?.toLowerCase().includes('roti') &&
-                          item.branch_distributions?.length > 0)
+        .filter((item) => item.branch_distributions?.length > 0)
         .forEach((item) => {
           base[item.id] = {};
           (item.branch_distributions || []).forEach((d) => {
             base[item.id][d.outlet_id] = String(d.qty);
           });
         });
-      // Terapkan auto-populate dari sesi untuk ordered roti tanpa distribusi tersimpan
+      // Terapkan auto-populate dari sesi untuk semua ordered items tanpa distribusi tersimpan
       (po.items || [])
-        .filter((item) => (item.source || 'ordered') === 'ordered' &&
-                          item.material?.name?.toLowerCase().includes('roti'))
+        .filter((item) => (item.source || 'ordered') === 'ordered')
         .forEach((item) => {
           const hasExisting = base[item.id] &&
             Object.values(base[item.id]).some((v) => Number(v) > 0);
           if (hasExisting) return;
-          const orderMap = sessionRotiOrders[item.material_id];
+          const orderMap = sessionOrders[item.material_id];
           if (!orderMap || Object.keys(orderMap).length === 0) return;
           base[item.id] = Object.fromEntries(
             Object.entries(orderMap).map(([outletId, qty]) => [outletId, String(qty)])
@@ -748,7 +743,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
         });
       });
 
-      await api.put(`/api/purchase/${po.id}/receive`, {
+      const res = await api.put(`/api/purchase/${po.id}/receive`, {
         items: [
           ...orderedItems.map((item) => ({
             id: item.id,
@@ -759,13 +754,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
             supplier_id: item.supplier_id || null,
           })),
           ...adjustmentItems.map((item) => {
-            const isRoti = (() => {
-              const mat = materials.find((m) => m.id === item.material_id);
-              return mat?.name?.toLowerCase().includes('roti') ||
-                     item.material?.name?.toLowerCase().includes('roti');
-            })();
-            // Adj roti baru (belum punya ID) → kirim inline_branch_distributions
-            const inlineDist = (!item.id && isRoti)
+            // Item adjustment baru (belum punya ID) → kirim inline_branch_distributions
+            const inlineDist = !item.id
               ? Object.entries(branchDistributions[item._tempId] || {})
                   .filter(([, qty]) => Number(qty) > 0)
                   .map(([outletId, qty]) => ({ outlet_id: outletId, qty: Number(qty) || 0 }))
@@ -787,7 +777,33 @@ function ReceiveModal({ po, onClose, onSaved }) {
         notes,
         branch_distributions,
       });
-      onSaved();
+
+      // Periksa hasil sinkronisasi stok POS
+      const posSync = res.data?.pos_sync;
+      let syncWarning = '';
+      if (posSync && !posSync.ok) {
+        syncWarning = `Penerimaan tersimpan, tapi sinkronisasi stok POS gagal: ${posSync.error || 'Error tidak diketahui'}. Buka Admin → Sync PO → Stok untuk retry.`;
+      } else if (posSync?.result?.summary) {
+        const { errors = 0, skipped = 0 } = posSync.result.summary;
+        const needsAction = errors + skipped;
+        if (needsAction > 0) {
+          const needsMappingItems = (posSync.result?.results || [])
+            .filter((r) => r.status === 'butuh_mapping_admin')
+            .map((r) => r.error?.match(/Bahan '([^']+)'/)?.[1])
+            .filter(Boolean);
+          const noOutletItems = (posSync.result?.results || [])
+            .filter((r) => r.status === 'butuh_alokasi_cabang')
+            .length;
+          const parts = [];
+          if (needsMappingItems.length > 0)
+            parts.push(`${needsMappingItems.length} bahan perlu pemetaan di Admin (${needsMappingItems.join(', ')})`);
+          if (noOutletItems > 0)
+            parts.push(`${noOutletItems} item tidak punya alokasi cabang`);
+          syncWarning = `Penerimaan disimpan. ${parts.join('; ')}. Buka Admin → Sync PO → Stok untuk konfigurasi.`;
+        }
+      }
+
+      onSaved(syncWarning);
       onClose();
     } catch (err) {
       setError(err.response?.data?.error || err.message);
@@ -962,22 +978,22 @@ function ReceiveModal({ po, onClose, onSaved }) {
             </div>
           </div>
 
-          {/* ── Distribusi Roti ke Cabang (Ordered) ── */}
+          {/* ── Distribusi Bahan ke Cabang (Ordered) ── */}
           {(() => {
-            const rotiItems = orderedItems.filter((item) =>
-              item.material?.name?.toLowerCase().includes('roti')
+            const itemsToDistribute = orderedItems.filter(
+              (item) => Number(item.qty_received) > 0
             );
-            if (rotiItems.length === 0 || outlets.length === 0) return null;
+            if (itemsToDistribute.length === 0 || outlets.length === 0) return null;
             return (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-1">
-                  Distribusi Roti ke Cabang
+                  Distribusi Bahan ke Cabang
                 </h4>
                 <p className="text-xs text-gray-400 mb-3">
-                  Distribusi otomatis dari order awal. Sesuaikan jika ada perubahan aktual.
+                  Tentukan berapa banyak setiap bahan yang diterima oleh masing-masing cabang. Auto-terisi dari order awal jika tersedia.
                 </p>
                 <div className="space-y-4">
-                  {rotiItems.map((item) => {
+                  {itemsToDistribute.map((item) => {
                     const distMap = branchDistributions[item.id] || {};
                     const totalDist = Object.values(distMap).reduce(
                       (s, q) => s + (Number(q) || 0), 0
@@ -987,7 +1003,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
                     const isBalanced = remaining === 0;
                     const isOver = remaining < 0;
                     // Cek apakah distribusi ini auto-filled dari session order
-                    const sessionOrderMap = sessionRotiOrders[item.material_id];
+                    const sessionOrderMap = sessionOrders[item.material_id];
                     const isAutoFilled = sessionOrderMap &&
                       !item.branch_distributions?.length &&
                       Object.keys(distMap).length > 0;
@@ -1050,24 +1066,22 @@ function ReceiveModal({ po, onClose, onSaved }) {
             );
           })()}
 
-          {/* ── Distribusi Roti Tambahan ke Cabang (Adjustment) ── */}
+          {/* ── Distribusi Bahan Tambahan ke Cabang (Adjustment) ── */}
           {(() => {
-            const adjRotiItems = adjustmentItems.filter((item) => {
-              const mat = materials.find((m) => m.id === item.material_id);
-              return mat?.name?.toLowerCase().includes('roti') ||
-                     item.material?.name?.toLowerCase().includes('roti');
-            });
-            if (adjRotiItems.length === 0 || outlets.length === 0) return null;
+            const adjItemsToDistribute = adjustmentItems.filter(
+              (item) => item.material_id && Number(item.qty_received) > 0
+            );
+            if (adjItemsToDistribute.length === 0 || outlets.length === 0) return null;
             return (
               <div>
                 <h4 className="text-sm font-semibold text-gray-700 mb-1">
-                  Distribusi Roti Tambahan ke Cabang
+                  Distribusi Bahan Tambahan ke Cabang
                 </h4>
                 <p className="text-xs text-gray-400 mb-3">
-                  Roti tambahan di luar order awal wajib dimapping manual ke setiap cabang.
+                  Bahan tambahan di luar order awal — tentukan distribusi ke setiap cabang.
                 </p>
                 <div className="space-y-4">
-                  {adjRotiItems.map((item) => {
+                  {adjItemsToDistribute.map((item) => {
                     const key = item.id || item._tempId;
                     const mat = materials.find((m) => m.id === item.material_id);
                     const distMap = branchDistributions[key] || {};
@@ -1410,6 +1424,7 @@ export default function PurchaseRecord() {
   const [resetting, setResetting] = useState(false);
   const [openingPOId, setOpeningPOId] = useState(null);
   const [actionError, setActionError] = useState('');
+  const [syncWarning, setSyncWarning] = useState('');
 
   useEffect(() => {
     loadPOs();
@@ -1478,7 +1493,11 @@ export default function PurchaseRecord() {
         <ReceiveModal
           po={selectedPO}
           onClose={() => setSelectedPO(null)}
-          onSaved={loadPOs}
+          onSaved={(warning) => {
+            loadPOs();
+            setSyncWarning(warning || '');
+            setActionError('');
+          }}
         />
       )}
 
@@ -1547,6 +1566,17 @@ export default function PurchaseRecord() {
       {actionError && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
           {actionError}
+        </div>
+      )}
+      {syncWarning && (
+        <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg text-orange-700 text-sm flex items-start justify-between gap-3">
+          <span>⚠ {syncWarning}</span>
+          <button
+            onClick={() => setSyncWarning('')}
+            className="text-orange-400 hover:text-orange-600 font-bold leading-none flex-shrink-0"
+          >
+            ×
+          </button>
         </div>
       )}
 

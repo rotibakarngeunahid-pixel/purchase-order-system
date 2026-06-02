@@ -42,7 +42,7 @@ async function fetchPODataForSync(poId) {
     .from('purchase_order_items')
     .select(`
       id, material_id, qty_ordered, qty_received, source,
-      materials(id, name, purchase_unit)
+      materials(id, name, purchase_unit, package_qty, package_unit)
     `)
     .eq('po_id', poId);
 
@@ -80,6 +80,9 @@ async function fetchPODataForSync(poId) {
       po_material_name:     item.materials?.name || item.material_id,
       po_item_source:       item.source || 'ordered',
       qty_received:         Number(item.qty_received ?? 0),
+      po_purchase_unit:     item.materials?.purchase_unit || null,
+      po_package_qty:       Math.max(1, Number(item.materials?.package_qty ?? 1) || 1),
+      po_package_unit:      item.materials?.package_unit || null,
       outlet_id:            '',
       outlet_name:          '',
       branch_distributions: distByItem[item.id] || [],
