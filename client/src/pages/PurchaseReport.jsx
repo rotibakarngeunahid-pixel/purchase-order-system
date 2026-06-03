@@ -44,6 +44,9 @@ export default function PurchaseReport() {
   const [toast, setToast] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [editSaving, setEditSaving] = useState(false);
   const [importReport, setImportReport] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -176,6 +179,38 @@ export default function PurchaseReport() {
       showToast('Gagal menyimpan: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  function handleEditOpen(item) {
+    setEditingItem(item);
+    setEditForm({
+      qty: String(item.qty || ''),
+      price_per_unit: String(item.price_per_unit || ''),
+      supplier_id: item.supplier_id || '',
+      notes: item.notes || '',
+    });
+  }
+
+  async function handleEditSave() {
+    if (!editingItem) return;
+    const qty = Number(editForm.qty);
+    if (!(qty > 0)) { showToast('Qty harus lebih dari 0.', 'error'); return; }
+    setEditSaving(true);
+    try {
+      const res = await api.put(`/api/purchase-report/${editingItem.id}`, {
+        qty,
+        price_per_unit: Number(editForm.price_per_unit) || 0,
+        supplier_id: editForm.supplier_id || null,
+        notes: editForm.notes || null,
+      });
+      setRecords((prev) => prev.map((r) => (r.id === editingItem.id ? res.data : r)));
+      showToast('Berhasil diperbarui dan disinkronkan ke stok POS.');
+      setEditingItem(null);
+    } catch (err) {
+      showToast('Gagal menyimpan: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -1147,6 +1182,102 @@ export default function PurchaseReport() {
         </div>
       )}
 
+      {/* ── Modal Edit ── */}
+      {editingItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+          onClick={() => !editSaving && setEditingItem(null)}
+        >
+          <div className="bg-white rounded-xl shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="font-bold text-gray-900 text-lg mb-0.5">Edit Barang Masuk</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              {editingItem.material?.name}
+              {editingItem.variant?.brand && (
+                <span className="ml-1 text-xs bg-gray-100 text-gray-500 rounded px-1.5 py-0.5">
+                  {editingItem.variant.brand}
+                </span>
+              )}
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="filter-label">Qty</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" min="0.01" step="any"
+                    value={editForm.qty}
+                    onChange={(e) => setEditForm((f) => ({ ...f, qty: e.target.value }))}
+                    className="input flex-1"
+                    autoFocus
+                  />
+                  <span className="text-sm text-gray-500 w-12 shrink-0">{editingItem.unit}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="filter-label">Harga/Satuan</label>
+                <input
+                  type="number" min="0" step="any"
+                  value={editForm.price_per_unit}
+                  onChange={(e) => setEditForm((f) => ({ ...f, price_per_unit: e.target.value }))}
+                  className="input w-full"
+                  placeholder="0"
+                />
+                {Number(editForm.qty) > 0 && Number(editForm.price_per_unit) > 0 && (
+                  <p className="text-xs text-gray-400 mt-0.5 text-right">
+                    Total: {(Number(editForm.qty) * Number(editForm.price_per_unit)).toLocaleString('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 })}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="filter-label">Supplier</label>
+                <select
+                  value={editForm.supplier_id}
+                  onChange={(e) => setEditForm((f) => ({ ...f, supplier_id: e.target.value }))}
+                  className="input w-full"
+                >
+                  <option value="">— Pilih —</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="filter-label">Catatan</label>
+                <input
+                  type="text"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="opsional"
+                  className="input w-full"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end mt-5">
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                disabled={editSaving}
+                className="btn-secondary text-sm"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleEditSave}
+                disabled={editSaving}
+                className="btn-primary text-sm"
+              >
+                {editSaving ? 'Menyimpan...' : 'Simpan & Sinkronkan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="page-header">
         <div>
           <h1 className="page-title">Laporan Barang Masuk</h1>
@@ -1442,11 +1573,11 @@ export default function PurchaseReport() {
                     <colgroup>
                       <col style={{ width: '30%' }} />
                       <col style={{ width: '12%' }} />
-                      <col style={{ width: '15%' }} />
-                      <col style={{ width: '15%' }} />
                       <col style={{ width: '14%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '13%' }} />
                       <col style={{ width: '10%' }} />
-                      <col style={{ width: '4%' }} />
+                      <col style={{ width: '7%' }} />
                     </colgroup>
                     <tbody>
                       {group.items.map((r) => {
@@ -1476,14 +1607,23 @@ export default function PurchaseReport() {
                               {r.notes || ''}
                             </td>
                             <td className="center-cell">
-                              <button
-                                onClick={() => handleDelete(r.id)}
-                                disabled={deletingId === r.id}
-                                className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none"
-                                title="Hapus"
-                              >
-                                ×
-                              </button>
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  onClick={() => handleEditOpen(r)}
+                                  className="text-gray-300 hover:text-blue-500 transition-colors leading-none p-0.5"
+                                  title="Edit & Sinkronkan"
+                                >
+                                  ✏
+                                </button>
+                                <button
+                                  onClick={() => handleDelete(r.id)}
+                                  disabled={deletingId === r.id}
+                                  className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none"
+                                  title="Hapus"
+                                >
+                                  ×
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );

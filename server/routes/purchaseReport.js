@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
+const { syncPurchaseReportToInventory } = require('../services/posStockSync');
 
 // GET semua variants aktif (untuk preload di frontend)
 router.get('/variants', async (req, res) => {
@@ -78,7 +79,57 @@ router.post('/', async (req, res) => {
     `);
 
   if (error) return res.status(500).json({ error: error.message });
+
+  // Fire-and-forget: sync ke stok POS
+  const outletName = (data && data[0]?.outlet?.name) || '';
+  syncPurchaseReportToInventory(data, outlet_id, outletName)
+    .then((r) => { if (!r.ok) console.error('[POS Sync] Purchase report sync gagal:', r.error); })
+    .catch((err) => console.error('[POS Sync] Purchase report sync error:', err?.message));
+
   res.status(201).json(data);
+});
+
+// PUT /:id — edit item + re-sync ke POS
+router.put('/:id', async (req, res) => {
+  const { id } = req.params;
+  const allowed = ['variant_id', 'supplier_id', 'qty', 'unit', 'price_per_unit', 'notes'];
+  const updates = {};
+  allowed.forEach((key) => {
+    if (req.body[key] !== undefined) updates[key] = req.body[key];
+  });
+
+  if (updates.qty !== undefined) updates.qty = Number(updates.qty);
+  if (updates.price_per_unit !== undefined) updates.price_per_unit = Number(updates.price_per_unit) || 0;
+  if (updates.notes !== undefined) updates.notes = updates.notes?.trim() || null;
+  if (updates.variant_id === '') updates.variant_id = null;
+  if (updates.supplier_id === '') updates.supplier_id = null;
+
+  if (updates.qty !== undefined && !(updates.qty > 0)) {
+    return res.status(400).json({ error: 'qty harus lebih dari 0' });
+  }
+
+  const { data, error } = await supabase
+    .from('purchase_report')
+    .update(updates)
+    .eq('id', id)
+    .select(`
+      *,
+      outlet:outlets(id, name),
+      material:materials(id, code, name, purchase_unit),
+      variant:material_variants(id, brand),
+      supplier:suppliers(id, name)
+    `)
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  // Fire-and-forget: re-sync ke POS dengan qty terbaru
+  const outletName = data.outlet?.name || '';
+  syncPurchaseReportToInventory([data], data.outlet_id, outletName)
+    .then((r) => { if (!r.ok) console.error('[POS Sync] Edit sync gagal:', r.error); })
+    .catch((err) => console.error('[POS Sync] Edit sync error:', err?.message));
+
+  res.json(data);
 });
 
 // DELETE single item

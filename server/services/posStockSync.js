@@ -181,8 +181,45 @@ async function syncPOReviseToInventory(poId, poStatus, triggeredByPosUserId = nu
   }
 }
 
+// ── Dipanggil setelah Lap. Barang Masuk disimpan atau diedit ─────────────────
+// po_id stabil 'purchase_report' + po_item_id = item.id (UUID unik per record)
+// → RPC menghitung delta = qty_baru - qty_sebelumnya, re-sync tidak double-count
+async function syncPurchaseReportToInventory(savedItems, outletId, outletName) {
+  try {
+    if (!savedItems || savedItems.length === 0) {
+      return { ok: true, result: { status: 'skipped', summary: { success: 0, skipped: 0, errors: 0 } } };
+    }
+
+    const syncItems = savedItems.map((item) => ({
+      po_item_id:           item.id,
+      po_material_id:       item.material_id,
+      po_material_name:     item.material?.name || String(item.material_id),
+      po_item_source:       'ordered',
+      qty_received:         Number(item.qty) || 0,
+      po_purchase_unit:     item.unit || null,
+      po_package_qty:       1,
+      po_package_unit:      item.unit || null,
+      outlet_id:            '',
+      outlet_name:          '',
+      branch_distributions: [{
+        outlet_id:   outletId,
+        outlet_name: outletName || outletId,
+        qty:         Number(item.qty) || 0,
+      }],
+    }));
+
+    const result = await callPosSyncRpc('purchase_report', 'received', 'purchase_report', syncItems, null);
+    console.log(`[POS Sync] Purchase report sync: status=${result?.status}, summary=`, result?.summary);
+    return { ok: true, result };
+  } catch (err) {
+    console.error('[POS Sync] Gagal sync purchase report ke stok POS:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
 module.exports = {
   syncPOReceiveToInventory,
   syncPOCancelToInventory,
   syncPOReviseToInventory,
+  syncPurchaseReportToInventory,
 };
