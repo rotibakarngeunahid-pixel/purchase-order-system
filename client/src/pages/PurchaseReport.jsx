@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { Pencil } from 'lucide-react';
 import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
 
 function getFirstOfMonth() {
@@ -1571,13 +1572,13 @@ export default function PurchaseReport() {
                   <div className="table-wrap">
                   <table className="data-table table-fixed" style={{ minWidth: '920px' }}>
                     <colgroup>
-                      <col style={{ width: '30%' }} />
-                      <col style={{ width: '12%' }} />
-                      <col style={{ width: '14%' }} />
-                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '28%' }} />
+                      <col style={{ width: '11%' }} />
                       <col style={{ width: '13%' }} />
-                      <col style={{ width: '10%' }} />
-                      <col style={{ width: '7%' }} />
+                      <col style={{ width: '13%' }} />
+                      <col style={{ width: '12%' }} />
+                      <col style={{ width: '9%' }} />
+                      <col style={{ width: '14%' }} />
                     </colgroup>
                     <tbody>
                       {group.items.map((r) => {
@@ -1606,19 +1607,20 @@ export default function PurchaseReport() {
                             <td className="text-gray-400 text-xs truncate">
                               {r.notes || ''}
                             </td>
-                            <td className="center-cell">
-                              <div className="flex items-center justify-center gap-1">
+                            <td className="px-2 py-1.5">
+                              <div className="flex items-center justify-center gap-1.5">
                                 <button
                                   onClick={() => handleEditOpen(r)}
-                                  className="text-gray-300 hover:text-blue-500 transition-colors leading-none p-0.5"
-                                  title="Edit & Sinkronkan"
+                                  className="inline-flex items-center gap-1 px-1.5 py-1 rounded text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors"
+                                  title="Edit & Sinkronkan ke stok POS"
                                 >
-                                  ✏
+                                  <Pencil className="h-3 w-3" strokeWidth={2.5} />
+                                  Edit
                                 </button>
                                 <button
                                   onClick={() => handleDelete(r.id)}
                                   disabled={deletingId === r.id}
-                                  className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none"
+                                  className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none px-0.5"
                                   title="Hapus"
                                 >
                                   ×
