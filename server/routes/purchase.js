@@ -251,6 +251,38 @@ async function fetchOrderedItemIds(poId) {
     .eq('po_id', poId);
 }
 
+function addPositiveDistributionRow(rows, poItemId, outletId, qty) {
+  if (!poItemId || !outletId) return;
+  const numericQty = Number(qty) || 0;
+  if (numericQty <= 0) return;
+  rows.push({
+    po_item_id: poItemId,
+    outlet_id: outletId,
+    qty: numericQty,
+  });
+}
+
+async function replaceBranchDistributions(poItemIds, rows) {
+  const itemIds = [...new Set((poItemIds || []).filter(Boolean))];
+  if (itemIds.length === 0) return null;
+
+  const { error: deleteError } = await supabase
+    .from('purchase_item_branch_distribution')
+    .delete()
+    .in('po_item_id', itemIds);
+  if (deleteError) return deleteError;
+
+  if (!rows.length) return null;
+  const mergedRows = [
+    ...new Map(rows.map((row) => [`${row.po_item_id}:${row.outlet_id}`, row])).values(),
+  ];
+
+  const { error: insertError } = await supabase
+    .from('purchase_item_branch_distribution')
+    .insert(mergedRows);
+  return insertError || null;
+}
+
 // GET detail PO
 router.get('/:po_id', async (req, res) => {
   const { po_id } = req.params;
@@ -377,16 +409,21 @@ router.put('/:po_id/receive', async (req, res) => {
     if (delError) return res.status(500).json({ error: delError.message });
   }
 
+  const distributionItemIds = new Set();
+  const nextDistributionRows = [];
+
   // Proses setiap item
   for (const item of items) {
     const source = item.source || 'ordered';
 
     if (source === 'ordered' && item.id) {
+      distributionItemIds.add(item.id);
       const itemError = await updateOrderedPOItem(po_id, item);
       if (itemError) return res.status(500).json({ error: itemError.message });
 
     } else if (source === 'adjustment') {
       if (item.id) {
+        distributionItemIds.add(item.id);
         // Update adjustment existing
         const updatePayload = {
           qty_received: item.qty_received,
@@ -443,45 +480,40 @@ router.put('/:po_id/receive', async (req, res) => {
         const insertedAdj = result.data;
 
         // Simpan inline_branch_distributions jika ada (untuk adj roti baru) — non-fatal
-        if (
-          insertedAdj?.id &&
-          Array.isArray(item.inline_branch_distributions) &&
-          item.inline_branch_distributions.length > 0
-        ) {
-          const distRows = item.inline_branch_distributions
-            .filter((d) => d.outlet_id && Number(d.qty) >= 0)
-            .map((d) => ({
-              po_item_id: insertedAdj.id,
-              outlet_id: d.outlet_id,
-              qty: Number(d.qty) || 0,
-            }));
-          if (distRows.length > 0) {
-            const { error: inlineDistError } = await supabase
-              .from('purchase_item_branch_distribution')
-              .upsert(distRows, { onConflict: 'po_item_id,outlet_id' });
-            if (inlineDistError) {
-              console.error('Inline distribusi adj gagal disimpan:', inlineDistError.message);
-            }
+        if (insertedAdj?.id) {
+          distributionItemIds.add(insertedAdj.id);
+          if (Array.isArray(item.inline_branch_distributions)) {
+            item.inline_branch_distributions.forEach((d) => {
+              addPositiveDistributionRow(
+                nextDistributionRows,
+                insertedAdj.id,
+                d.outlet_id,
+                d.qty
+              );
+            });
           }
         }
       }
     }
   }
 
-  // Simpan distribusi roti per cabang (jika ada)
-  if (Array.isArray(branch_distributions) && branch_distributions.length > 0) {
-    const distRows = branch_distributions
-      .filter((d) => d.po_item_id && d.outlet_id && Number(d.qty) >= 0)
-      .map((d) => ({ po_item_id: d.po_item_id, outlet_id: d.outlet_id, qty: Number(d.qty) || 0 }));
+  if (Array.isArray(branch_distributions)) {
+    branch_distributions.forEach((d) => {
+      if (!distributionItemIds.has(d.po_item_id)) return;
+      addPositiveDistributionRow(nextDistributionRows, d.po_item_id, d.outlet_id, d.qty);
+    });
+  }
 
-    if (distRows.length > 0) {
-      const { error: distError } = await supabase
-        .from('purchase_item_branch_distribution')
-        .upsert(distRows, { onConflict: 'po_item_id,outlet_id' });
-      if (distError) {
-        // Non-fatal: log saja, jangan gagalkan penerimaan utama
-        console.error('Distribusi cabang gagal disimpan:', distError.message);
-      }
+  // Distribusi adalah snapshot terbaru. Hapus dulu agar qty 0/cabang yang dihapus
+  // tidak tertinggal dan tidak ikut tersinkron ulang ke stok POS.
+  if (distributionItemIds.size > 0) {
+    const distError = await replaceBranchDistributions(
+      [...distributionItemIds],
+      nextDistributionRows
+    );
+    if (distError) {
+      // Non-fatal: log saja, jangan gagalkan penerimaan utama
+      console.error('Distribusi cabang gagal disimpan:', distError.message);
     }
   }
 

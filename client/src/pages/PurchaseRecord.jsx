@@ -57,6 +57,38 @@ function newAdjustmentRow(defaultSupplierId = '') {
   };
 }
 
+function reconcileDistributionForReceivedQty(distributionMap, itemKey, qtyReceived) {
+  if (!itemKey || !distributionMap[itemKey]) return distributionMap;
+
+  const qty = Number(qtyReceived) || 0;
+  const next = { ...distributionMap };
+
+  if (qty <= 0) {
+    delete next[itemKey];
+    return next;
+  }
+
+  const current = distributionMap[itemKey] || {};
+  const positiveEntries = Object.entries(current).filter(([, qtyValue]) => Number(qtyValue) > 0);
+  if (positiveEntries.length === 1) {
+    const [outletId] = positiveEntries[0];
+    next[itemKey] = { ...current, [outletId]: String(qty) };
+  }
+
+  return next;
+}
+
+function addPositiveDistributionPayload(rows, poItemId, outletId, qty) {
+  if (!poItemId || !outletId) return;
+  const numericQty = Number(qty) || 0;
+  if (numericQty <= 0) return;
+  rows.push({
+    po_item_id: poItemId,
+    outlet_id: outletId,
+    qty: numericQty,
+  });
+}
+
 // ─── QuickAddVariantModal ─────────────────────────────────────────────────────
 
 function QuickAddVariantModal({ materialId, materialName, defaultSupplierId, suppliers, onSaved, onCancel }) {
@@ -428,11 +460,17 @@ function ReceiveModal({ po, onClose, onSaved }) {
   // ── Ordered items ──
 
   const updateOrdered = (idx, field, value) => {
+    const itemId = orderedItems[idx]?.id;
     setOrderedItems((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], [field]: value };
       return next;
     });
+    if (field === 'qty_received' && itemId) {
+      setBranchDistributions((prev) =>
+        reconcileDistributionForReceivedQty(prev, itemId, value)
+      );
+    }
   };
 
   const handleSelectOrderedVariant = (idx, variantId) => {
@@ -476,6 +514,12 @@ function ReceiveModal({ po, onClose, onSaved }) {
       setDeletedAdjustmentItemIds((prev) => [...prev, item.id]);
     }
     setAdjustmentItems((prev) => prev.filter((i) => i._tempId !== tempId));
+    setBranchDistributions((prev) => {
+      const next = { ...prev };
+      delete next[tempId];
+      if (item?.id) delete next[item.id];
+      return next;
+    });
     setRowErrors((prev) => {
       const next = { ...prev };
       delete next[tempId];
@@ -487,6 +531,13 @@ function ReceiveModal({ po, onClose, onSaved }) {
     setAdjustmentItems((prev) =>
       prev.map((item) => (item._tempId === tempId ? { ...item, [field]: value } : item))
     );
+    if (field === 'qty_received') {
+      const item = adjustmentItems.find((i) => i._tempId === tempId);
+      const itemKey = item?.id || tempId;
+      setBranchDistributions((prev) =>
+        reconcileDistributionForReceivedQty(prev, itemKey, value)
+      );
+    }
     if (rowErrors[tempId]) {
       setRowErrors((prev) => {
         const next = { ...prev };
@@ -722,24 +773,18 @@ function ReceiveModal({ po, onClose, onSaved }) {
       // Bangun array distribusi cabang untuk ordered items dan adj items yang sudah punya ID
       const branch_distributions = [];
       orderedItems.forEach((item) => {
+        if (!(Number(item.qty_received) > 0)) return;
         const distMap = branchDistributions[item.id] || {};
         Object.entries(distMap).forEach(([outletId, qty]) => {
-          branch_distributions.push({
-            po_item_id: item.id,
-            outlet_id: outletId,
-            qty: Number(qty) || 0,
-          });
+          addPositiveDistributionPayload(branch_distributions, item.id, outletId, qty);
         });
       });
       // Adj items yang sudah punya ID real (bukan baru) juga masuk branch_distributions biasa
       adjustmentItems.filter((adj) => adj.id).forEach((item) => {
+        if (!(Number(item.qty_received) > 0)) return;
         const distMap = branchDistributions[item.id] || {};
         Object.entries(distMap).forEach(([outletId, qty]) => {
-          branch_distributions.push({
-            po_item_id: item.id,
-            outlet_id: outletId,
-            qty: Number(qty) || 0,
-          });
+          addPositiveDistributionPayload(branch_distributions, item.id, outletId, qty);
         });
       });
 
