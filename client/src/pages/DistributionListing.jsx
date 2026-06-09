@@ -242,16 +242,24 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
       <div className="p-4 space-y-4">
 
         {/* Guide section */}
-        <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+        <div className="bg-gray-50 rounded-xl p-3 space-y-3">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Panduan Foto</p>
           <p className="text-sm text-gray-700 leading-relaxed">{instruction}</p>
           {examplePhotos.length > 0 && (
-            <div>
-              <p className="text-xs text-gray-400 mb-2">Contoh Foto:</p>
-              <div className="flex gap-2 flex-wrap">
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Contoh Foto:</p>
+              <div className={`grid gap-2 ${examplePhotos.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 {examplePhotos.map((url, idx) => (
-                  <div key={idx} className="w-16 h-16 rounded-lg overflow-hidden bg-gray-200 cursor-pointer border border-gray-300 hover:opacity-80 transition-opacity" onClick={() => setLightboxUrl(url)}>
+                  <div
+                    key={idx}
+                    className="relative rounded-xl overflow-hidden bg-gray-200 cursor-pointer border-2 border-blue-200 active:opacity-80"
+                    style={{ aspectRatio: '4/3' }}
+                    onClick={() => setLightboxUrl(url)}
+                  >
                     <img src={url} alt={`Contoh ${idx + 1}`} className="w-full h-full object-cover" loading="lazy" />
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-2 py-1.5">
+                      <p className="text-white text-[11px] font-semibold">Contoh {idx + 1} — ketuk untuk perbesar</p>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -265,17 +273,16 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp,image/*"
+              accept="image/*"
               capture="environment"
-              multiple
               className="sr-only"
               onChange={handleFileSelect}
             />
             <div className="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center hover:border-blue-400 hover:bg-blue-50/50 transition-colors active:scale-[0.99]">
               <div className="text-4xl mb-2">📷</div>
-              <p className="text-sm font-semibold text-blue-700">Ketuk untuk ambil foto atau pilih dari galeri</p>
+              <p className="text-sm font-semibold text-blue-700">Ketuk untuk ambil foto langsung</p>
               <p className="text-xs text-gray-400 mt-1">
-                Maks. {3 - selectedPhotos.length} foto lagi • JPG, PNG, WebP • Maks. 10MB/foto
+                Maks. {3 - selectedPhotos.length} foto lagi • Foto harus diambil langsung (kamera)
               </p>
             </div>
           </label>
