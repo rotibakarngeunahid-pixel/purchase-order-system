@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import api from '../lib/api';
 import { toInputDate } from '../lib/api';
-import { Image, X, ZoomIn } from 'lucide-react';
+import { Image, Trash2, X, ZoomIn } from 'lucide-react';
 
 function formatDateTime(iso) {
   if (!iso) return '-';
@@ -47,6 +47,8 @@ export default function DistributionPhotos() {
   const [filterBranch, setFilterBranch] = useState('');
   const [filterDate, setFilterDate] = useState(toInputDate());
   const [lightboxUrl, setLightboxUrl] = useState(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanResult, setCleanResult] = useState(null);
   const hasFetched = useRef(false);
 
   useEffect(() => {
@@ -71,6 +73,25 @@ export default function DistributionPhotos() {
 
   const totalPhotos = photos.reduce((sum, r) => sum + (r.photos?.length || 0), 0);
 
+  const handleCleanup = async () => {
+    if (!window.confirm('Hapus semua foto yang sudah lebih dari 7 hari? Tindakan ini tidak bisa dibatalkan.')) return;
+    setCleaning(true);
+    setCleanResult(null);
+    try {
+      const res = await api.post('/api/distribution-photos/cleanup');
+      setCleanResult({ ok: true, msg: res.data.message });
+      // Reload list setelah cleanup
+      const params = new URLSearchParams();
+      if (filterBranch) params.set('branch', filterBranch);
+      if (filterDate) params.set('date', filterDate);
+      api.get(`/api/distribution-photos?${params}`).then((r) => setPhotos(r.data || [])).catch(() => {});
+    } catch (err) {
+      setCleanResult({ ok: false, msg: err.response?.data?.error || err.message });
+    } finally {
+      setCleaning(false);
+    }
+  };
+
   return (
     <div className="page-shell max-w-5xl">
       {lightboxUrl && <LightboxModal url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
@@ -78,9 +99,24 @@ export default function DistributionPhotos() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Foto Bukti Distribusi</h1>
-          <p className="page-subtitle">Arsip foto bukti bahan masuk per cabang</p>
+          <p className="page-subtitle">Arsip foto bukti bahan masuk per cabang • otomatis dihapus setelah 7 hari</p>
         </div>
+        <button
+          onClick={handleCleanup}
+          disabled={cleaning}
+          className="btn-secondary text-sm flex items-center gap-2"
+          title="Hapus semua foto yang sudah lebih dari 7 hari"
+        >
+          <Trash2 className="w-4 h-4" />
+          {cleaning ? 'Membersihkan...' : 'Hapus Foto Lama'}
+        </button>
       </div>
+
+      {cleanResult && (
+        <div className={`mb-4 px-4 py-3 rounded-xl text-sm font-medium ${cleanResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+          {cleanResult.msg}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="card p-4 mb-5 flex flex-wrap gap-3 items-end">

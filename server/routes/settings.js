@@ -66,7 +66,12 @@ router.post('/upload-guide-photo', (req, res) => {
     let buffer = req.file.buffer;
     try {
       if (sharpLib) {
-        buffer = await sharpLib(buffer).rotate().webp({ quality: 82 }).toBuffer();
+        // Resize maks 1200px untuk foto panduan (tidak butuh resolusi tinggi)
+        buffer = await sharpLib(buffer)
+          .rotate()
+          .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+          .webp({ quality: 75, effort: 6, smartSubsample: true })
+          .toBuffer();
       }
     } catch (convErr) {
       console.error('[GuidePhoto] WebP conversion error:', convErr.message);

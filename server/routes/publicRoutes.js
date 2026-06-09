@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const multer = require('multer');
-// TODO: Fill in IMAGE_SERVER credentials in .env for FTP/SFTP upload.
-// Currently using Supabase Storage as the upload backend.
+// Supabase Storage digunakan sebagai backend upload foto distribusi.
 let sharpLib;
 try { sharpLib = require('sharp'); } catch { sharpLib = null; }
+const { cleanupOldDistributionPhotos } = require('../services/photoCleanup');
 
 // ── Upload helpers ──────────────────────────────────────────────────────────
 
@@ -20,11 +20,12 @@ const uploadMiddleware = multer({
   },
 });
 
-function getWIBTime() {
-  return new Date(Date.now() + 7 * 60 * 60 * 1000);
+// WITA = UTC+8
+function getWITATime() {
+  return new Date(Date.now() + 8 * 60 * 60 * 1000);
 }
 
-function formatWIB(d) {
+function formatWITA(d) {
   const p = (n) => String(n).padStart(2, '0');
   return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
@@ -33,15 +34,15 @@ function randomStr(n) {
   return Array.from({ length: n }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
 }
 
-let distribusiiBucketReady = false;
+let distribusiBucketReady = false;
 async function ensureDistribusiBucket() {
-  if (distribusiiBucketReady) return;
+  if (distribusiBucketReady) return;
   try {
     const { data: buckets } = await supabase.storage.listBuckets();
     if (!(buckets || []).some((b) => b.name === 'distribusi')) {
       await supabase.storage.createBucket('distribusi', { public: true });
     }
-    distribusiiBucketReady = true;
+    distribusiBucketReady = true;
   } catch (err) {
     console.error('[DistPhotos] Bucket init error:', err.message);
   }
@@ -56,13 +57,24 @@ function escapeXml(str) {
     .replace(/'/g, '&apos;');
 }
 
-async function processAndWatermark(buffer, branchName, wibTime) {
+// Resize ke maks 1920px, watermark WITA, encode WebP quality 75 effort 6
+async function processAndWatermark(buffer, branchName, witaTime) {
   if (!sharpLib) return buffer;
-  const meta = await sharpLib(buffer).metadata();
-  const w = meta.width || 800;
-  const h = meta.height || 600;
-  const fontSize = Math.max(14, Math.round(w * 0.022));
-  const text = `RBN • ${escapeXml(branchName)} • ${formatWIB(wibTime)} WIB`;
+
+  const MAX_DIM = 1920;
+
+  // Pass 1: auto-rotate + resize → dapatkan dimensi final
+  const { data: resizedBuf, info } = await sharpLib(buffer)
+    .rotate()
+    .resize(MAX_DIM, MAX_DIM, { fit: 'inside', withoutEnlargement: true })
+    .toBuffer({ resolveWithObject: true });
+
+  const w = info.width;
+  const h = info.height;
+
+  // Bangun SVG watermark sesuai dimensi final
+  const fontSize = Math.max(14, Math.round(w * 0.018));
+  const text = `RBN • ${escapeXml(branchName)} • ${formatWITA(witaTime)} WITA`;
   const textW = Math.round(text.length * fontSize * 0.58);
   const padH = 12;
   const padV = 7;
@@ -74,10 +86,11 @@ async function processAndWatermark(buffer, branchName, wibTime) {
     `<text x="${w - padH}" y="${barY + padV + fontSize - 2}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" fill="white" text-anchor="end">${text}</text>` +
     `</svg>`
   );
-  return sharpLib(buffer)
-    .rotate()
+
+  // Pass 2: composite watermark + encode WebP (quality 75, effort 6)
+  return sharpLib(resizedBuf)
     .composite([{ input: svgBuf, blend: 'over' }])
-    .webp({ quality: 82 })
+    .webp({ quality: 75, effort: 6, smartSubsample: true })
     .toBuffer();
 }
 
@@ -486,12 +499,12 @@ router.post('/distribution/upload-photo', (req, res) => {
     if (!branch) return res.status(400).json({ error: 'Parameter branch wajib diisi.' });
     if (files.length === 0) return res.status(400).json({ error: 'Minimal 1 foto harus diunggah.' });
 
-    const wibNow = getWIBTime();
-    const year = String(wibNow.getUTCFullYear());
-    const month = String(wibNow.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(wibNow.getUTCDate()).padStart(2, '0');
-    const hour = String(wibNow.getUTCHours()).padStart(2, '0');
-    const min = String(wibNow.getUTCMinutes()).padStart(2, '0');
+    const witaNow = getWITATime();
+    const year = String(witaNow.getUTCFullYear());
+    const month = String(witaNow.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(witaNow.getUTCDate()).padStart(2, '0');
+    const hour = String(witaNow.getUTCHours()).padStart(2, '0');
+    const min = String(witaNow.getUTCMinutes()).padStart(2, '0');
     const photoDate = date || `${year}-${month}-${day}`;
     const branchSlug = branch.toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -505,7 +518,7 @@ router.post('/distribution/upload-photo', (req, res) => {
       let buffer = file.buffer;
       try {
         try {
-          buffer = await processAndWatermark(file.buffer, branch, wibNow);
+          buffer = await processAndWatermark(file.buffer, branch, witaNow);
         } catch (convErr) {
           console.error('[DistPhotos] WebP conversion error, using original:', convErr.message);
         }
@@ -565,6 +578,11 @@ router.post('/distribution/upload-photo', (req, res) => {
       photos: results,
       ...(errors.length > 0 && { errors }),
     });
+
+    // Hapus otomatis foto > 7 hari setelah setiap upload (fire-and-forget)
+    cleanupOldDistributionPhotos().catch((err) =>
+      console.error('[DistPhotos] Background cleanup error:', err.message)
+    );
   });
 });
 
