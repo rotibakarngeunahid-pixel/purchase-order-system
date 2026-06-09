@@ -1,6 +1,85 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
+const multer = require('multer');
+// TODO: Fill in IMAGE_SERVER credentials in .env for FTP/SFTP upload.
+// Currently using Supabase Storage as the upload backend.
+let sharpLib;
+try { sharpLib = require('sharp'); } catch { sharpLib = null; }
+
+// ── Upload helpers ──────────────────────────────────────────────────────────
+
+const uploadMiddleware = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) return cb(null, true);
+    const err = new Error('FORMAT_NOT_SUPPORTED');
+    err.code = 'FORMAT_NOT_SUPPORTED';
+    cb(err);
+  },
+});
+
+function getWIBTime() {
+  return new Date(Date.now() + 7 * 60 * 60 * 1000);
+}
+
+function formatWIB(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+function randomStr(n) {
+  return Array.from({ length: n }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
+}
+
+let distribusiiBucketReady = false;
+async function ensureDistribusiBucket() {
+  if (distribusiiBucketReady) return;
+  try {
+    const { data: buckets } = await supabase.storage.listBuckets();
+    if (!(buckets || []).some((b) => b.name === 'distribusi')) {
+      await supabase.storage.createBucket('distribusi', { public: true });
+    }
+    distribusiiBucketReady = true;
+  } catch (err) {
+    console.error('[DistPhotos] Bucket init error:', err.message);
+  }
+}
+
+function escapeXml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+async function processAndWatermark(buffer, branchName, wibTime) {
+  if (!sharpLib) return buffer;
+  const meta = await sharpLib(buffer).metadata();
+  const w = meta.width || 800;
+  const h = meta.height || 600;
+  const fontSize = Math.max(14, Math.round(w * 0.022));
+  const text = `RBN • ${escapeXml(branchName)} • ${formatWIB(wibTime)} WIB`;
+  const textW = Math.round(text.length * fontSize * 0.58);
+  const padH = 12;
+  const padV = 7;
+  const barH = fontSize + padV * 2;
+  const barY = h - barH - 10;
+  const svgBuf = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+    `<rect x="${w - textW - padH * 2}" y="${barY}" width="${textW + padH * 2}" height="${barH}" rx="4" fill="rgba(0,0,0,0.60)"/>` +
+    `<text x="${w - padH}" y="${barY + padV + fontSize - 2}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" fill="white" text-anchor="end">${text}</text>` +
+    `</svg>`
+  );
+  return sharpLib(buffer)
+    .rotate()
+    .composite([{ input: svgBuf, blend: 'over' }])
+    .webp({ quality: 82 })
+    .toBuffer();
+}
 
 const FINAL_RECEIPT_STATUSES = ['received', 'received_partial'];
 
@@ -385,6 +464,126 @@ router.get('/pos-setup-data', async (req, res) => {
     outlets:   outletsRes.data  || [],
     materials: materialsRes.data || [],
   });
+});
+
+// ── POST /api/public/distribution/upload-photo ─────────────────────────────
+// Upload photo proof (public — Distribution Listing page has no staff auth)
+router.post('/distribution/upload-photo', (req, res) => {
+  uploadMiddleware.array('photos', 3)(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'FORMAT_NOT_SUPPORTED' || err.message === 'FORMAT_NOT_SUPPORTED') {
+        return res.status(400).json({ error: 'Format tidak didukung. Gunakan JPG, PNG, atau WebP.' });
+      }
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'Foto terlalu besar. Maksimal 10MB.' });
+      }
+      return res.status(400).json({ error: err.message });
+    }
+
+    const { branch, date } = req.body;
+    const files = req.files || [];
+
+    if (!branch) return res.status(400).json({ error: 'Parameter branch wajib diisi.' });
+    if (files.length === 0) return res.status(400).json({ error: 'Minimal 1 foto harus diunggah.' });
+
+    const wibNow = getWIBTime();
+    const year = String(wibNow.getUTCFullYear());
+    const month = String(wibNow.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(wibNow.getUTCDate()).padStart(2, '0');
+    const hour = String(wibNow.getUTCHours()).padStart(2, '0');
+    const min = String(wibNow.getUTCMinutes()).padStart(2, '0');
+    const photoDate = date || `${year}-${month}-${day}`;
+    const branchSlug = branch.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    await ensureDistribusiBucket();
+
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      let buffer = file.buffer;
+      try {
+        try {
+          buffer = await processAndWatermark(file.buffer, branch, wibNow);
+        } catch (convErr) {
+          console.error('[DistPhotos] WebP conversion error, using original:', convErr.message);
+        }
+
+        const filename = `${branchSlug}_${year}${month}${day}_${hour}${min}_${randomStr(4)}.webp`;
+        const storagePath = `${branchSlug}/${year}/${month}/${filename}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from('distribusi')
+          .upload(storagePath, buffer, { contentType: 'image/webp', upsert: false });
+
+        if (uploadErr) throw uploadErr;
+
+        const { data: urlData } = supabase.storage.from('distribusi').getPublicUrl(storagePath);
+        results.push({ url: urlData.publicUrl, filename });
+      } catch (photoErr) {
+        console.error(`[DistPhotos] Photo ${i + 1} failed:`, photoErr.message);
+        errors.push({ index: i, message: photoErr.message });
+      }
+    }
+
+    if (results.length === 0) {
+      return res.status(500).json({
+        error: 'Gagal mengirim foto. Periksa koneksi dan coba lagi.',
+        errors,
+      });
+    }
+
+    // Save record to DB
+    let sessionId = null;
+    try {
+      const { data: session } = await supabase
+        .from('order_sessions')
+        .select('id')
+        .eq('order_date', photoDate)
+        .maybeSingle();
+      sessionId = session?.id || null;
+    } catch {}
+
+    try {
+      await supabase.from('distribution_photos').insert({
+        branch,
+        date: photoDate,
+        uploaded_at: new Date().toISOString(),
+        photos: results,
+        distribution_session_id: sessionId,
+      });
+    } catch (dbErr) {
+      console.error('[DistPhotos] DB save error:', dbErr.message);
+      // Non-fatal — files are already uploaded
+    }
+
+    res.json({
+      success: true,
+      uploaded: results.length,
+      failed: errors.length,
+      photos: results,
+      ...(errors.length > 0 && { errors }),
+    });
+  });
+});
+
+// GET /api/public/distribution/photo-guide
+router.get('/distribution/photo-guide', async (req, res) => {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('value')
+    .eq('key', 'distribution_photo_guide')
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  let guide = null;
+  if (data?.value) {
+    try { guide = JSON.parse(data.value); } catch {}
+  }
+
+  res.json(guide || { instruction: '', example_photos: [] });
 });
 
 module.exports = router;

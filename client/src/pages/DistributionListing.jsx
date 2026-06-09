@@ -1,11 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import axios from 'axios';
 import { toInputDate, formatDateID } from '../lib/api';
 
 const baseURL = import.meta.env.VITE_API_URL ?? '';
-const publicApi = axios.create({ baseURL, timeout: 30000 });
+const publicApi = axios.create({ baseURL, timeout: 60000 });
 
 const STORAGE_KEY = (date, outletId) => `dist_check_${date}_${outletId}`;
+const PHOTO_KEY = (date, outletName) => `dist_photo_${date}_${outletName}`;
 
 function loadChecks(date, outletId) {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY(date, outletId)) || '{}'); }
@@ -14,19 +15,23 @@ function loadChecks(date, outletId) {
 function saveChecks(date, outletId, checks) {
   localStorage.setItem(STORAGE_KEY(date, outletId), JSON.stringify(checks));
 }
+function loadUploadedPhotos(date, outletName) {
+  try { return JSON.parse(localStorage.getItem(PHOTO_KEY(date, outletName)) || 'null'); }
+  catch { return null; }
+}
+function saveUploadedPhotos(date, outletName, data) {
+  localStorage.setItem(PHOTO_KEY(date, outletName), JSON.stringify(data));
+}
 
 function mergeOutletTabs(masterOutlets, distributionOutlets) {
   const map = new Map((masterOutlets || []).map((outlet) => [String(outlet.id), outlet]));
   (distributionOutlets || []).forEach((entry) => {
     const outlet = entry.outlet;
-    if (outlet?.id && !map.has(String(outlet.id))) {
-      map.set(String(outlet.id), outlet);
-    }
+    if (outlet?.id && !map.has(String(outlet.id))) map.set(String(outlet.id), outlet);
   });
   return Array.from(map.values());
 }
 
-// Roti Tawar selalu paling atas
 function sortItems(items) {
   return [...items].sort((a, b) => {
     const aIsRoti = a.material_name?.toLowerCase().includes('roti tawar');
@@ -37,14 +42,364 @@ function sortItems(items) {
   });
 }
 
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ── Photo Upload Card ────────────────────────────────────────────────────────
+
+function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadSuccess }) {
+  const [guide, setGuide] = useState(null);
+  const [selectedPhotos, setSelectedPhotos] = useState([]);
+  const [uploadStatus, setUploadStatus] = useState('idle'); // idle|processing|uploading|done|error
+  const [uploadProgress, setUploadProgress] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const [uploadedPhotos, setUploadedPhotos] = useState(alreadyUploaded || null);
+  const [lightboxUrl, setLightboxUrl] = useState(null);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    publicApi.get('/api/public/distribution/photo-guide')
+      .then((res) => setGuide(res.data))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setUploadedPhotos(alreadyUploaded || null);
+  }, [alreadyUploaded]);
+
+  const defaultInstruction =
+    'Pastikan foto jelas, semua bahan terlihat, dan nota/surat jalan tampak dalam frame.';
+  const instruction = guide?.instruction || defaultInstruction;
+  const examplePhotos = guide?.example_photos || [];
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    const remaining = 3 - selectedPhotos.length;
+    if (remaining <= 0) return;
+
+    const added = [];
+    const fileErrors = [];
+    for (const file of files.slice(0, remaining)) {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+        fileErrors.push(`${file.name}: Format tidak didukung.`);
+        continue;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        fileErrors.push(`${file.name}: Terlalu besar. Maksimal 10MB.`);
+        continue;
+      }
+      added.push({ file, preview: URL.createObjectURL(file), name: file.name, size: file.size });
+    }
+    if (fileErrors.length > 0) setUploadError(fileErrors.join(' '));
+    else setUploadError('');
+    setSelectedPhotos((prev) => [...prev, ...added]);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const handleRemove = (idx) => {
+    setSelectedPhotos((prev) => {
+      const next = [...prev];
+      URL.revokeObjectURL(next[idx].preview);
+      next.splice(idx, 1);
+      return next;
+    });
+    setUploadError('');
+  };
+
+  const canSubmit = allDone && selectedPhotos.length > 0 && uploadStatus === 'idle';
+
+  async function attemptUpload(formData, attempt = 0) {
+    try {
+      const res = await publicApi.post('/api/public/distribution/upload-photo', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 60000,
+      });
+      return res.data;
+    } catch (err) {
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        return attemptUpload(formData, attempt + 1);
+      }
+      throw err;
+    }
+  }
+
+  const handleUpload = async () => {
+    if (!canSubmit) {
+      setShowTooltip(true);
+      setTimeout(() => setShowTooltip(false), 3000);
+      return;
+    }
+    setUploadStatus('processing');
+    setUploadProgress('Memproses foto... (konversi ke WebP)');
+    setUploadError('');
+
+    const formData = new FormData();
+    formData.append('branch', outletName);
+    formData.append('date', date);
+    selectedPhotos.forEach((p) => formData.append('photos', p.file));
+
+    try {
+      setUploadStatus('uploading');
+      setUploadProgress(`Mengunggah ${selectedPhotos.length} foto...`);
+      const result = await attemptUpload(formData);
+
+      setUploadStatus('done');
+      setUploadProgress('Selesai ✓');
+
+      const uploadData = {
+        photos: result.photos,
+        uploadedAt: new Date().toISOString(),
+        failed: result.failed || 0,
+        errors: result.errors,
+      };
+      setUploadedPhotos(uploadData);
+      saveUploadedPhotos(date, outletName, uploadData);
+      onUploadSuccess?.(uploadData);
+
+      selectedPhotos.forEach((p) => URL.revokeObjectURL(p.preview));
+      setSelectedPhotos([]);
+    } catch (err) {
+      setUploadStatus('error');
+      const msg = err.response?.data?.error || err.message || 'Gagal mengirim foto.';
+      setUploadError(`${msg} Periksa koneksi dan coba lagi.`);
+      setUploadProgress('');
+    }
+  };
+
+  const handleRetry = () => {
+    setUploadStatus('idle');
+    setUploadError('');
+    setUploadProgress('');
+  };
+
+  // ── Lightbox ──────────────────────────────────────────────────────────────
+  const Lightbox = lightboxUrl ? (
+    <div
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      onClick={() => setLightboxUrl(null)}
+    >
+      <button className="absolute top-4 right-4 text-white bg-black/40 rounded-full w-9 h-9 flex items-center justify-center text-lg" onClick={() => setLightboxUrl(null)}>✕</button>
+      <img src={lightboxUrl} alt="Foto" className="max-w-full max-h-full rounded-xl object-contain" onClick={(e) => e.stopPropagation()} />
+    </div>
+  ) : null;
+
+  // ── Already uploaded view ─────────────────────────────────────────────────
+  if (uploadedPhotos?.photos?.length > 0 && uploadStatus !== 'error') {
+    const ts = uploadedPhotos.uploadedAt
+      ? new Date(uploadedPhotos.uploadedAt).toLocaleString('id-ID', {
+          day: '2-digit', month: 'short', year: 'numeric',
+          hour: '2-digit', minute: '2-digit',
+        })
+      : '';
+    return (
+      <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+        {Lightbox}
+        <div className="px-4 py-3.5 bg-green-50 border-b border-green-100">
+          <h2 className="font-bold text-green-700 text-base">📷 Foto Bukti Bahan Masuk</h2>
+        </div>
+        <div className="p-4">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
+            <p className="text-green-700 font-semibold text-sm">
+              ✅ Foto bukti berhasil dikirim — {ts}
+            </p>
+            {uploadedPhotos.failed > 0 && (
+              <p className="text-yellow-600 text-xs mt-1">
+                {uploadedPhotos.failed} foto gagal diunggah
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {uploadedPhotos.photos.map((photo, idx) => (
+              <div key={idx} className="relative">
+                <div className="w-24 h-24 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer" onClick={() => setLightboxUrl(photo.url)}>
+                  <img src={photo.url} alt={photo.filename} className="w-full h-full object-cover" loading="lazy" />
+                </div>
+                <p className="text-[10px] text-gray-400 mt-1 w-24 truncate text-center" title={photo.filename}>
+                  {photo.filename}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Upload form view ──────────────────────────────────────────────────────
+  return (
+    <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
+      {Lightbox}
+
+      <div className="px-4 py-3.5 bg-blue-50 border-b border-blue-100">
+        <h2 className="font-bold text-blue-800 text-base">📷 Foto Bukti Bahan Masuk</h2>
+      </div>
+
+      <div className="p-4 space-y-4">
+
+        {/* Guide section */}
+        <div className="bg-gray-50 rounded-xl p-3 space-y-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Panduan Foto</p>
+          <p className="text-sm text-gray-700 leading-relaxed">{instruction}</p>
+          {examplePhotos.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-400 mb-2">Contoh Foto:</p>
+              <div className="flex gap-2 flex-wrap">
+                {examplePhotos.map((url, idx) => (
+                  <div key={idx} className="w-16 h-16 rounded-lg overflow-hidden bg-gray-200 cursor-pointer border border-gray-300 hover:opacity-80 transition-opacity" onClick={() => setLightboxUrl(url)}>
+                    <img src={url} alt={`Contoh ${idx + 1}`} className="w-full h-full object-cover" loading="lazy" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Upload zone */}
+        {selectedPhotos.length < 3 && uploadStatus === 'idle' && (
+          <label className="block cursor-pointer">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/*"
+              capture="environment"
+              multiple
+              className="sr-only"
+              onChange={handleFileSelect}
+            />
+            <div className="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center hover:border-blue-400 hover:bg-blue-50/50 transition-colors active:scale-[0.99]">
+              <div className="text-4xl mb-2">📷</div>
+              <p className="text-sm font-semibold text-blue-700">Ketuk untuk ambil foto atau pilih dari galeri</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Maks. {3 - selectedPhotos.length} foto lagi • JPG, PNG, WebP • Maks. 10MB/foto
+              </p>
+            </div>
+          </label>
+        )}
+
+        {/* Inline file error */}
+        {uploadError && uploadStatus === 'idle' && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+            <p className="text-red-600 text-sm">{uploadError}</p>
+          </div>
+        )}
+
+        {/* Photo previews */}
+        {selectedPhotos.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Foto Dipilih ({selectedPhotos.length}/3)
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {selectedPhotos.map((photo, idx) => (
+                <div key={idx} className="relative">
+                  <div className="w-24 h-24 rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
+                    <img src={photo.preview} alt={photo.name} className="w-full h-full object-cover" />
+                  </div>
+                  <span className="absolute top-1 left-1 bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">WebP</span>
+                  {uploadStatus === 'idle' && (
+                    <button
+                      onClick={() => handleRemove(idx)}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs font-bold hover:bg-red-600 active:scale-90"
+                    >
+                      ✕
+                    </button>
+                  )}
+                  <p className="text-[10px] text-gray-400 mt-1 w-24 truncate" title={photo.name}>{photo.name}</p>
+                  <p className="text-[10px] text-gray-400">{formatFileSize(photo.size)}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Progress indicator */}
+        {(uploadStatus === 'processing' || uploadStatus === 'uploading') && (
+          <div className="flex items-center gap-3 bg-blue-50 rounded-xl p-3">
+            <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+            <p className="text-sm text-blue-700 font-medium">{uploadProgress}</p>
+          </div>
+        )}
+
+        {/* Error state with retry */}
+        {uploadStatus === 'error' && (
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-2">
+            <p className="text-red-600 text-sm">{uploadError}</p>
+            <button onClick={handleRetry} className="text-sm font-semibold text-red-600 underline underline-offset-2">
+              Coba Lagi
+            </button>
+          </div>
+        )}
+
+        {/* Submit button */}
+        {uploadStatus !== 'done' && (
+          <div className="relative">
+            <button
+              onClick={handleUpload}
+              disabled={uploadStatus !== 'idle' || selectedPhotos.length === 0}
+              className={`w-full py-3.5 rounded-xl font-bold text-sm transition-all active:scale-[0.98] ${
+                canSubmit
+                  ? 'bg-brand-red text-white shadow-sm hover:bg-red-700'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+              }`}
+            >
+              {uploadStatus === 'processing' || uploadStatus === 'uploading'
+                ? uploadProgress || 'Mengunggah...'
+                : 'Kirim Foto Bukti'}
+            </button>
+            {showTooltip && (
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap z-10 shadow-lg">
+                {!allDone
+                  ? 'Selesaikan pengecekan semua item terlebih dahulu'
+                  : 'Pilih minimal 1 foto terlebih dahulu'}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800" />
+              </div>
+            )}
+          </div>
+        )}
+
+        {!allDone && uploadStatus === 'idle' && (
+          <p className="text-xs text-gray-400 text-center">
+            Selesaikan pengecekan semua item untuk mengaktifkan tombol kirim
+          </p>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ────────────────────────────────────────────────────────────────
+
 export default function DistributionListing() {
+  // ── State ──
   const [date, setDate] = useState(toInputDate());
   const [outlets, setOutlets] = useState([]);
   const [selectedOutletId, setSelectedOutletId] = useState('');
   const [distributionData, setDistributionData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [checks, setChecks] = useState({});
+  const [alreadyUploaded, setAlreadyUploaded] = useState(null);
 
+  // ── Derived values (computed before effects so they can be used in deps) ──
+  const displayOutlets = mergeOutletTabs(outlets, distributionData?.outlets || []);
+  const outletData = distributionData?.outlets?.find(
+    (o) => String(o.outlet?.id) === String(selectedOutletId)
+  );
+  const isAdjustmentGroup = !!outletData?.is_adjustment_group;
+  const rawItems = outletData?.items || [];
+  const items = sortItems(rawItems);
+  const checkedCount = items.filter((item) => checks[item.id]).length;
+  const allDone = items.length > 0 && checkedCount === items.length;
+  const progressPct = items.length > 0 ? (checkedCount / items.length) * 100 : 0;
+  const selectedOutletName = displayOutlets.find((o) => String(o.id) === String(selectedOutletId))?.name || '';
+  const showPhotoCard = !!distributionData?.session && !isAdjustmentGroup && items.length > 0;
+
+  // ── Effects ──
   useEffect(() => {
     publicApi.get('/api/public/outlets').then((res) => {
       setOutlets(res.data || []);
@@ -66,6 +421,7 @@ export default function DistributionListing() {
   }, [date]);
 
   useEffect(() => { loadDistribution(); }, [loadDistribution]);
+
   useEffect(() => {
     const merged = mergeOutletTabs(outlets, distributionData?.outlets || []);
     const selectedExists = merged.some((outlet) => String(outlet.id) === String(selectedOutletId));
@@ -73,35 +429,29 @@ export default function DistributionListing() {
       setSelectedOutletId(String(merged[0].id));
     }
   }, [outlets, distributionData, selectedOutletId]);
+
   useEffect(() => {
     if (selectedOutletId) setChecks(loadChecks(date, selectedOutletId));
   }, [date, selectedOutletId]);
 
+  useEffect(() => {
+    if (date && selectedOutletName) {
+      setAlreadyUploaded(loadUploadedPhotos(date, selectedOutletName));
+    }
+  }, [date, selectedOutletName]);
+
+  // ── Handlers ──
   const toggleCheck = (itemId) => {
     const next = { ...checks, [itemId]: !checks[itemId] };
     setChecks(next);
     saveChecks(date, selectedOutletId, next);
   };
 
-  const displayOutlets = mergeOutletTabs(outlets, distributionData?.outlets || []);
-  const outletData = distributionData?.outlets?.find(
-    (o) => String(o.outlet?.id) === String(selectedOutletId)
-  );
-  const isAdjustmentGroup = !!outletData?.is_adjustment_group;
-  const rawItems = outletData?.items || [];
-  const items = sortItems(rawItems);
-  const checkedCount = items.filter((item) => checks[item.id]).length;
-  const allDone = items.length > 0 && checkedCount === items.length;
-  const progressPct = items.length > 0 ? (checkedCount / items.length) * 100 : 0;
-  const selectedOutletName = displayOutlets.find((o) => String(o.id) === String(selectedOutletId))?.name || '';
-
   return (
-    // text-[16px] mencegah auto-zoom iOS saat tap input
     <div className="min-h-screen bg-gray-100 text-[16px]">
 
       {/* ── Sticky Header ── */}
       <div className="sticky top-0 z-20 bg-brand-red shadow-md">
-        {/* Baris atas: judul + date */}
         <div className="px-4 pt-5 pb-3 flex items-start justify-between gap-3">
           <div>
             <p className="text-red-300 text-[11px] font-bold tracking-widest uppercase mb-0.5">
@@ -118,7 +468,7 @@ export default function DistributionListing() {
           />
         </div>
 
-        {/* Tab navigasi cabang — horizontal scroll */}
+        {/* Tab navigasi cabang */}
         <div className="pb-3">
           <p className="px-4 text-red-300 text-[10px] font-bold tracking-widest uppercase mb-2">
             Pilih Cabang
@@ -189,8 +539,6 @@ export default function DistributionListing() {
               </div>
             ) : (
               <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
-
-                {/* Card header */}
                 <div className="flex items-center justify-between px-4 py-3.5 bg-orange-50 border-b border-orange-100">
                   <h2 className="font-bold text-brand-red text-base">{selectedOutletName}</h2>
                   <span className={`${isAdjustmentGroup ? 'bg-blue-600' : 'bg-brand-red'} text-white text-xs font-bold px-3 py-1 rounded-full`}>
@@ -198,7 +546,6 @@ export default function DistributionListing() {
                   </span>
                 </div>
 
-                {/* Rows */}
                 {items.map((item, idx) => {
                   const checked = !!checks[item.id];
                   const isRoti = item.material_name?.toLowerCase().includes('roti tawar');
@@ -216,7 +563,6 @@ export default function DistributionListing() {
                           : 'bg-white'
                       }`}
                     >
-                      {/* Tap area kiri: nomor + nama (flex-1, tinggi 60px min) */}
                       <button
                         onClick={() => toggleCheck(item.id)}
                         className="flex-1 min-w-0 flex items-center gap-3 px-4 py-4 text-left"
@@ -241,7 +587,6 @@ export default function DistributionListing() {
                         </span>
                       </button>
 
-                      {/* Qty + Satuan */}
                       <div className="flex items-center gap-1.5 flex-shrink-0 pr-2">
                         <span className={`w-9 text-right text-lg font-bold tabular-nums ${checked ? 'text-gray-400' : 'text-gray-800'}`}>
                           {item.qty}
@@ -251,13 +596,10 @@ export default function DistributionListing() {
                         </span>
                       </div>
 
-                      {/* Tombol centang — 44×44px tap target */}
                       <button
                         onClick={() => toggleCheck(item.id)}
                         className={`w-11 h-11 flex-shrink-0 flex items-center justify-center mr-2 rounded-full transition-all active:scale-90 ${
-                          checked
-                            ? 'text-green-500'
-                            : 'text-gray-300 hover:text-gray-400'
+                          checked ? 'text-green-500' : 'text-gray-300 hover:text-gray-400'
                         }`}
                       >
                         {checked ? (
@@ -274,7 +616,6 @@ export default function DistributionListing() {
                   );
                 })}
 
-                {/* Footer */}
                 <div className="bg-brand-red px-4 py-4 flex items-center justify-between">
                   <span className="text-white text-sm font-semibold">
                     {isAdjustmentGroup ? 'Total Bahan Menyusul' : 'Total Bahan Masuk'}
@@ -282,6 +623,17 @@ export default function DistributionListing() {
                   <span className="text-white font-bold">{items.length} item</span>
                 </div>
               </div>
+            )}
+
+            {/* Photo upload card */}
+            {showPhotoCard && (
+              <PhotoUploadCard
+                outletName={selectedOutletName}
+                date={date}
+                allDone={allDone}
+                alreadyUploaded={alreadyUploaded}
+                onUploadSuccess={(data) => setAlreadyUploaded(data)}
+              />
             )}
           </>
         )}
