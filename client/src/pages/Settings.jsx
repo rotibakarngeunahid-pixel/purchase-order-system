@@ -77,7 +77,10 @@ function PhotoGuideSection({ showToast }) {
       const res = await api.post('/api/settings/upload-guide-photo', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setExamplePhotos((prev) => [...prev, res.data.url]);
+      const newPhotos = [...examplePhotos, res.data.url];
+      setExamplePhotos(newPhotos);
+      const guideValue = JSON.stringify({ instruction, example_photos: newPhotos });
+      await api.put('/api/settings', { distribution_photo_guide: guideValue });
       showToast('Foto contoh berhasil diunggah!');
     } catch (err) {
       showToast(err.response?.data?.error || err.message, 'error');
@@ -87,8 +90,16 @@ function PhotoGuideSection({ showToast }) {
     }
   };
 
-  const handleRemoveExample = (idx) => {
-    setExamplePhotos((prev) => prev.filter((_, i) => i !== idx));
+  const handleRemoveExample = async (idx) => {
+    const newPhotos = examplePhotos.filter((_, i) => i !== idx);
+    setExamplePhotos(newPhotos);
+    try {
+      const guideValue = JSON.stringify({ instruction, example_photos: newPhotos });
+      await api.put('/api/settings', { distribution_photo_guide: guideValue });
+      showToast('Foto contoh dihapus.');
+    } catch {
+      showToast('Gagal menyimpan perubahan.', 'error');
+    }
   };
 
   const handleSave = async () => {
@@ -134,7 +145,7 @@ function PhotoGuideSection({ showToast }) {
               </div>
               <button
                 onClick={() => handleRemoveExample(idx)}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs font-bold flex items-center justify-center hover:bg-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs font-bold flex items-center justify-center hover:bg-red-600"
               >
                 ✕
               </button>
