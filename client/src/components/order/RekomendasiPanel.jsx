@@ -1,81 +1,86 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api, { formatDateID } from '../../lib/api';
 
-function RekomendasiItem({ item, material, isAdded, onAdd }) {
+function getGDriveThumbnailUrl(url) {
+  if (!url) return null;
+  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (!match) return null;
+  return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w200`;
+}
+
+function RekomendasiItem({ item, material, isAdded, onAdd, showCabang }) {
   const hasNumber = item.tipe_stok !== 'foto' && item.stok_akhir !== null && item.stok_akhir !== undefined;
-  const hasPhoto  = !!item.foto_url;
+  const thumbUrl = !hasNumber ? getGDriveThumbnailUrl(item.foto_url) : null;
+  const unit = material?.package_unit || '';
 
   return (
-    <div className="border border-orange-200 rounded-xl p-3 bg-white">
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="font-semibold text-sm text-gray-900 truncate">{item.nama_bahan}</p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {item.nama_cabang} · {formatDateID(item.tanggal)}
+    <div className="flex items-start gap-2.5 py-2.5 border-b border-orange-100 last:border-0">
+      {thumbUrl && (
+        <a
+          href={item.foto_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex-shrink-0 mt-0.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <img
+            src={thumbUrl}
+            alt="stok"
+            className="w-11 h-11 rounded-lg object-cover border border-orange-200 bg-orange-100"
+            onError={(e) => { e.target.style.display = 'none'; }}
+          />
+        </a>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <span className="font-semibold text-sm text-gray-900 leading-tight">
+            {item.nama_bahan}
+          </span>
+          <div className="flex-shrink-0">
+            {!material && (
+              <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
+                Belum dipetakan
+              </span>
+            )}
+            {material && !isAdded && (
+              <button
+                onClick={() => onAdd(material.id, item.rekomendasi_id)}
+                className="text-xs bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white px-2.5 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap"
+              >
+                + Tambah
+              </button>
+            )}
+            {material && isAdded && (
+              <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-lg font-medium whitespace-nowrap">
+                ✓ Ditambahkan
+              </span>
+            )}
+          </div>
+        </div>
+        <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">
+          {showCabang && (
+            <span className="font-medium text-orange-600">{item.nama_cabang} · </span>
+          )}
+          {formatDateID(item.tanggal)}
+        </p>
+        {hasNumber && (
+          <p className="text-xs text-orange-600 font-semibold mt-0.5">
+            Sisa: {item.stok_akhir}{unit ? ` ${unit}` : ''}
           </p>
-          {hasNumber && (
-            <p className="text-xs text-orange-700 mt-1 font-medium">
-              Sisa: {item.stok_akhir} {material?.package_unit || ''}
-            </p>
-          )}
-          {!hasNumber && hasPhoto && (
-            <a
-              href={item.foto_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="block mt-1"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={item.foto_url.replace('/view', '/preview')}
-                alt="stok"
-                className="w-14 h-14 object-cover rounded-lg border border-orange-200"
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-            </a>
-          )}
-          {!hasNumber && !hasPhoto && (
-            <p className="text-xs text-gray-400 mt-1">Stok: lihat laporan inventori</p>
-          )}
-        </div>
-        <div className="flex-shrink-0 mt-0.5">
-          {!material && (
-            <span
-              className="text-xs text-amber-600 bg-amber-50 border border-amber-200 px-2 py-1 rounded-lg block text-center"
-              title="Bahan ini belum ada di master data PO — isi sheet Mapping_Bahan_PO"
-            >
-              Belum di master PO
-            </span>
-          )}
-          {material && !isAdded && (
-            <button
-              onClick={() => onAdd(material.id, item.rekomendasi_id)}
-              className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg font-medium transition-colors whitespace-nowrap"
-            >
-              + Tambahkan
-            </button>
-          )}
-          {material && isAdded && (
-            <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-1 rounded-lg font-medium">
-              ✓ Ditambahkan
-            </span>
-          )}
-        </div>
+        )}
       </div>
     </div>
   );
 }
 
-export default function RekomendasiPanel({ materials, onAddToOrder, addedIds }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState(null);
+export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, currentOutlet, inputMode }) {
+  const [items, setItems]       = useState([]);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState(null);
   const [collapsed, setCollapsed] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  const [showAll, setShowAll]   = useState(false);
 
-  useEffect(() => {
-    fetchRekomendasi();
-  }, []);
+  useEffect(() => { fetchRekomendasi(); }, []);
 
   async function fetchRekomendasi() {
     setLoading(true);
@@ -94,92 +99,143 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds }) 
     }
   }
 
-  async function handleDismissAll() {
-    if (items.length === 0) { setDismissed(true); return; }
-    try {
-      const ids = items.map(i => i.rekomendasi_id);
-      await api.post('/api/inventori/rekomendasi/process', { rekomendasi_ids: ids, note: 'Diabaikan oleh admin' });
-    } catch (_) {
-      // Gagal proses tidak masalah — tetap sembunyikan panel
-    }
-    setDismissed(true);
-  }
-
-  // Jangan render sama sekali jika dismissed atau env belum dikonfigurasi
-  if (dismissed) return null;
-
-  // Cari material PO berdasarkan po_material_id dari mapping inventori
   function findMaterial(item) {
     if (!item.po_material_id) return null;
-    return materials.find(m => m.id === item.po_material_id) || null;
+    return materials.find((m) => m.id === item.po_material_id) || null;
   }
 
-  const pendingCount = items.length;
+  const isPerOutlet = inputMode === 'per-outlet';
+
+  const thisOutletItems = useMemo(() => {
+    if (!currentOutlet) return items;
+    return items.filter(
+      (item) => item.nama_cabang.toLowerCase() === currentOutlet.name.toLowerCase()
+    );
+  }, [items, currentOutlet]);
+
+  const filteredItems = useMemo(() => {
+    if (!isPerOutlet || showAll || !currentOutlet) return items;
+    return thisOutletItems;
+  }, [items, thisOutletItems, isPerOutlet, showAll, currentOutlet]);
+
+  async function handleMarkProcessed() {
+    const ids = filteredItems
+      .filter((i) => !addedIds.has(i.rekomendasi_id))
+      .map((i) => i.rekomendasi_id);
+    if (ids.length === 0) return;
+    try {
+      await api.post('/api/inventori/rekomendasi/process', {
+        rekomendasi_ids: ids,
+        note: showAll || !currentOutlet ? 'Diabaikan oleh admin' : `Diabaikan untuk ${currentOutlet.name}`,
+      });
+    } catch (_) {}
+    setItems((prev) => prev.filter((item) => !ids.includes(item.rekomendasi_id)));
+  }
+
+  const showCabang = !isPerOutlet || showAll;
+  const totalCount = items.length;
+  const displayCount = filteredItems.length;
 
   return (
     <div className="bg-orange-50 border border-orange-200 rounded-xl overflow-hidden">
       {/* Header */}
-      <div
-        className="flex items-center justify-between px-3 py-2.5 cursor-pointer select-none"
-        onClick={() => setCollapsed(v => !v)}
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-3 py-2.5 text-left"
+        onClick={() => setCollapsed((v) => !v)}
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-orange-800">📋 Rekomendasi Staff</span>
-          {!loading && pendingCount > 0 && (
-            <span className="text-xs bg-orange-500 text-white px-1.5 py-0.5 rounded-full font-bold">
-              {pendingCount}
+          {!loading && totalCount > 0 && (
+            <span className="text-[11px] bg-orange-500 text-white px-1.5 py-0.5 rounded-full font-bold leading-none">
+              {displayCount}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-orange-400 text-xs">{collapsed ? '▶' : '▼'}</span>
-        </div>
-      </div>
+        <span className="text-orange-400 text-xs">{collapsed ? '▶' : '▼'}</span>
+      </button>
 
       {!collapsed && (
-        <div className="px-3 pb-3 space-y-2 border-t border-orange-200 pt-2">
-          {loading && (
-            <div className="text-xs text-orange-600 text-center py-2">
-              <span className="animate-spin inline-block mr-1">⟳</span> Memuat rekomendasi...
-            </div>
-          )}
-
-          {!loading && error && (
-            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
-              <p>⚠ {error}</p>
+        <div className="border-t border-orange-200">
+          {/* Filter toggle — hanya tampil di per-outlet mode dan ada data */}
+          {isPerOutlet && currentOutlet && totalCount > 0 && !loading && !error && (
+            <div className="flex border-b border-orange-200 text-xs font-semibold">
               <button
-                onClick={fetchRekomendasi}
-                className="underline mt-1 hover:text-amber-900"
+                type="button"
+                onClick={() => setShowAll(false)}
+                className={`flex-1 py-1.5 transition-colors ${
+                  !showAll
+                    ? 'bg-orange-500 text-white'
+                    : 'text-orange-600 hover:bg-orange-100'
+                }`}
               >
-                Coba Lagi
+                {currentOutlet.name} ({thisOutletItems.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className={`flex-1 py-1.5 transition-colors border-l border-orange-200 ${
+                  showAll
+                    ? 'bg-orange-500 text-white'
+                    : 'text-orange-600 hover:bg-orange-100'
+                }`}
+              >
+                Semua ({totalCount})
               </button>
             </div>
           )}
 
-          {!loading && !error && items.length === 0 && (
-            <div className="text-xs text-gray-400 text-center py-2">
-              ✅ Tidak ada rekomendasi baru dari staff.
-            </div>
-          )}
+          <div className="px-3 py-1">
+            {loading && (
+              <div className="text-xs text-orange-600 text-center py-3">
+                <span className="inline-block animate-spin mr-1">⟳</span> Memuat...
+              </div>
+            )}
 
-          {!loading && !error && items.map(item => (
-            <RekomendasiItem
-              key={item.rekomendasi_id}
-              item={item}
-              material={findMaterial(item)}
-              isAdded={addedIds.has(item.rekomendasi_id)}
-              onAdd={onAddToOrder}
-            />
-          ))}
+            {!loading && error && (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 my-2">
+                <p>⚠ {error}</p>
+                <button
+                  onClick={fetchRekomendasi}
+                  className="underline mt-1 hover:text-amber-900"
+                >
+                  Coba Lagi
+                </button>
+              </div>
+            )}
 
-          {!loading && items.length > 0 && (
-            <button
-              onClick={handleDismissAll}
-              className="w-full text-xs text-orange-500 hover:text-orange-700 mt-1 py-1 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors"
-            >
-              Tutup / Tandai Semua Diproses
-            </button>
-          )}
+            {!loading && !error && filteredItems.length === 0 && (
+              <p className="text-xs text-gray-400 text-center py-3">
+                ✅ Tidak ada rekomendasi
+                {isPerOutlet && !showAll && currentOutlet ? ` untuk ${currentOutlet.name}` : ''}.
+              </p>
+            )}
+
+            {!loading && !error && filteredItems.length > 0 && (
+              <div>
+                {filteredItems.map((item) => (
+                  <RekomendasiItem
+                    key={item.rekomendasi_id}
+                    item={item}
+                    material={findMaterial(item)}
+                    isAdded={addedIds.has(item.rekomendasi_id)}
+                    onAdd={onAddToOrder}
+                    showCabang={showCabang}
+                  />
+                ))}
+              </div>
+            )}
+
+            {!loading && !error && filteredItems.length > 0 && (
+              <button
+                type="button"
+                onClick={handleMarkProcessed}
+                className="w-full text-[11px] text-orange-400 hover:text-orange-600 mt-1 mb-1 py-1.5 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors"
+              >
+                Tandai {showAll || !isPerOutlet ? 'semua' : currentOutlet?.name} sudah diproses
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

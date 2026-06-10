@@ -412,13 +412,16 @@ export default function OrderEntry() {
   };
 
   const handleAddRekToOrder = (materialId, rekomendasiId) => {
-    // Tambahkan qty=1 ke outlet aktif pertama (atau pertahankan jika sudah lebih besar)
-    const activeOutlet = outlets.find((o) => outletOpen[o.id] !== false);
-    if (!activeOutlet) return;
-    const key = getMatrixKey(activeOutlet.id, materialId);
+    // Di per-outlet mode: tambahkan ke outlet yang sedang dipilih
+    // Di mode lain: tambahkan ke outlet aktif pertama
+    const targetOutlet =
+      inputMode === 'per-outlet'
+        ? outlets[Math.min(selectedOutletIdx, outlets.length - 1)]
+        : outlets.find((o) => outletOpen[o.id] !== false);
+    if (!targetOutlet) return;
+    const key = getMatrixKey(targetOutlet.id, materialId);
     const currentQty = Number(matrix[key]) || 0;
-    const newQty = Math.max(currentQty, 1);
-    handleCellChange(activeOutlet.id, materialId, newQty);
+    handleCellChange(targetOutlet.id, materialId, Math.max(currentQty, 1));
     setRekAddedIds((prev) => new Set([...prev, rekomendasiId]));
   };
 
@@ -765,6 +768,8 @@ export default function OrderEntry() {
             materials={materials}
             onAddToOrder={handleAddRekToOrder}
             addedIds={rekAddedIds}
+            currentOutlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
+            inputMode={inputMode}
           />
           <RotiTawarPanel {...rotiPanelProps} />
         </div>
@@ -784,6 +789,8 @@ export default function OrderEntry() {
           materials={materials}
           onAddToOrder={handleAddRekToOrder}
           addedIds={rekAddedIds}
+          currentOutlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
+          inputMode={inputMode}
         />
         <RotiTawarPanel {...rotiPanelProps} />
       </div>
