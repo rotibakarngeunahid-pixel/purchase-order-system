@@ -53,9 +53,16 @@ export default function Analytics() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api.get('/api/outlets').then((res) => setOutlets((res.data || []).filter((o) => o.is_active)));
-    loadAll();
+    api.get('/api/outlets')
+      .then((res) => setOutlets((res.data || []).filter((o) => o.is_active)))
+      .catch(() => {});
   }, []);
+
+  // Auto-apply filter: reload otomatis saat filter berubah (debounce 400ms)
+  useEffect(() => {
+    const timer = setTimeout(() => { loadAll(); }, 400);
+    return () => clearTimeout(timer);
+  }, [dateFrom, dateTo, outletId]);
 
   async function loadAll() {
     setLoading(true);
@@ -134,9 +141,9 @@ export default function Analytics() {
             ))}
           </select>
         </div>
-        <button onClick={loadAll} disabled={loading} className="btn-primary text-sm h-10">
-          {loading ? 'Memuat...' : 'Terapkan'}
-        </button>
+        <div className="flex items-center h-10 text-xs text-gray-400">
+          {loading ? 'Memuat...' : 'Filter diterapkan otomatis'}
+        </div>
       </div>
 
       {/* Summary cards (trends) */}

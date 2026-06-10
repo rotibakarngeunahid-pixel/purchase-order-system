@@ -11,6 +11,9 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import api, { formatDateID, formatRupiah, toInputDate } from '../lib/api';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import Toast from '../components/ui/Toast';
+import useToast from '../components/ui/useToast';
 
 function getFirstOfMonth() {
   const d = new Date();
@@ -87,7 +90,8 @@ export default function FinancePortal() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+  const { toast, showToast: showToastRaw, hideToast } = useToast();
 
   const integrationLink = useMemo(() => {
     const params = new URLSearchParams();
@@ -121,8 +125,7 @@ export default function FinancePortal() {
   }
 
   function showToast(message, type = 'success') {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    showToastRaw(message, type);
   }
 
   async function loadPreview() {
@@ -163,7 +166,6 @@ export default function FinancePortal() {
   }
 
   async function regenerateKey() {
-    if (!window.confirm('Buat API key baru? API key lama tidak bisa dipakai lagi.')) return;
     setRegenerating(true);
     try {
       const res = await api.post('/api/finance-portal/admin/regenerate-key');
@@ -173,6 +175,7 @@ export default function FinancePortal() {
       showToast(err.response?.data?.error || 'API key baru belum bisa dibuat.', 'error');
     } finally {
       setRegenerating(false);
+      setConfirmRegenerate(false);
     }
   }
 
@@ -201,12 +204,21 @@ export default function FinancePortal() {
 
   return (
     <div className="page-shell">
-      {toast && (
-        <div className={`fixed right-4 top-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm text-white shadow-lg ${
-          toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
-        }`}>
-          {toast.message}
-        </div>
+      <Toast toast={toast} onClose={hideToast} />
+
+      {confirmRegenerate && (
+        <ConfirmDialog
+          title="Buat API Key Baru?"
+          confirmLabel="Ya, Buat Baru"
+          danger
+          loading={regenerating}
+          loadingLabel="Membuat..."
+          onConfirm={regenerateKey}
+          onCancel={() => setConfirmRegenerate(false)}
+        >
+          API key lama langsung tidak berlaku. Sistem keuangan yang masih memakai
+          key lama akan gagal mengambil data sampai key baru diberikan.
+        </ConfirmDialog>
       )}
 
       <div className="page-header">
@@ -261,7 +273,7 @@ export default function FinancePortal() {
               <CopyButton value={config.api_key} label="Salin API key" onCopied={showToast} />
               <button
                 type="button"
-                onClick={regenerateKey}
+                onClick={() => setConfirmRegenerate(true)}
                 disabled={regenerating}
                 className="btn-secondary text-sm"
               >

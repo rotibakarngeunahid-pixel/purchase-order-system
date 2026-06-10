@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
 import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import useModalDismiss from '../components/ui/useModalDismiss';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -97,6 +100,7 @@ function QuickAddVariantModal({ materialId, materialName, defaultSupplierId, sup
   const [supplierId, setSupplierId] = useState(defaultSupplierId || '');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useModalDismiss(onCancel);
 
   const handleSave = async () => {
     if (!brand.trim()) return setError('Nama merk wajib diisi');
@@ -189,6 +193,7 @@ function QuickAddMaterialModal({ defaultSupplierId, suppliers, onSaved, onCancel
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  useModalDismiss(onCancel);
 
   const set = (key, val) => setForm((prev) => ({ ...prev, [key]: val }));
 
@@ -336,6 +341,9 @@ function QuickAddMaterialModal({ defaultSupplierId, suppliers, onSaved, onCancel
 // ─── ReceiveModal ─────────────────────────────────────────────────────────────
 
 function ReceiveModal({ po, onClose, onSaved }) {
+  // Hanya kunci scroll body — Escape/backdrop TIDAK menutup modal entri data
+  // agar isian penerimaan tidak hilang karena tertutup tak sengaja.
+  useModalDismiss(onClose, { closeOnEscape: false });
   const defaultSupplierId = po.supplier_id || po.supplier?.id || '';
   const [orderedItems, setOrderedItems] = useState(() => buildInitialOrderedItems(po.items, defaultSupplierId));
   const [adjustmentItems, setAdjustmentItems] = useState(() => buildInitialAdjustmentItems(po.items, defaultSupplierId));
@@ -350,6 +358,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [quickAddVariantFor, setQuickAddVariantFor] = useState(null);
   const [quickAddMaterialForRowId, setQuickAddMaterialForRowId] = useState(null);
   const [outlets, setOutlets] = useState([]);
+  // Jumlah item tambahan berharga Rp 0 yang menunggu konfirmasi simpan
+  const [zeroPriceConfirmCount, setZeroPriceConfirmCount] = useState(0);
   // branchDistributions: { [po_item_id | _tempId]: { [outlet_id]: qty_string } }
   // Digunakan untuk ORDERED items (keyed by po_item_id) dan ADJ items (keyed by _tempId/id)
   const [branchDistributions, setBranchDistributions] = useState(() => {
@@ -757,15 +767,17 @@ function ReceiveModal({ po, onClose, onSaved }) {
       return;
     }
 
-    // Peringatan harga 0
+    // Peringatan harga 0 — pakai dialog konfirmasi, bukan window.confirm
     const adjZeroPrice = adjustmentItems.filter((adj) => !Number(adj.price_actual));
     if (adjZeroPrice.length > 0) {
-      const ok = window.confirm(
-        `${adjZeroPrice.length} item tambahan memiliki harga Rp 0. Lanjutkan menyimpan?`
-      );
-      if (!ok) return;
+      setZeroPriceConfirmCount(adjZeroPrice.length);
+      return;
     }
 
+    await doSave();
+  };
+
+  const doSave = async () => {
     setSaving(true);
     setError('');
     try {
@@ -889,6 +901,20 @@ function ReceiveModal({ po, onClose, onSaved }) {
           onSaved={handleMaterialSaved}
           onCancel={() => setQuickAddMaterialForRowId(null)}
         />
+      )}
+      {zeroPriceConfirmCount > 0 && (
+        <ConfirmDialog
+          title="Ada Item Berharga Rp 0"
+          confirmLabel="Ya, Simpan"
+          onConfirm={async () => {
+            setZeroPriceConfirmCount(0);
+            await doSave();
+          }}
+          onCancel={() => setZeroPriceConfirmCount(0)}
+        >
+          {zeroPriceConfirmCount} item tambahan memiliki harga Rp 0 dan tidak akan
+          terhitung di total pengeluaran. Lanjutkan menyimpan?
+        </ConfirmDialog>
       )}
 
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col">
@@ -1464,6 +1490,9 @@ export default function PurchaseRecord() {
   const [loading, setLoading] = useState(true);
   const [selectedPO, setSelectedPO] = useState(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [confirmReset, setConfirmReset] = useState(null);
   const [resetting, setResetting] = useState(false);
   const [openingPOId, setOpeningPOId] = useState(null);
@@ -1482,10 +1511,25 @@ export default function PurchaseRecord() {
       setPos(res.data);
     } catch (err) {
       console.error(err);
+      setActionError('Gagal memuat daftar PO. Muat ulang halaman atau coba lagi.');
     } finally {
       setLoading(false);
     }
   }
+
+  // Filter tanggal order & pencarian supplier dilakukan di sisi client
+  const filteredPos = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return pos.filter((po) => {
+      const orderDate = po.session?.order_date || '';
+      if (dateFrom && orderDate && orderDate < dateFrom) return false;
+      if (dateTo && orderDate && orderDate > dateTo) return false;
+      if (q && !(po.supplier?.name || '').toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [pos, search, dateFrom, dateTo]);
+
+  const hasActiveFilter = search.trim() || dateFrom || dateTo || statusFilter;
 
   const openModal = async (po) => {
     setOpeningPOId(po.id);
@@ -1510,9 +1554,11 @@ export default function PurchaseRecord() {
         await api.put(`/api/purchase/${po.id}/reset`);
       }
       setConfirmReset(null);
+      setActionError('');
       loadPOs();
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal mereset PO');
+      setConfirmReset(null);
+      setActionError(err.response?.data?.error || 'Gagal mereset PO. Coba lagi.');
     } finally {
       setResetting(false);
     }
@@ -1546,47 +1592,39 @@ export default function PurchaseRecord() {
       )}
 
       {/* Modal konfirmasi reset */}
-      {confirmReset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            {confirmReset.status === 'pending' || confirmReset.status === 'confirmed' ? (
+      {confirmReset && (() => {
+        const isDelete = confirmReset.status === 'pending' || confirmReset.status === 'confirmed';
+        return (
+          <ConfirmDialog
+            title={isDelete ? 'Hapus PO ini?' : 'Reset Data Penerimaan?'}
+            confirmLabel={isDelete ? 'Ya, Hapus' : 'Ya, Reset'}
+            danger={isDelete}
+            loading={resetting}
+            onConfirm={() => handleResetPO(confirmReset)}
+            onCancel={() => setConfirmReset(null)}
+          >
+            {isDelete ? (
               <>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Hapus PO ini?</h3>
-                <p className="text-sm text-gray-500 mb-1">
+                <p>
                   PO <strong>{confirmReset.supplier?.name}</strong> (
                   {formatDateID(confirmReset.session?.order_date)}) akan dihapus dari daftar.
                 </p>
-                <p className="text-sm text-red-600 mb-6">Tindakan ini tidak dapat dibatalkan.</p>
+                <p className="text-red-600 mt-1">Tindakan ini tidak dapat dibatalkan.</p>
               </>
             ) : (
               <>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                  Reset Data Penerimaan?
-                </h3>
-                <p className="text-sm text-gray-500 mb-1">
+                <p>
                   PO <strong>{confirmReset.supplier?.name}</strong> akan dikembalikan ke status{' '}
                   <strong>Pending</strong>.
                 </p>
-                <p className="text-sm text-orange-600 mb-6">
+                <p className="text-orange-600 mt-1">
                   Semua data qty diterima, harga aktual, dan bahan tambahan akan dihapus.
                 </p>
               </>
             )}
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setConfirmReset(null)} className="btn-outline text-sm">
-                Batal
-              </button>
-              <button
-                onClick={() => handleResetPO(confirmReset)}
-                disabled={resetting}
-                className="bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-orange-600 disabled:opacity-50"
-              >
-                {resetting ? 'Memproses...' : 'Ya, Lanjutkan'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </ConfirmDialog>
+        );
+      })()}
 
       {/* Header */}
       <div className="page-header">
@@ -1594,18 +1632,72 @@ export default function PurchaseRecord() {
           <h1 className="page-title">Catat Penerimaan</h1>
           <p className="page-subtitle">Catat barang yang sudah diterima dari supplier</p>
         </div>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="input w-full sm:w-56"
-        >
-          <option value="">Semua Status</option>
-          <option value="pending">Pending</option>
-          <option value="confirmed">Dikonfirmasi</option>
-          <option value="received">Diterima</option>
-          <option value="received_partial">Diterima Sebagian</option>
-        </select>
       </div>
+
+      {/* Filter & pencarian */}
+      <div className="filter-card">
+        <div className="filter-field">
+          <label className="filter-label">Cari Supplier</label>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Nama supplier..."
+              className="input pl-9"
+            />
+          </div>
+        </div>
+        <div className="filter-field">
+          <label className="filter-label">Tgl Order Dari</label>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="input"
+          />
+        </div>
+        <div className="filter-field">
+          <label className="filter-label">Sampai</label>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="input"
+          />
+        </div>
+        <div className="filter-field">
+          <label className="filter-label">Status</label>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="input"
+          >
+            <option value="">Semua Status</option>
+            <option value="pending">Pending</option>
+            <option value="confirmed">Dikonfirmasi</option>
+            <option value="received">Diterima</option>
+            <option value="received_partial">Diterima Sebagian</option>
+          </select>
+        </div>
+      </div>
+
+      {!loading && hasActiveFilter && (
+        <div className="mb-3 flex items-center justify-between gap-3 text-sm text-gray-500">
+          <span>
+            Menampilkan <strong className="text-gray-700">{filteredPos.length}</strong> dari{' '}
+            {pos.length} PO
+          </span>
+          <button
+            type="button"
+            onClick={() => { setSearch(''); setDateFrom(''); setDateTo(''); setStatusFilter(''); }}
+            className="text-brand-red font-medium hover:underline whitespace-nowrap"
+          >
+            Reset Filter
+          </button>
+        </div>
+      )}
 
       {actionError && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
@@ -1628,14 +1720,20 @@ export default function PurchaseRecord() {
         <div className="flex items-center justify-center py-20">
           <div className="w-8 h-8 border-4 border-brand-red border-t-transparent rounded-full animate-spin" />
         </div>
-      ) : pos.length === 0 ? (
+      ) : filteredPos.length === 0 ? (
         <div className="card p-10 text-center text-gray-400">
-          <p className="font-medium">Tidak ada Purchase Order</p>
-          <p className="text-sm mt-1">PO akan muncul setelah order disubmit dari halaman review</p>
+          <p className="font-medium">
+            {hasActiveFilter ? 'Tidak ada PO yang cocok dengan filter' : 'Tidak ada Purchase Order'}
+          </p>
+          <p className="text-sm mt-1">
+            {hasActiveFilter
+              ? 'Coba ubah kata kunci, rentang tanggal, atau status'
+              : 'PO akan muncul setelah order disubmit dari halaman review'}
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
-          {pos.map((po) => (
+          {filteredPos.map((po) => (
             <div
               key={po.id}
               className="card p-4 grid gap-4 lg:grid-cols-[minmax(220px,1fr)_auto] items-center"

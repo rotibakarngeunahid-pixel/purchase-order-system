@@ -1,6 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { Pencil } from 'lucide-react';
 import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
+import Toast from '../components/ui/Toast';
+import useToast from '../components/ui/useToast';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import useModalDismiss from '../components/ui/useModalDismiss';
 
 function getFirstOfMonth() {
   const d = new Date();
@@ -42,8 +46,9 @@ export default function PurchaseReport() {
   const [dateTo, setDateTo] = useState(toInputDate());
   const [filterOutletId, setFilterOutletId] = useState('');
 
-  const [toast, setToast] = useState(null);
+  const { toast, showToast, hideToast } = useToast();
   const [deletingId, setDeletingId] = useState(null);
+  const [confirmDeleteItem, setConfirmDeleteItem] = useState(null);
   const [importing, setImporting] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [editForm, setEditForm] = useState({});
@@ -51,10 +56,21 @@ export default function PurchaseReport() {
   const [importReport, setImportReport] = useState(null);
   const fileInputRef = useRef(null);
 
+  // Escape menutup modal edit (kecuali sedang menyimpan) + kunci scroll body
+  const closeEditModal = useCallback(() => {
+    if (!editSaving) setEditingItem(null);
+  }, [editSaving]);
+  useModalDismiss(closeEditModal, { active: !!editingItem });
+
   useEffect(() => {
     loadMasterData();
-    loadRecords();
   }, []);
+
+  // Auto-apply filter histori: reload otomatis saat filter berubah (debounce 400ms)
+  useEffect(() => {
+    const timer = setTimeout(() => { loadRecords(); }, 400);
+    return () => clearTimeout(timer);
+  }, [dateFrom, dateTo, filterOutletId]);
 
   async function loadMasterData() {
     try {
@@ -85,11 +101,6 @@ export default function PurchaseReport() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
   }
 
   function updateRow(idx, patch) {
@@ -173,8 +184,9 @@ export default function PurchaseReport() {
         })),
       });
       showToast(`${validRows.length} item berhasil disimpan!`);
+      // Outlet & tanggal sengaja dipertahankan agar input batch berikutnya
+      // untuk outlet yang sama tidak perlu memilih ulang
       setRows([newRow()]);
-      setOutletId('');
       loadRecords();
     } catch (err) {
       showToast('Gagal menyimpan: ' + (err.response?.data?.error || err.message), 'error');
@@ -216,7 +228,6 @@ export default function PurchaseReport() {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm('Hapus catatan ini?')) return;
     setDeletingId(id);
     try {
       await api.delete(`/api/purchase-report/${id}`);
@@ -226,6 +237,7 @@ export default function PurchaseReport() {
       showToast('Gagal menghapus.', 'error');
     } finally {
       setDeletingId(null);
+      setConfirmDeleteItem(null);
     }
   }
 
@@ -1175,12 +1187,25 @@ export default function PurchaseReport() {
 
   return (
     <div className="page-shell">
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm ${
-          toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
-        }`}>
-          {toast.msg}
-        </div>
+      <Toast toast={toast} onClose={hideToast} />
+
+      {/* ── Modal konfirmasi hapus ── */}
+      {confirmDeleteItem && (
+        <ConfirmDialog
+          title="Hapus Catatan Barang Masuk?"
+          confirmLabel="Ya, Hapus"
+          danger
+          loading={deletingId === confirmDeleteItem.id}
+          loadingLabel="Menghapus..."
+          onConfirm={() => handleDelete(confirmDeleteItem.id)}
+          onCancel={() => setConfirmDeleteItem(null)}
+        >
+          <p>
+            <strong>{confirmDeleteItem.material?.name}</strong> ({confirmDeleteItem.qty}{' '}
+            {confirmDeleteItem.unit}) pada {formatDateID(confirmDeleteItem.date)} akan dihapus.
+          </p>
+          <p className="text-red-600 mt-1">Tindakan ini tidak dapat dibatalkan.</p>
+        </ConfirmDialog>
       )}
 
       {/* ── Modal Edit ── */}
@@ -1535,9 +1560,9 @@ export default function PurchaseReport() {
             <label className="filter-label">Sampai</label>
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input" />
           </div>
-          <button onClick={loadRecords} disabled={loading} className="btn-primary text-sm h-10">
-            {loading ? 'Memuat...' : 'Terapkan'}
-          </button>
+          <div className="flex items-center h-10 text-xs text-gray-400">
+            {loading ? 'Memuat...' : 'Filter diterapkan otomatis'}
+          </div>
         </div>
 
         {loading ? (
@@ -1618,7 +1643,7 @@ export default function PurchaseReport() {
                                   Edit
                                 </button>
                                 <button
-                                  onClick={() => handleDelete(r.id)}
+                                  onClick={() => setConfirmDeleteItem(r)}
                                   disabled={deletingId === r.id}
                                   className="text-gray-300 hover:text-red-500 transition-colors text-xl leading-none px-0.5"
                                   title="Hapus"

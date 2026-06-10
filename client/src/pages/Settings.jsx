@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
 import RotiTawarConfig from '../components/RotiTawarConfig';
+import Toast from '../components/ui/Toast';
+import useToast from '../components/ui/useToast';
 
 function Section({ title, children }) {
   return (
@@ -196,21 +198,16 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [toast, setToast] = useState(null);
+  const { toast, showToast, hideToast } = useToast();
 
   useEffect(() => {
-    api.get('/api/settings').then((res) => {
-      setSettings(res.data);
-      setLoading(false);
-    });
+    api.get('/api/settings')
+      .then((res) => setSettings(res.data))
+      .catch(() => showToast('Gagal memuat pengaturan. Muat ulang halaman.', 'error'))
+      .finally(() => setLoading(false));
   }, []);
 
   const set = (key, val) => setSettings((s) => ({ ...s, [key]: val }));
-
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
-  }
 
   const handleSave = async () => {
     setSaving(true);
@@ -250,13 +247,7 @@ export default function Settings() {
 
   return (
     <div className="page-shell max-w-3xl">
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm ${
-          toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+      <Toast toast={toast} onClose={hideToast} />
 
       <div className="page-header">
         <div>

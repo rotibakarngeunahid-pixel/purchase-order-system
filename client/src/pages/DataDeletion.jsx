@@ -10,6 +10,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import api, { formatDateID, toInputDate } from '../lib/api';
+import Toast from '../components/ui/Toast';
+import useToast from '../components/ui/useToast';
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
@@ -47,19 +49,6 @@ const TABLE_ORDER = [
 ];
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-
-function Toast({ toast }) {
-  if (!toast) return null;
-  return (
-    <div
-      className={`fixed right-4 top-4 z-50 max-w-sm rounded-lg px-4 py-3 text-sm text-white shadow-lg ${
-        toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
-      }`}
-    >
-      {toast.message}
-    </div>
-  );
-}
 
 function AlertBox({ type = 'warning', icon: Icon, title, children }) {
   const styles = {
@@ -187,13 +176,8 @@ export default function DataDeletion() {
   const [confirmChecked, setConfirmChecked] = useState(false);
 
   // Pesan
-  const [toast, setToast]   = useState(null);
+  const { toast, showToast, hideToast } = useToast();
   const [error, setError]   = useState('');
-
-  function showToast(message, type = 'success') {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  }
 
   function resetAll() {
     setStage('idle');
@@ -284,7 +268,7 @@ export default function DataDeletion() {
 
   return (
     <div className="page-shell max-w-3xl">
-      <Toast toast={toast} />
+      <Toast toast={toast} onClose={hideToast} />
 
       {/* Header */}
       <div className="page-header">

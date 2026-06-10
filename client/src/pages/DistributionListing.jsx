@@ -101,6 +101,14 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
       .catch(() => {});
   }, []);
 
+  // Escape menutup lightbox foto
+  useEffect(() => {
+    if (!lightboxUrl) return undefined;
+    const handler = (e) => { if (e.key === 'Escape') setLightboxUrl(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [lightboxUrl]);
+
   useEffect(() => {
     setUploadedPhotos(alreadyUploaded || null);
   }, [alreadyUploaded]);
@@ -348,7 +356,6 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
                   <div className="w-24 h-24 rounded-xl overflow-hidden bg-gray-100 border border-gray-200">
                     <img src={photo.preview} alt={photo.name} className="w-full h-full object-cover" />
                   </div>
-                  <span className="absolute top-1 left-1 bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded">WebP</span>
                   {uploadStatus === 'idle' && (
                     <button
                       onClick={() => handleRemove(idx)}

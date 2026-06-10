@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import api from '../lib/api';
-import { toInputDate } from '../lib/api';
+import api, { toInputDate, formatDateID } from '../lib/api';
 import { Image, Trash2, X, ZoomIn } from 'lucide-react';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 function formatDateTime(iso) {
   if (!iso) return '-';
@@ -49,6 +49,7 @@ export default function DistributionPhotos() {
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const [cleaning, setCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState(null);
+  const [confirmCleanup, setConfirmCleanup] = useState(false);
   const hasFetched = useRef(false);
 
   useEffect(() => {
@@ -74,7 +75,6 @@ export default function DistributionPhotos() {
   const totalPhotos = photos.reduce((sum, r) => sum + (r.photos?.length || 0), 0);
 
   const handleCleanup = async () => {
-    if (!window.confirm('Hapus semua foto yang sudah lebih dari 7 hari? Tindakan ini tidak bisa dibatalkan.')) return;
     setCleaning(true);
     setCleanResult(null);
     try {
@@ -89,6 +89,7 @@ export default function DistributionPhotos() {
       setCleanResult({ ok: false, msg: err.response?.data?.error || err.message });
     } finally {
       setCleaning(false);
+      setConfirmCleanup(false);
     }
   };
 
@@ -96,13 +97,28 @@ export default function DistributionPhotos() {
     <div className="page-shell max-w-5xl">
       {lightboxUrl && <LightboxModal url={lightboxUrl} onClose={() => setLightboxUrl(null)} />}
 
+      {confirmCleanup && (
+        <ConfirmDialog
+          title="Hapus Foto Lama?"
+          confirmLabel="Ya, Hapus"
+          danger
+          loading={cleaning}
+          loadingLabel="Membersihkan..."
+          onConfirm={handleCleanup}
+          onCancel={() => setConfirmCleanup(false)}
+        >
+          Semua foto yang sudah lebih dari 7 hari akan dihapus permanen dari
+          penyimpanan. Tindakan ini tidak bisa dibatalkan.
+        </ConfirmDialog>
+      )}
+
       <div className="page-header">
         <div>
           <h1 className="page-title">Foto Bukti Distribusi</h1>
           <p className="page-subtitle">Arsip foto bukti bahan masuk per cabang • otomatis dihapus setelah 7 hari</p>
         </div>
         <button
-          onClick={handleCleanup}
+          onClick={() => setConfirmCleanup(true)}
           disabled={cleaning}
           className="btn-secondary text-sm flex items-center gap-2"
           title="Hapus semua foto yang sudah lebih dari 7 hari"
@@ -177,7 +193,7 @@ export default function DistributionPhotos() {
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div>
                   <span className="font-bold text-gray-800 text-base">{record.branch}</span>
-                  <span className="ml-3 text-sm text-gray-500">{record.date}</span>
+                  <span className="ml-3 text-sm text-gray-500">{formatDateID(record.date)}</span>
                 </div>
                 <div className="text-xs text-gray-400">
                   Dikirim: {formatDateTime(record.uploaded_at)}

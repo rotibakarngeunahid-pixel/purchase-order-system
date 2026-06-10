@@ -10,17 +10,24 @@ export default function Login({ onLogin }) {
     setError('');
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login gagal');
+      let res;
+      try {
+        res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+      } catch {
+        // fetch gagal total = masalah jaringan/server, bukan password salah
+        throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet Anda lalu coba lagi.');
+      }
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) throw new Error('Password salah. Coba lagi.');
+      if (!res.ok) throw new Error(data.error || 'Login gagal. Coba lagi sebentar lagi.');
       localStorage.setItem('rbn_token', data.token);
       onLogin();
     } catch (err) {
-      setError('Password salah. Coba lagi.');
+      setError(err.message);
     } finally {
       setLoading(false);
     }

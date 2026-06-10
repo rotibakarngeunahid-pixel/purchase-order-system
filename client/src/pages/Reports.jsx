@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
+import Toast from '../components/ui/Toast';
+import useToast from '../components/ui/useToast';
 
 function getFirstOfMonth() {
   const d = new Date();
@@ -19,12 +21,20 @@ export default function Reports() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [lastReset, setLastReset] = useState(null);
+  const { toast, showToast, hideToast } = useToast();
 
   useEffect(() => {
-    api.get('/api/suppliers').then((res) => setSuppliers(res.data.filter((s) => s.is_active)));
-    loadReports();
+    api.get('/api/suppliers')
+      .then((res) => setSuppliers(res.data.filter((s) => s.is_active)))
+      .catch(() => {});
     loadLastReset();
   }, []);
+
+  // Auto-apply filter: reload otomatis saat filter berubah (debounce 400ms)
+  useEffect(() => {
+    const timer = setTimeout(() => { loadReports(); }, 400);
+    return () => clearTimeout(timer);
+  }, [dateFrom, dateTo, supplierId]);
 
   async function loadLastReset() {
     try {
@@ -42,8 +52,9 @@ export default function Reports() {
       setDateTo(toInputDate());
       setShowResetModal(false);
       loadReports();
+      showToast('Laporan berhasil direset.');
     } catch (err) {
-      alert('Gagal reset: ' + (err.response?.data?.error || err.message));
+      showToast('Gagal reset: ' + (err.response?.data?.error || err.message), 'error');
     } finally {
       setResetting(false);
     }
@@ -104,6 +115,8 @@ export default function Reports() {
 
   return (
     <div className="page-shell">
+      <Toast toast={toast} onClose={hideToast} />
+
       {/* Reset confirmation modal */}
       {showResetModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -192,9 +205,9 @@ export default function Reports() {
             ))}
           </select>
         </div>
-        <button onClick={loadReports} disabled={loading} className="btn-primary text-sm h-10">
-          {loading ? 'Memuat...' : 'Terapkan Filter'}
-        </button>
+        <div className="flex items-center h-10 text-xs text-gray-400">
+          {loading ? 'Memuat...' : 'Filter diterapkan otomatis'}
+        </div>
       </div>
 
       {/* Summary cards */}

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { getMapping, saveMapping, getInventoryBranches } from '../services/rotiTawarService';
+import useToast from './ui/useToast';
 
 export default function RotiTawarConfig() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [toast, setToast] = useState(null);
+  const { toast, showToast } = useToast();
 
   useEffect(() => {
     loadData();
@@ -37,11 +38,6 @@ export default function RotiTawarConfig() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
   }
 
   function updateRow(idx, field, value) {

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const posStockSync = require('../services/posStockSync');
+const { fetchAllRows } = require('../services/fetchAll');
 
 const OPTIONAL_PO_ITEM_COLUMNS = [
   'variant_id',
@@ -299,18 +300,23 @@ router.get('/:po_id', async (req, res) => {
 // GET list PO (dengan filter status)
 router.get('/', async (req, res) => {
   const { status } = req.query;
-  let query = supabase
-    .from('purchase_orders')
-    .select(`
-      *,
-      supplier:suppliers(id, name),
-      session:order_sessions(id, order_date)
-    `)
-    .order('created_at', { ascending: false });
 
-  if (status) query = query.eq('status', status);
+  const buildQuery = () => {
+    let query = supabase
+      .from('purchase_orders')
+      .select(`
+        *,
+        supplier:suppliers(id, name),
+        session:order_sessions(id, order_date)
+      `)
+      .order('created_at', { ascending: false })
+      .order('id');
 
-  const { data, error } = await query;
+    if (status) query = query.eq('status', status);
+    return query;
+  };
+
+  const { data, error } = await fetchAllRows(buildQuery);
   if (error) return res.status(500).json({ error: error.message });
   res.json(data);
 });

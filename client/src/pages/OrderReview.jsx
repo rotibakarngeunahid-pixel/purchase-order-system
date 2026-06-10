@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api, { formatRupiah, formatDateID } from '../lib/api';
+import Toast from '../components/ui/Toast';
+import useToast from '../components/ui/useToast';
 import {
   createSupplierOrderImageBlob,
   getSupplierOrderImageFilename,
@@ -143,7 +145,7 @@ export default function OrderReview() {
     business_name: 'Roti Bakar Ngeunah',
     wa_greeting_text: '',
   });
-  const [toast, setToast] = useState(null);
+  const { toast, showToast, hideToast } = useToast(5000);
 
   useEffect(() => {
     loadData();
@@ -170,11 +172,6 @@ export default function OrderReview() {
     } finally {
       setLoading(false);
     }
-  }
-
-  function showToast(msg, type = 'success') {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 5000);
   }
 
   function replaceOrderImages(nextImages) {
@@ -252,14 +249,7 @@ export default function OrderReview() {
 
   return (
     <div className="page-shell">
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm ${
-          toast.type === 'error' ? 'bg-red-600' : 'bg-green-600'
-        }`}>
-          {toast.msg}
-        </div>
-      )}
+      <Toast toast={toast} onClose={hideToast} />
 
       {/* Header */}
       <div className="page-header">

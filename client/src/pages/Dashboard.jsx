@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import Toast from '../components/ui/Toast';
+import useToast from '../components/ui/useToast';
 
 const statusLabel = { draft: 'Draft', sent: 'Terkirim', completed: 'Selesai' };
 const statusClass = { draft: 'badge-draft', sent: 'badge-sent', completed: 'badge-completed' };
@@ -27,6 +30,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const { toast, showToast, hideToast } = useToast();
 
   useEffect(() => {
     loadData();
@@ -49,8 +53,10 @@ export default function Dashboard() {
       await api.delete(`/api/orders/session/${session.id}`);
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
       setConfirmDelete(null);
+      showToast('Draft berhasil dihapus.');
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal menghapus draft');
+      setConfirmDelete(null);
+      showToast(err.response?.data?.error || 'Gagal menghapus draft', 'error');
     } finally {
       setDeletingId(null);
     }
@@ -78,39 +84,30 @@ export default function Dashboard() {
     );
   }
 
-  // Konfirmasi hapus draft modal
-  if (confirmDelete) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-2">Hapus Draft?</h3>
-          <p className="text-sm text-gray-500 mb-6">
-            Anda yakin ingin menghapus draft order tanggal{' '}
-            <strong>{formatDateID(confirmDelete.order_date)}</strong>? Tindakan ini tidak dapat dibatalkan.
-          </p>
-          <div className="flex gap-3 justify-end">
-            <button onClick={() => setConfirmDelete(null)} className="btn-outline text-sm">
-              Batal
-            </button>
-            <button
-              onClick={() => handleDeleteDraft(confirmDelete)}
-              disabled={deletingId === confirmDelete.id}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-            >
-              {deletingId === confirmDelete.id ? 'Menghapus...' : 'Ya, Hapus'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const grandTotal = sessions.reduce((sum, s) => {
     return sum + (s.purchase_orders || []).reduce((a, po) => a + Number(po.total_estimated || 0), 0);
   }, 0);
 
   return (
     <div className="page-shell">
+      <Toast toast={toast} onClose={hideToast} />
+
+      {/* Konfirmasi hapus draft */}
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Hapus Draft?"
+          confirmLabel="Ya, Hapus"
+          danger
+          loading={deletingId === confirmDelete.id}
+          loadingLabel="Menghapus..."
+          onConfirm={() => handleDeleteDraft(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
+        >
+          Anda yakin ingin menghapus draft order tanggal{' '}
+          <strong>{formatDateID(confirmDelete.order_date)}</strong>? Tindakan ini tidak dapat
+          dibatalkan.
+        </ConfirmDialog>
+      )}
       {/* Header */}
       <div className="page-header">
         <div>

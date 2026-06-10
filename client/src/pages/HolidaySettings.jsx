@@ -305,18 +305,20 @@ export default function HolidaySettings() {
       setDeletingHoliday(null);
       loadHolidays();
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal menghapus. Coba lagi.');
+      setDeletingHoliday(null);
+      setError(err.response?.data?.error || 'Gagal menghapus. Coba lagi.');
     } finally {
       setDeleteLoading(false);
     }
   };
 
   const handleReactivate = async (h) => {
+    setError(null);
     try {
       await updateHoliday(h.id, { is_active: true });
       loadHolidays();
     } catch (err) {
-      alert(err.response?.data?.error || 'Gagal mengaktifkan. Coba lagi.');
+      setError(err.response?.data?.error || 'Gagal mengaktifkan. Coba lagi.');
     }
   };
 

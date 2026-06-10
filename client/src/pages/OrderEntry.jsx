@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import useModalDismiss from '../components/ui/useModalDismiss';
 import api, {
   toInputDate,
   getLocalOperationalDate,
@@ -452,7 +453,7 @@ export default function OrderEntry() {
   const handleRotiDistribute = async () => {
     const rotiMaterial = materials.find((m) => m.name.toLowerCase().includes('roti tawar'));
     if (!rotiMaterial) {
-      alert('Material "Roti Tawar" tidak ditemukan di master data.');
+      setRotiError('Material "Roti Tawar" tidak ditemukan di master data.');
       return;
     }
     setRotiDistQtys({});
@@ -504,6 +505,15 @@ export default function OrderEntry() {
     }
   };
 
+  // Escape + kunci scroll untuk modal distribusi roti & override hari libur
+  const closeRotiDistModal = useCallback(() => {
+    setShowRotiDistModal(false);
+    setRotiDistQtys({});
+  }, []);
+  useModalDismiss(closeRotiDistModal, { active: showRotiDistModal });
+  const closeOverrideModal = useCallback(() => setPendingOverrideOutletId(null), []);
+  useModalDismiss(closeOverrideModal, { active: !!pendingOverrideOutletId });
+
   // --- Derived ---
   const isReadOnly = !!(session?.status && session.status !== 'draft');
   const rotiLiveSummary = useMemo(
@@ -512,7 +522,9 @@ export default function OrderEntry() {
   );
 
   // --- Loading screen ---
-  if (loading) {
+  // Full-screen hanya untuk muat pertama; saat ganti tanggal cukup overlay tipis
+  // agar halaman tidak "berkedip" kosong.
+  if (loading && outlets.length === 0) {
     return (
       <div className="p-8 flex items-center justify-center min-h-screen">
         <div className="text-center">
@@ -565,13 +577,29 @@ export default function OrderEntry() {
 
   return (
     <div className="page-shell-wide">
+      {/* Overlay saat memuat sesi (ganti tanggal) — halaman tetap terlihat */}
+      {loading && (
+        <div className="fixed inset-0 z-40 bg-white/60 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-lg border border-gray-100 px-5 py-4 flex items-center gap-3">
+            <div className="w-5 h-5 border-2 border-brand-red border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-gray-600">Memuat sesi...</span>
+          </div>
+        </div>
+      )}
+
       {/* Modal distribusi roti tambahan */}
       {showRotiDistModal && (() => {
         const rotiMaterial = materials.find((m) => m.name.toLowerCase().includes('roti tawar'));
         const totalDist = Object.values(rotiDistQtys).reduce((s, q) => s + (Number(q) || 0), 0);
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={closeRotiDistModal}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
               <h3 className="font-semibold text-gray-900 mb-1">Distribusi Roti Tambahan</h3>
               <p className="text-xs text-gray-400 mb-4">
                 Masukkan jumlah roti tambahan per cabang. Nilai akan ditambahkan ke order saat ini.
@@ -777,8 +805,14 @@ export default function OrderEntry() {
         };
         const holidays = [info?.date1_holiday].filter(Boolean);
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={closeOverrideModal}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6"
+              onClick={(e) => e.stopPropagation()}
+            >
               <h3 className="font-semibold text-gray-800 text-lg mb-2">Override Hari Libur?</h3>
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 text-sm space-y-1.5">
                 <p className="font-medium text-yellow-800">{outlet?.name}</p>

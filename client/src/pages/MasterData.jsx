@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import api, { formatRupiah } from '../lib/api';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import useModalDismiss from '../components/ui/useModalDismiss';
 
 // ─── Variants Modal ───────────────────────────────────────────────────────────
 function VariantsModal({ material, suppliers, onClose }) {
@@ -10,19 +12,29 @@ function VariantsModal({ material, suppliers, onClose }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  useModalDismiss(onClose);
 
   useEffect(() => { loadVariants(); }, []);
 
   async function loadVariants() {
     setLoading(true);
-    const res = await api.get(`/api/materials/${material.id}/variants`);
-    setVariants(res.data || []);
-    setLoading(false);
+    try {
+      const res = await api.get(`/api/materials/${material.id}/variants`);
+      setVariants(res.data || []);
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleAdd() {
     if (!newForm.brand.trim()) return;
     setSaving(true);
+    setError('');
     try {
       await api.post(`/api/materials/${material.id}/variants`, {
         brand: newForm.brand,
@@ -33,7 +45,7 @@ function VariantsModal({ material, suppliers, onClose }) {
       setAddingNew(false);
       loadVariants();
     } catch (err) {
-      alert(err.response?.data?.error || err.message);
+      setError(err.response?.data?.error || err.message);
     } finally {
       setSaving(false);
     }
@@ -41,6 +53,7 @@ function VariantsModal({ material, suppliers, onClose }) {
 
   async function handleUpdate(vid) {
     setSaving(true);
+    setError('');
     try {
       await api.put(`/api/materials/${material.id}/variants/${vid}`, {
         brand: editForm.brand,
@@ -50,26 +63,60 @@ function VariantsModal({ material, suppliers, onClose }) {
       setEditingId(null);
       loadVariants();
     } catch (err) {
-      alert(err.response?.data?.error || err.message);
+      setError(err.response?.data?.error || err.message);
     } finally {
       setSaving(false);
     }
   }
 
   async function handleDelete(vid) {
-    if (!window.confirm('Hapus varian ini?')) return;
-    await api.delete(`/api/materials/${material.id}/variants/${vid}`);
-    loadVariants();
+    setDeleting(true);
+    setError('');
+    try {
+      await api.delete(`/api/materials/${material.id}/variants/${vid}`);
+      setConfirmDeleteId(null);
+      loadVariants();
+    } catch (err) {
+      setConfirmDeleteId(null);
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function toggleActive(v) {
-    await api.put(`/api/materials/${material.id}/variants/${v.id}`, { is_active: !v.is_active });
-    loadVariants();
+    setError('');
+    try {
+      await api.put(`/api/materials/${material.id}/variants/${v.id}`, { is_active: !v.is_active });
+      loadVariants();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      {confirmDeleteId && (
+        <ConfirmDialog
+          title="Hapus Varian?"
+          confirmLabel="Ya, Hapus"
+          danger
+          loading={deleting}
+          loadingLabel="Menghapus..."
+          onConfirm={() => handleDelete(confirmDeleteId)}
+          onCancel={() => setConfirmDeleteId(null)}
+        >
+          Varian merk ini akan dihapus permanen dari bahan{' '}
+          <strong>{material.name}</strong>.
+        </ConfirmDialog>
+      )}
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="bg-brand-red px-6 py-4 flex items-center justify-between flex-shrink-0">
           <div>
             <h3 className="text-white font-semibold text-lg">Varian Merk — {material.name}</h3>
@@ -79,6 +126,11 @@ function VariantsModal({ material, suppliers, onClose }) {
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {error}
+            </div>
+          )}
           {/* Form tambah baru */}
           {addingNew ? (
             <div className="mb-5 p-4 bg-yellow-50 rounded-xl border border-yellow-200">
@@ -212,7 +264,7 @@ function VariantsModal({ material, suppliers, onClose }) {
                           >
                             Edit
                           </button>
-                          <button onClick={() => handleDelete(v.id)} className="text-red-500 text-xs font-medium hover:underline">
+                          <button onClick={() => setConfirmDeleteId(v.id)} className="text-red-500 text-xs font-medium hover:underline">
                             Hapus
                           </button>
                         </div>
@@ -330,27 +382,22 @@ function SuppliersTab() {
   return (
     <div>
       {confirmDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Hapus Supplier?</h3>
-            <p className="text-sm text-gray-500 mb-1">
-              Supplier <strong>{confirmDelete.name}</strong> akan dihapus permanen.
-            </p>
-            <p className="text-sm text-red-600 mb-6">
-              Jika supplier masih terhubung dengan bahan baku, penghapusan akan gagal.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button onClick={() => setConfirmDelete(null)} className="btn-outline text-sm">Batal</button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-              >
-                {deleting ? 'Menghapus...' : 'Ya, Hapus'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ConfirmDialog
+          title="Hapus Supplier?"
+          confirmLabel="Ya, Hapus"
+          danger
+          loading={deleting}
+          loadingLabel="Menghapus..."
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(null)}
+        >
+          <p>
+            Supplier <strong>{confirmDelete.name}</strong> akan dihapus permanen.
+          </p>
+          <p className="text-red-600 mt-1">
+            Jika supplier masih terhubung dengan bahan baku, penghapusan akan gagal.
+          </p>
+        </ConfirmDialog>
       )}
 
       <div className="flex items-center justify-between mb-4">
