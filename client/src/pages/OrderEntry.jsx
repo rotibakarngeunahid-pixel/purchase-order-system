@@ -16,6 +16,7 @@ import OutletOrderInput from '../components/order/OutletOrderInput';
 import MaterialOrderInput from '../components/order/MaterialOrderInput';
 import RotiTawarPanel from '../components/order/RotiTawarPanel';
 import OrderItemsSidebar from '../components/order/OrderItemsSidebar';
+import RekomendasiPanel from '../components/order/RekomendasiPanel';
 
 const STATUS_LABEL = { draft: 'Draft', sent: 'Terkirim', completed: 'Selesai' };
 const STATUS_CLASS = { draft: 'badge-draft', sent: 'badge-sent', completed: 'badge-completed' };
@@ -59,6 +60,7 @@ export default function OrderEntry() {
   // Roti distribution modal state
   const [showRotiDistModal, setShowRotiDistModal] = useState(false);
   const [rotiDistQtys, setRotiDistQtys] = useState({});
+  const [rekAddedIds, setRekAddedIds] = useState(new Set());
 
   // Refs for use inside async callbacks
   const saveTimers = useRef({});
@@ -404,6 +406,17 @@ export default function OrderEntry() {
     }
   };
 
+  const handleAddRekToOrder = (materialId, rekomendasiId) => {
+    // Tambahkan qty=1 ke outlet aktif pertama (atau pertahankan jika sudah lebih besar)
+    const activeOutlet = outlets.find((o) => outletOpen[o.id] !== false);
+    if (!activeOutlet) return;
+    const key = getMatrixKey(activeOutlet.id, materialId);
+    const currentQty = Number(matrix[key]) || 0;
+    const newQty = Math.max(currentQty, 1);
+    handleCellChange(activeOutlet.id, materialId, newQty);
+    setRekAddedIds((prev) => new Set([...prev, rekomendasiId]));
+  };
+
   const handleToggleOpen = (id) =>
     setOutletOpen((prev) => ({ ...prev, [id]: !prev[id] }));
 
@@ -716,6 +729,11 @@ export default function OrderEntry() {
           )}
           {/* Mode matrix/per-bahan: tampilkan OutletControlsPanel (OutletControls sudah di panel kiri di per-outlet) */}
           {inputMode !== 'per-outlet' && <OutletControlsPanel {...outletControlProps} />}
+          <RekomendasiPanel
+            materials={materials}
+            onAddToOrder={handleAddRekToOrder}
+            addedIds={rekAddedIds}
+          />
           <RotiTawarPanel {...rotiPanelProps} />
         </div>
       </div>
@@ -730,6 +748,11 @@ export default function OrderEntry() {
           />
         )}
         {inputMode !== 'per-outlet' && <OutletControlsPanel {...outletControlProps} />}
+        <RekomendasiPanel
+          materials={materials}
+          onAddToOrder={handleAddRekToOrder}
+          addedIds={rekAddedIds}
+        />
         <RotiTawarPanel {...rotiPanelProps} />
       </div>
 
