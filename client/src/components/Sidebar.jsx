@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 import {
   BarChart3,
   CalendarOff,
@@ -49,11 +49,11 @@ function SidebarIcon({ icon: Icon, active = false, danger = false }) {
 }
 
 export default function Sidebar() {
-  const navigate = useNavigate();
-
   const handleLogout = () => {
     localStorage.removeItem('rbn_token');
-    navigate('/login');
+    // Hard redirect agar state login di App ikut ter-reset
+    // (navigate() saja membuat ProtectedRoute masih menganggap user login)
+    window.location.replace('/login');
   };
 
   return (

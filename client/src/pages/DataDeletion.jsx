@@ -9,13 +9,13 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react';
-import api, { formatDateID } from '../lib/api';
+import api, { formatDateID, toInputDate } from '../lib/api';
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
 function getToday() {
-  const d = new Date();
-  return d.toISOString().split('T')[0];
+  // Tanggal WITA, konsisten dengan zona waktu operasional
+  return toInputDate();
 }
 
 /** Label ramah untuk setiap key tabel */

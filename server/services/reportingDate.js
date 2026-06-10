@@ -31,4 +31,9 @@ function resolveRotiReferenceDate(orderDate) {
   return orderDate > today ? today : orderDate;
 }
 
-module.exports = { getReportingDate, getOperationalTomorrow, resolveRotiReferenceDate };
+// Tanggal kalender WITA (UTC+8) TANPA cutoff — konsisten dengan toInputDate() di client.
+function getWitaDate(offsetHours = 8) {
+  return new Date(Date.now() + offsetHours * 3600 * 1000).toISOString().split('T')[0];
+}
+
+module.exports = { getReportingDate, getOperationalTomorrow, resolveRotiReferenceDate, getWitaDate };

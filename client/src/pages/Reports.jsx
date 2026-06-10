@@ -51,24 +51,30 @@ export default function Reports() {
 
   async function loadReports() {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo) params.set('date_to', dateTo);
-    if (supplierId) params.set('supplier_id', supplierId);
+    try {
+      const params = new URLSearchParams();
+      if (dateFrom) params.set('date_from', dateFrom);
+      if (dateTo) params.set('date_to', dateTo);
+      if (supplierId) params.set('supplier_id', supplierId);
 
-    const [dailyRes, supplierRes, barangMasukRes] = await Promise.all([
-      api.get(`/api/reports/daily?${params}`),
-      api.get(`/api/reports/supplier?${params}`),
-      api.get(`/api/purchase-report?${params}`),
-    ]);
-    setDailyData(dailyRes.data);
-    setSupplierSummary(supplierRes.data);
-    setBarangMasukData(barangMasukRes.data);
-    setLoading(false);
+      const [dailyRes, supplierRes, barangMasukRes] = await Promise.all([
+        api.get(`/api/reports/daily?${params}`),
+        api.get(`/api/reports/supplier?${params}`),
+        api.get(`/api/purchase-report?${params}`),
+      ]);
+      setDailyData(dailyRes.data);
+      setSupplierSummary(supplierRes.data);
+      setBarangMasukData(barangMasukRes.data);
+    } catch (err) {
+      console.error('loadReports error:', err);
+    } finally {
+      setLoading(false);
+    }
   }
 
+  // PO diterima sebagian (received_partial) juga punya total_actual — ikut dihitung
   const totalActual = dailyData
-    .filter((po) => po.status === 'received')
+    .filter((po) => po.status === 'received' || po.status === 'received_partial')
     .reduce((sum, po) => sum + Number(po.total_actual || 0), 0);
   const totalEstimated = dailyData.reduce((sum, po) => sum + Number(po.total_estimated || 0), 0);
   const totalBarangMasuk = barangMasukData.reduce(
@@ -83,8 +89,18 @@ export default function Reports() {
     return acc;
   }, {});
 
-  const statusLabel = { pending: 'Pending', confirmed: 'Dikonfirmasi', received: 'Diterima' };
-  const statusClass = { pending: 'badge-pending', confirmed: 'badge-sent', received: 'badge-received' };
+  const statusLabel = {
+    pending: 'Pending',
+    confirmed: 'Dikonfirmasi',
+    received: 'Diterima',
+    received_partial: 'Diterima Sebagian',
+  };
+  const statusClass = {
+    pending: 'badge-pending',
+    confirmed: 'badge-sent',
+    received: 'badge-received',
+    received_partial: 'badge-pending',
+  };
 
   return (
     <div className="page-shell">

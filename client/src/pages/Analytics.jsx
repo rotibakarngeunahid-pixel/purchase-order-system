@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react';
-import api, { formatRupiah } from '../lib/api';
+import api, { formatRupiah, toInputDate } from '../lib/api';
 
 function getFirstOfMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
-}
-
-function toInputDate(date = new Date()) {
-  return date.toISOString().split('T')[0];
 }
 
 function formatMonth(yyyymm) {
@@ -63,21 +59,26 @@ export default function Analytics() {
 
   async function loadAll() {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (dateFrom) params.set('date_from', dateFrom);
-    if (dateTo) params.set('date_to', dateTo);
-    if (outletId) params.set('outlet_id', outletId);
+    try {
+      const params = new URLSearchParams();
+      if (dateFrom) params.set('date_from', dateFrom);
+      if (dateTo) params.set('date_to', dateTo);
+      if (outletId) params.set('outlet_id', outletId);
 
-    const [matRes, outletRes, trendRes] = await Promise.all([
-      api.get(`/api/reports/analytics/materials?${params}`),
-      api.get(`/api/reports/analytics/outlets?${params}`),
-      api.get(`/api/reports/analytics/trends?${params}`),
-    ]);
+      const [matRes, outletRes, trendRes] = await Promise.all([
+        api.get(`/api/reports/analytics/materials?${params}`),
+        api.get(`/api/reports/analytics/outlets?${params}`),
+        api.get(`/api/reports/analytics/trends?${params}`),
+      ]);
 
-    setMaterialsData(matRes.data || []);
-    setOutletsData(outletRes.data || []);
-    setTrendsData(trendRes.data || []);
-    setLoading(false);
+      setMaterialsData(matRes.data || []);
+      setOutletsData(outletRes.data || []);
+      setTrendsData(trendRes.data || []);
+    } catch (err) {
+      console.error('loadAll analytics error:', err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   const maxMaterialQty = Math.max(...materialsData.map((m) => m.total_qty), 1);

@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const supabase = require('./supabase');
+const { fetchAllRows } = require('./fetchAll');
 
 const CONFIG_ID = 'default';
 const FINAL_RECEIPT_STATUSES = ['received', 'received_partial'];
@@ -189,13 +190,16 @@ function createExpenseAccumulator(outlets, selectedOutletId) {
 }
 
 async function getRequestQtyMaps(dateFrom, dateTo) {
-  const { data, error } = await supabase
-    .from('order_request_items')
-    .select(`
-      qty, outlet_id, material_id, session_id,
-      session:order_sessions(id, order_date)
-    `)
-    .gt('qty', 0);
+  const { data, error } = await fetchAllRows(() =>
+    supabase
+      .from('order_request_items')
+      .select(`
+        id, qty, outlet_id, material_id, session_id,
+        session:order_sessions(id, order_date)
+      `)
+      .gt('qty', 0)
+      .order('id')
+  );
 
   if (error) throw error;
 
@@ -230,9 +234,12 @@ async function fetchPOExpenseRows() {
     branch_distributions:purchase_item_branch_distribution(outlet_id, qty)
   `;
 
-  let result = await supabase
-    .from('purchase_order_items')
-    .select(withAllColumns);
+  let result = await fetchAllRows(() =>
+    supabase
+      .from('purchase_order_items')
+      .select(withAllColumns)
+      .order('id')
+  );
 
   if (!result.error) return (result.data || []).map((row) => row);
 
@@ -248,9 +255,12 @@ async function fetchPOExpenseRows() {
     )
   `;
 
-  result = await supabase
-    .from('purchase_order_items')
-    .select(withoutDistribution);
+  result = await fetchAllRows(() =>
+    supabase
+      .from('purchase_order_items')
+      .select(withoutDistribution)
+      .order('id')
+  );
 
   if (!result.error) {
     return (result.data || []).map((row) => ({ ...row, branch_distributions: [] }));
@@ -266,9 +276,12 @@ async function fetchPOExpenseRows() {
     )
   `;
 
-  result = await supabase
-    .from('purchase_order_items')
-    .select(legacyColumns);
+  result = await fetchAllRows(() =>
+    supabase
+      .from('purchase_order_items')
+      .select(legacyColumns)
+      .order('id')
+  );
 
   if (result.error) throw result.error;
   return (result.data || []).map((row) => ({
@@ -319,16 +332,20 @@ async function addPurchaseOrderExpenses({ dateFrom, dateTo, add }) {
 }
 
 async function addPurchaseReportExpenses({ dateFrom, dateTo, selectedOutletId, add }) {
-  let query = supabase
-    .from('purchase_report')
-    .select('id, outlet_id, date, qty, price_per_unit, outlet:outlets(id, name)')
-    .gte('date', dateFrom)
-    .lte('date', dateTo)
-    .gt('qty', 0);
+  const buildQuery = () => {
+    let query = supabase
+      .from('purchase_report')
+      .select('id, outlet_id, date, qty, price_per_unit, outlet:outlets(id, name)')
+      .gte('date', dateFrom)
+      .lte('date', dateTo)
+      .gt('qty', 0)
+      .order('id');
 
-  if (selectedOutletId) query = query.eq('outlet_id', selectedOutletId);
+    if (selectedOutletId) query = query.eq('outlet_id', selectedOutletId);
+    return query;
+  };
 
-  const { data, error } = await query;
+  const { data, error } = await fetchAllRows(buildQuery);
   if (error) throw error;
 
   for (const row of data || []) {

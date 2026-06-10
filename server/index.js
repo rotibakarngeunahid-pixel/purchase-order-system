@@ -26,6 +26,9 @@ const inventoriRekomendasiRouter = require('./routes/inventoriRekomendasi');
 
 const app = express();
 
+// Berjalan di belakang proxy Vercel — wajib agar req.ip & rate limit akurat
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(compression());
 const ALLOWED_ORIGINS = [
@@ -48,7 +51,8 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
+// Limit dinaikkan dari default 100kb agar import XLSX/CSV besar tidak gagal 413
+app.use(express.json({ limit: '2mb' }));
 
 // Cegah browser cache API response (hindari 304 stale data)
 app.use('/api', (req, res, next) => {

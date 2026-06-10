@@ -2,11 +2,13 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const { calculatePOs } = require('../services/calculator');
+const { getWitaDate } = require('../services/reportingDate');
 
 // Buat sesi order baru atau ambil existing untuk tanggal tertentu
 router.post('/session', async (req, res) => {
   const { order_date } = req.body;
-  const date = order_date || new Date().toISOString().split('T')[0];
+  // Default pakai tanggal WITA, bukan UTC, agar tidak mundur sehari di pagi hari
+  const date = order_date || getWitaDate();
 
   // Cek apakah sudah ada sesi untuk tanggal ini
   const { data: existing } = await supabase

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import api, { formatRupiah, formatDateID } from '../lib/api';
+import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
 
 const statusLabel = { draft: 'Draft', sent: 'Terkirim', completed: 'Selesai' };
 const statusClass = { draft: 'badge-draft', sent: 'badge-sent', completed: 'badge-completed' };
@@ -57,7 +57,8 @@ export default function Dashboard() {
   }
 
   const handleNewOrder = async () => {
-    const today = new Date().toISOString().split('T')[0];
+    // Tanggal WITA, bukan UTC — agar order baru tidak mundur sehari di pagi hari
+    const today = toInputDate();
     try {
       const res = await api.post('/api/orders/session', { order_date: today });
       navigate(`/order?sessionId=${res.data.id}`);

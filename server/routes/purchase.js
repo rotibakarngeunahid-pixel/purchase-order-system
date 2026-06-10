@@ -535,8 +535,13 @@ router.put('/:po_id/receive', async (req, res) => {
   const hasDiscrepancy = discrepancies.length > 0;
   const poStatus = hasDiscrepancy ? 'received_partial' : 'received';
 
-  // Buat catatan discrepancy otomatis
-  let autoNotes = notes || '';
+  // Buat catatan discrepancy otomatis.
+  // Baris [Selisih Penerimaan] lama dibuang dulu agar tidak terduplikasi saat re-save.
+  let autoNotes = String(notes || '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('[Selisih Penerimaan]'))
+    .join('\n')
+    .trim();
   if (hasDiscrepancy) {
     const discLines = discrepancies.map(
       (item) =>

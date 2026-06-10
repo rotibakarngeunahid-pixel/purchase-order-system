@@ -204,6 +204,10 @@ export default function OrderEntry() {
       ]);
       const fullRes = await api.get(`/api/orders/session/${sessionRes.data.id}`);
       applySession(fullRes.data);
+    } catch (err) {
+      console.error('handleDateChange error:', err);
+      setSaveStatus('error');
+      setSaveError('Gagal memuat sesi untuk tanggal tersebut. Coba pilih ulang tanggal.');
     } finally {
       setLoading(false);
     }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import api, { formatRupiah, formatDateID } from '../lib/api';
+import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -176,7 +176,7 @@ function QuickAddVariantModal({ materialId, materialName, defaultSupplierId, sup
 // ─── QuickAddMaterialModal ────────────────────────────────────────────────────
 
 function QuickAddMaterialModal({ defaultSupplierId, suppliers, onSaved, onCancel }) {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const today = toInputDate().replace(/-/g, '');
   const [form, setForm] = useState({
     code: `ADJ-${today}-001`,
     name: '',
@@ -425,19 +425,18 @@ function ReceiveModal({ po, onClose, onSaved }) {
     });
   }, [sessionOrders, po.items]);
 
-  // Load variants untuk semua bahan di PO (ordered + adjustment existing)
+  // Load variants untuk semua bahan di PO (ordered + adjustment existing).
+  // Satu request untuk semua varian aktif — menggantikan N request per bahan.
   useEffect(() => {
     const materialIds = [...new Set((po.items || []).map((i) => i.material_id).filter(Boolean))];
     if (materialIds.length === 0) return;
-    Promise.all(
-      materialIds.map((mid) =>
-        api.get(`/api/materials/${mid}/variants`).then((r) => ({ mid, variants: r.data || [] }))
-      )
-    )
-      .then((results) => {
+    api.get('/api/purchase-report/variants')
+      .then((res) => {
         const map = {};
-        results.forEach(({ mid, variants }) => {
-          map[mid] = variants.filter((v) => v.is_active);
+        materialIds.forEach((mid) => { map[mid] = []; });
+        (res.data || []).forEach((variant) => {
+          if (!map[variant.material_id]) map[variant.material_id] = [];
+          map[variant.material_id].push(variant);
         });
         setVariantsMap(map);
       })

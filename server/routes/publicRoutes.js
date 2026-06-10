@@ -516,22 +516,29 @@ router.post('/distribution/upload-photo', (req, res) => {
     const results = [];
     const errors = [];
 
+    const EXT_BY_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       let buffer = file.buffer;
+      // Jika konversi gagal, simpan file asli dengan ekstensi & content-type aslinya
+      let converted = false;
       try {
         try {
           buffer = await processAndWatermark(file.buffer, branch, witaNow);
+          converted = !!sharpLib;
         } catch (convErr) {
           console.error('[DistPhotos] WebP conversion error, using original:', convErr.message);
         }
 
-        const filename = `${branchSlug}_${year}${month}${day}_${hour}${min}_${randomStr(4)}.webp`;
+        const ext = converted ? 'webp' : (EXT_BY_MIME[file.mimetype] || 'jpg');
+        const contentType = converted ? 'image/webp' : file.mimetype;
+        const filename = `${branchSlug}_${year}${month}${day}_${hour}${min}_${randomStr(4)}.${ext}`;
         const storagePath = `${branchSlug}/${year}/${month}/${filename}`;
 
         const { error: uploadErr } = await supabase.storage
           .from('distribusi')
-          .upload(storagePath, buffer, { contentType: 'image/webp', upsert: false });
+          .upload(storagePath, buffer, { contentType, upsert: false });
 
         if (uploadErr) throw uploadErr;
 

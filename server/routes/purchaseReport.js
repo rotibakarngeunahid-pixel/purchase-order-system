@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const { syncPurchaseReportToInventory } = require('../services/posStockSync');
+const { fetchAllRows } = require('../services/fetchAll');
 
 // GET semua variants aktif (untuk preload di frontend)
 router.get('/variants', async (req, res) => {
@@ -19,24 +20,28 @@ router.get('/variants', async (req, res) => {
 router.get('/', async (req, res) => {
   const { outlet_id, date_from, date_to, supplier_id } = req.query;
 
-  let query = supabase
-    .from('purchase_report')
-    .select(`
-      *,
-      outlet:outlets(id, name),
-      material:materials(id, code, name, purchase_unit),
-      variant:material_variants(id, brand),
-      supplier:suppliers(id, name)
-    `)
-    .order('date', { ascending: false })
-    .order('created_at', { ascending: false });
+  const buildQuery = () => {
+    let query = supabase
+      .from('purchase_report')
+      .select(`
+        *,
+        outlet:outlets(id, name),
+        material:materials(id, code, name, purchase_unit),
+        variant:material_variants(id, brand),
+        supplier:suppliers(id, name)
+      `)
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id');
 
-  if (outlet_id) query = query.eq('outlet_id', outlet_id);
-  if (date_from) query = query.gte('date', date_from);
-  if (date_to) query = query.lte('date', date_to);
-  if (supplier_id) query = query.eq('supplier_id', supplier_id);
+    if (outlet_id) query = query.eq('outlet_id', outlet_id);
+    if (date_from) query = query.gte('date', date_from);
+    if (date_to) query = query.lte('date', date_to);
+    if (supplier_id) query = query.eq('supplier_id', supplier_id);
+    return query;
+  };
 
-  const { data, error } = await query;
+  const { data, error } = await fetchAllRows(buildQuery);
   if (error) return res.status(500).json({ error: error.message });
   res.json(data || []);
 });
