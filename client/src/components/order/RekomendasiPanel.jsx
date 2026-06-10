@@ -84,9 +84,8 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds }) 
       const res = await api.get('/api/inventori/rekomendasi?status=pending');
       setItems(res.data?.data || []);
     } catch (err) {
-      // Jika env belum dikonfigurasi (503), jangan tampilkan panel sama sekali
       if (err.response?.status === 503) {
-        setDismissed(true);
+        setError('Integrasi inventori belum aktif di server. Hubungi admin untuk mengatur env INVENTORI_GAS_URL & INVENTORI_API_KEY di Vercel.');
         return;
       }
       setError('Gagal memuat rekomendasi. Panel ini tidak mempengaruhi order.');

@@ -1,8 +1,8 @@
 const express = require('express');
 const router  = express.Router();
 
-const GAS_URL = () => process.env.INVENTORI_GAS_URL || '';
-const GAS_KEY = () => process.env.INVENTORI_API_KEY || '';
+const GAS_URL = () => (process.env.INVENTORI_GAS_URL || '').trim();
+const GAS_KEY = () => (process.env.INVENTORI_API_KEY || '').trim();
 
 // GET /api/inventori/rekomendasi?status=pending
 router.get('/', async (req, res) => {
@@ -11,8 +11,10 @@ router.get('/', async (req, res) => {
   const key = GAS_KEY();
 
   if (!url || !key) {
+    console.warn('[inventoriRekomendasi] Env vars missing — GAS_URL set:', !!url, '| GAS_KEY set:', !!key);
     return res.status(503).json({
-      error: 'Integrasi inventori belum dikonfigurasi. Tambahkan INVENTORI_GAS_URL dan INVENTORI_API_KEY ke env server.',
+      error: 'Integrasi inventori belum dikonfigurasi.',
+      detail: { gasUrl: !!url, gasKey: !!key },
     });
   }
 
