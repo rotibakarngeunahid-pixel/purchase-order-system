@@ -48,6 +48,40 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// Vercel menolak request body > 4.5MB (413), sedangkan foto kamera HP bisa 3-4MB+.
+// Kompres dulu di sisi klien agar selalu jauh di bawah batas itu.
+const CLIENT_MAX_DIM = 1920;
+const COMPRESS_THRESHOLD = 1.5 * 1024 * 1024;
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+async function compressImage(file) {
+  try {
+    const img = await loadImageFromFile(file);
+    const scale = Math.min(1, CLIENT_MAX_DIM / Math.max(img.naturalWidth, img.naturalHeight));
+    if (scale === 1 && file.size <= COMPRESS_THRESHOLD) return file;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.\w+$/i, '') + '.jpg', { type: 'image/jpeg' });
+  } catch {
+    return file;
+  }
+}
+
 // ── Photo Upload Card ────────────────────────────────────────────────────────
 
 function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadSuccess }) {
@@ -77,27 +111,23 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
   const examplePhotos = guide?.example_photos || [];
 
   const handleFileSelect = (e) => {
-    const files = Array.from(e.target.files || []);
-    const remaining = 3 - selectedPhotos.length;
-    if (remaining <= 0) return;
-
-    const added = [];
-    const fileErrors = [];
-    for (const file of files.slice(0, remaining)) {
-      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-        fileErrors.push(`${file.name}: Format tidak didukung.`);
-        continue;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        fileErrors.push(`${file.name}: Terlalu besar. Maksimal 10MB.`);
-        continue;
-      }
-      added.push({ file, preview: URL.createObjectURL(file), name: file.name, size: file.size });
-    }
-    if (fileErrors.length > 0) setUploadError(fileErrors.join(' '));
-    else setUploadError('');
-    setSelectedPhotos((prev) => [...prev, ...added]);
+    const file = (e.target.files || [])[0];
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setUploadError(`${file.name}: Format tidak didukung.`);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError(`${file.name}: Terlalu besar. Maksimal 10MB.`);
+      return;
+    }
+    setUploadError('');
+    setSelectedPhotos((prev) => {
+      prev.forEach((p) => URL.revokeObjectURL(p.preview));
+      return [{ file, preview: URL.createObjectURL(file), name: file.name, size: file.size }];
+    });
   };
 
   const handleRemove = (idx) => {
@@ -120,12 +150,22 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
       });
       return res.data;
     } catch (err) {
-      if (attempt < 2) {
+      // Retry hanya untuk gangguan jaringan / error server — bukan error 4xx
+      const status = err.response?.status;
+      if (attempt < 2 && (!status || status >= 500)) {
         await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
         return attemptUpload(formData, attempt + 1);
       }
       throw err;
     }
+  }
+
+  function extractErrorMessage(err) {
+    const raw = err.response?.data?.error;
+    if (typeof raw === 'string' && raw) return raw;
+    if (raw?.message) return raw.message;
+    if (err.response?.status === 413) return 'Ukuran foto terlalu besar untuk dikirim.';
+    return err.message || 'Gagal mengirim foto.';
   }
 
   const handleUpload = async () => {
@@ -135,17 +175,19 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
       return;
     }
     setUploadStatus('processing');
-    setUploadProgress('Memproses foto... (konversi ke WebP)');
+    setUploadProgress('Memproses foto...');
     setUploadError('');
 
-    const formData = new FormData();
-    formData.append('branch', outletName);
-    formData.append('date', date);
-    selectedPhotos.forEach((p) => formData.append('photos', p.file));
-
     try {
+      const compressed = await compressImage(selectedPhotos[0].file);
+
+      const formData = new FormData();
+      formData.append('branch', outletName);
+      formData.append('date', date);
+      formData.append('photos', compressed);
+
       setUploadStatus('uploading');
-      setUploadProgress(`Mengunggah ${selectedPhotos.length} foto...`);
+      setUploadProgress('Mengunggah foto...');
       const result = await attemptUpload(formData);
 
       setUploadStatus('done');
@@ -165,8 +207,7 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
       setSelectedPhotos([]);
     } catch (err) {
       setUploadStatus('error');
-      const msg = err.response?.data?.error || err.message || 'Gagal mengirim foto.';
-      setUploadError(`${msg} Periksa koneksi dan coba lagi.`);
+      setUploadError(`${extractErrorMessage(err)} Periksa koneksi dan coba lagi.`);
       setUploadProgress('');
     }
   };
@@ -268,7 +309,7 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
         </div>
 
         {/* Upload zone */}
-        {selectedPhotos.length < 3 && uploadStatus === 'idle' && (
+        {selectedPhotos.length === 0 && uploadStatus === 'idle' && (
           <label className="block cursor-pointer">
             <input
               ref={fileInputRef}
@@ -282,7 +323,7 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
               <div className="text-4xl mb-2">📷</div>
               <p className="text-sm font-semibold text-blue-700">Ketuk untuk ambil foto langsung</p>
               <p className="text-xs text-gray-400 mt-1">
-                Maks. {3 - selectedPhotos.length} foto lagi • Foto harus diambil langsung (kamera)
+                1 foto bukti • Foto harus diambil langsung (kamera)
               </p>
             </div>
           </label>
@@ -299,7 +340,7 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
         {selectedPhotos.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-              Foto Dipilih ({selectedPhotos.length}/3)
+              Foto Dipilih
             </p>
             <div className="flex flex-wrap gap-3">
               {selectedPhotos.map((photo, idx) => (
@@ -362,7 +403,7 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap z-10 shadow-lg">
                 {!allDone
                   ? 'Selesaikan pengecekan semua item terlebih dahulu'
-                  : 'Pilih minimal 1 foto terlebih dahulu'}
+                  : 'Ambil foto terlebih dahulu'}
                 <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800" />
               </div>
             )}

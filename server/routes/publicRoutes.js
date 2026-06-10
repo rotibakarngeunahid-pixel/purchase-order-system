@@ -482,13 +482,16 @@ router.get('/pos-setup-data', async (req, res) => {
 // ── POST /api/public/distribution/upload-photo ─────────────────────────────
 // Upload photo proof (public — Distribution Listing page has no staff auth)
 router.post('/distribution/upload-photo', (req, res) => {
-  uploadMiddleware.array('photos', 3)(req, res, async (err) => {
+  uploadMiddleware.array('photos', 1)(req, res, async (err) => {
     if (err) {
       if (err.code === 'FORMAT_NOT_SUPPORTED' || err.message === 'FORMAT_NOT_SUPPORTED') {
         return res.status(400).json({ error: 'Format tidak didukung. Gunakan JPG, PNG, atau WebP.' });
       }
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({ error: 'Foto terlalu besar. Maksimal 10MB.' });
+      }
+      if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return res.status(400).json({ error: 'Maksimal 1 foto per pengiriman.' });
       }
       return res.status(400).json({ error: err.message });
     }
@@ -497,7 +500,7 @@ router.post('/distribution/upload-photo', (req, res) => {
     const files = req.files || [];
 
     if (!branch) return res.status(400).json({ error: 'Parameter branch wajib diisi.' });
-    if (files.length === 0) return res.status(400).json({ error: 'Minimal 1 foto harus diunggah.' });
+    if (files.length === 0) return res.status(400).json({ error: 'Foto harus diunggah.' });
 
     const witaNow = getWITATime();
     const year = String(witaNow.getUTCFullYear());
@@ -558,17 +561,21 @@ router.post('/distribution/upload-photo', (req, res) => {
       sessionId = session?.id || null;
     } catch {}
 
-    try {
-      await supabase.from('distribution_photos').insert({
-        branch,
-        date: photoDate,
-        uploaded_at: new Date().toISOString(),
-        photos: results,
-        distribution_session_id: sessionId,
+    // supabase-js tidak melempar exception — error harus dicek dari return value.
+    // Tanpa record ini foto tidak akan terlihat oleh admin, jadi gagal = fatal.
+    const { error: dbError } = await supabase.from('distribution_photos').insert({
+      branch,
+      date: photoDate,
+      uploaded_at: new Date().toISOString(),
+      photos: results,
+      distribution_session_id: sessionId,
+    });
+
+    if (dbError) {
+      console.error('[DistPhotos] DB save error:', dbError.message);
+      return res.status(500).json({
+        error: 'Foto terunggah tapi gagal tercatat di arsip admin. Coba kirim ulang.',
       });
-    } catch (dbErr) {
-      console.error('[DistPhotos] DB save error:', dbErr.message);
-      // Non-fatal — files are already uploaded
     }
 
     res.json({
