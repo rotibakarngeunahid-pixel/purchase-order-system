@@ -9,6 +9,7 @@ node_modules/
 .env.production
 .env.*.local
 .env.vercel
+vercel-env-import.env
 
 # Build output
 client/dist/
