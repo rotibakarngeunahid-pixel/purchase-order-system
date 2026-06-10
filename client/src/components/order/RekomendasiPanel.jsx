@@ -1,5 +1,36 @@
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import api, { formatDateID } from '../../lib/api';
+
+function PhotoLightbox({ url, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80"
+      onClick={onClose}
+    >
+      <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <img
+          src={url}
+          alt="Foto stok"
+          className="max-w-full max-h-[85vh] rounded-xl object-contain shadow-2xl"
+        />
+        <button
+          onClick={onClose}
+          className="absolute -top-3 -right-3 w-8 h-8 bg-white rounded-full shadow-lg flex items-center justify-center text-gray-700 hover:bg-gray-100 font-bold text-sm"
+        >
+          ✕
+        </button>
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 function getGDriveThumbnailUrl(url) {
   if (!url) return null;
@@ -9,27 +40,28 @@ function getGDriveThumbnailUrl(url) {
 }
 
 function RekomendasiItem({ item, material, isAdded, onAdd, showCabang }) {
+  const [lightbox, setLightbox] = useState(false);
   const hasNumber = item.tipe_stok !== 'foto' && item.stok_akhir !== null && item.stok_akhir !== undefined;
   const thumbUrl = !hasNumber ? getGDriveThumbnailUrl(item.foto_url) : null;
+  const fullUrl  = thumbUrl ? `https://drive.google.com/thumbnail?id=${item.foto_url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1]}&sz=w1200` : null;
   const unit = material?.package_unit || '';
 
   return (
     <div className="flex items-start gap-2.5 py-2.5 border-b border-orange-100 last:border-0">
+      {lightbox && fullUrl && <PhotoLightbox url={fullUrl} onClose={() => setLightbox(false)} />}
       {thumbUrl && (
-        <a
-          href={item.foto_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex-shrink-0 mt-0.5"
-          onClick={(e) => e.stopPropagation()}
+        <button
+          type="button"
+          onClick={() => setLightbox(true)}
+          className="flex-shrink-0 mt-0.5 rounded-lg overflow-hidden border border-orange-200 bg-orange-100 hover:opacity-80 transition-opacity"
         >
           <img
             src={thumbUrl}
             alt="stok"
-            className="w-11 h-11 rounded-lg object-cover border border-orange-200 bg-orange-100"
-            onError={(e) => { e.target.style.display = 'none'; }}
+            className="w-11 h-11 object-cover"
+            onError={(e) => { e.target.parentElement.style.display = 'none'; }}
           />
-        </a>
+        </button>
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
