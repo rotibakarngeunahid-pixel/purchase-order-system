@@ -19,6 +19,7 @@ const HolidaySettings = lazy(() => import('./pages/HolidaySettings'));
 const FinancePortal = lazy(() => import('./pages/FinancePortal'));
 const DataDeletion = lazy(() => import('./pages/DataDeletion'));
 const DistributionPhotos = lazy(() => import('./pages/DistributionPhotos'));
+const PriceLogs = lazy(() => import('./pages/PriceLogs'));
 
 function isLoggedIn() {
   return !!localStorage.getItem('rbn_token');
@@ -86,6 +87,7 @@ export default function App() {
             <Route path="/settings" element={<ProtectedRoute loggedIn={loggedIn}><Settings /></ProtectedRoute>} />
             <Route path="/master" element={<ProtectedRoute loggedIn={loggedIn}><MasterData /></ProtectedRoute>} />
             <Route path="/purchase-report" element={<ProtectedRoute loggedIn={loggedIn}><PurchaseReport /></ProtectedRoute>} />
+            <Route path="/price-logs" element={<ProtectedRoute loggedIn={loggedIn}><PriceLogs /></ProtectedRoute>} />
             <Route path="/finance-portal" element={<ProtectedRoute loggedIn={loggedIn}><FinancePortal /></ProtectedRoute>} />
             <Route path="/holidays" element={<ProtectedRoute loggedIn={loggedIn}><HolidaySettings /></ProtectedRoute>} />
             <Route path="/data-deletion" element={<ProtectedRoute loggedIn={loggedIn}><DataDeletion /></ProtectedRoute>} />

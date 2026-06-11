@@ -13,6 +13,7 @@ import {
   PackagePlus,
   Settings,
   Trash2,
+  TrendingUp,
   Truck,
 } from 'lucide-react';
 
@@ -21,6 +22,7 @@ const navItems = [
   { to: '/order', label: 'Input Order', icon: ClipboardList },
   { to: '/purchase', label: 'Catat Penerimaan', icon: ClipboardCheck },
   { to: '/purchase-report', label: 'Lap. Barang Masuk', icon: PackagePlus },
+  { to: '/price-logs', label: 'Log Harga', icon: TrendingUp },
   { to: '/distribution', label: 'Distribution Listing', icon: Truck },
   { to: '/distribution-photos', label: 'Foto Bukti', icon: Image },
   { to: '/reports', label: 'Laporan', icon: FileBarChart },

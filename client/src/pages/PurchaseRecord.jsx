@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Search, TrendingDown, TrendingUp } from 'lucide-react';
 import api, { formatRupiah, formatDateID, toInputDate } from '../lib/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import useModalDismiss from '../components/ui/useModalDismiss';
@@ -90,6 +91,97 @@ function addPositiveDistributionPayload(rows, poItemId, outletId, qty) {
     outlet_id: outletId,
     qty: numericQty,
   });
+}
+
+// ─── PriceChangeDialog ────────────────────────────────────────────────────────
+// Info perubahan harga bahan yang terdeteksi otomatis saat penerimaan disimpan.
+// Harga master sudah di-update server; dialog ini murni informasi + link ke log.
+
+function PriceChangeDialog({ changes, onClose }) {
+  useModalDismiss(onClose);
+  const ups = changes.filter((c) => c.direction === 'up');
+  const downs = changes.filter((c) => c.direction === 'down');
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        <div className="px-6 py-4 border-b flex-shrink-0">
+          <h3 className="font-semibold text-gray-900 text-lg">
+            {ups.length > 0 ? '⚠ Ada Perubahan Harga Bahan' : 'Perubahan Harga Bahan'}
+          </h3>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {ups.length > 0 && (
+              <span className="text-red-600 font-medium">{ups.length} bahan naik</span>
+            )}
+            {ups.length > 0 && downs.length > 0 && <span> · </span>}
+            {downs.length > 0 && (
+              <span className="text-green-600 font-medium">{downs.length} bahan turun</span>
+            )}
+            <span>. Harga master sudah diperbarui otomatis dan tercatat di log.</span>
+          </p>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-2">
+          {changes.map((c, idx) => {
+            const isUp = c.direction === 'up';
+            return (
+              <div
+                key={idx}
+                className={`rounded-xl border p-3 ${
+                  isUp ? 'border-red-200 bg-red-50/60' : 'border-green-200 bg-green-50/60'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-800 text-sm leading-snug">
+                      {c.material_name}
+                      {c.brand && (
+                        <span className="ml-1.5 text-xs font-medium text-gray-500">
+                          ({c.brand})
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {c.supplier_name || 'Supplier tidak diketahui'}
+                      {c.purchase_unit && <span> · per {c.purchase_unit}</span>}
+                    </p>
+                  </div>
+                  <span
+                    className={`flex items-center gap-1 text-xs font-bold flex-shrink-0 ${
+                      isUp ? 'text-red-600' : 'text-green-600'
+                    }`}
+                  >
+                    {isUp ? (
+                      <TrendingUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <TrendingDown className="w-3.5 h-3.5" />
+                    )}
+                    {isUp ? '+' : ''}
+                    {formatRupiah(c.change_amount)}
+                    {c.change_pct !== null && ` (${isUp ? '+' : ''}${c.change_pct}%)`}
+                  </span>
+                </div>
+                <p className="text-sm mt-1.5">
+                  <span className="text-gray-400 line-through">{formatRupiah(c.old_price)}</span>
+                  <span className="mx-2 text-gray-400">→</span>
+                  <span className={`font-bold ${isUp ? 'text-red-600' : 'text-green-600'}`}>
+                    {formatRupiah(c.new_price)}
+                  </span>
+                </p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="px-6 py-4 border-t flex justify-end gap-2 flex-shrink-0">
+          <Link to="/price-logs" className="btn-outline text-sm">
+            Lihat Log Harga
+          </Link>
+          <button onClick={onClose} className="btn-primary text-sm">
+            Mengerti
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── QuickAddVariantModal ─────────────────────────────────────────────────────
@@ -859,7 +951,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
         }
       }
 
-      onSaved(syncWarning);
+      onSaved(syncWarning, res.data?.price_changes || []);
       onClose();
     } catch (err) {
       setError(err.response?.data?.error || err.message);
@@ -1498,6 +1590,7 @@ export default function PurchaseRecord() {
   const [openingPOId, setOpeningPOId] = useState(null);
   const [actionError, setActionError] = useState('');
   const [syncWarning, setSyncWarning] = useState('');
+  const [priceChanges, setPriceChanges] = useState([]);
 
   useEffect(() => {
     loadPOs();
@@ -1583,12 +1676,18 @@ export default function PurchaseRecord() {
         <ReceiveModal
           po={selectedPO}
           onClose={() => setSelectedPO(null)}
-          onSaved={(warning) => {
+          onSaved={(warning, changes) => {
             loadPOs();
             setSyncWarning(warning || '');
+            setPriceChanges(changes || []);
             setActionError('');
           }}
         />
+      )}
+
+      {/* Info perubahan harga bahan setelah penerimaan disimpan */}
+      {priceChanges.length > 0 && (
+        <PriceChangeDialog changes={priceChanges} onClose={() => setPriceChanges([])} />
       )}
 
       {/* Modal konfirmasi reset */}

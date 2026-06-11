@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const posStockSync = require('../services/posStockSync');
+const priceSync = require('../services/priceSync');
 const { fetchAllRows } = require('../services/fetchAll');
 
 const OPTIONAL_PO_ITEM_COLUMNS = [
@@ -597,7 +598,20 @@ router.put('/:po_id/receive', async (req, res) => {
   const posSync = wasAlreadyReceived
     ? await posStockSync.syncPOReviseToInventory(po_id, poStatus)
     : await posStockSync.syncPOReceiveToInventory(po_id, poStatus);
-  res.json({ ...po, has_discrepancy: hasDiscrepancy, pos_sync: posSync });
+
+  // Auto-update harga master bahan dari harga aktual penerimaan + tulis log.
+  // Non-fatal: kegagalan sinkron harga tidak menggagalkan penerimaan.
+  const priceResult = await priceSync.syncPricesFromReceive(po_id);
+  if (!priceResult.ok) {
+    console.error('Sinkronisasi harga bahan gagal:', priceResult.error);
+  }
+
+  res.json({
+    ...po,
+    has_discrepancy: hasDiscrepancy,
+    pos_sync: posSync,
+    price_changes: priceResult.changes || [],
+  });
 });
 
 // DELETE hapus PO yang masih pending/confirmed

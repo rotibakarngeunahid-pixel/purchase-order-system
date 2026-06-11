@@ -23,6 +23,7 @@ const financePortalRouter = require('./routes/financePortal');
 const dataDeletionRouter = require('./routes/dataDeletion');
 const distributionPhotosRouter = require('./routes/distributionPhotos');
 const inventoriRekomendasiRouter = require('./routes/inventoriRekomendasi');
+const priceLogsRouter = require('./routes/priceLogs');
 
 const app = express();
 
@@ -92,6 +93,7 @@ app.use('/api/holidays', authMiddleware, holidaysRouter);
 app.use('/api/data-deletion', authMiddleware, dataDeletionRouter);
 app.use('/api/distribution-photos', authMiddleware, distributionPhotosRouter);
 app.use('/api/inventori/rekomendasi', authMiddleware, inventoriRekomendasiRouter);
+app.use('/api/price-logs', authMiddleware, priceLogsRouter);
 
 // Global error handler
 app.use((err, req, res, next) => {

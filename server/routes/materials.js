@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
+const { logPriceChange } = require('../services/priceSync');
 
 router.get('/', async (req, res) => {
   const { data, error } = await supabase
@@ -22,6 +23,17 @@ router.post('/', async (req, res) => {
     .select('*, supplier:suppliers(id, name, wa_number)')
     .single();
   if (error) return res.status(500).json({ error: error.message });
+
+  // Catat harga awal sebagai baseline analisa harga
+  await logPriceChange({
+    materialId: data.id,
+    supplierId: data.supplier_id,
+    brand: data.brand,
+    oldPrice: null,
+    newPrice: data.price_per_purchase_unit,
+    source: 'initial',
+  });
+
   res.status(201).json(data);
 });
 
@@ -33,6 +45,17 @@ router.put('/:id', async (req, res) => {
     if (req.body[key] !== undefined) updates[key] = req.body[key];
   });
 
+  // Ambil harga lama dulu agar perubahan manual bisa dicatat di log harga
+  let oldPrice = null;
+  if (updates.price_per_purchase_unit !== undefined) {
+    const { data: existing } = await supabase
+      .from('materials')
+      .select('price_per_purchase_unit')
+      .eq('id', id)
+      .single();
+    oldPrice = existing?.price_per_purchase_unit ?? null;
+  }
+
   const { data, error } = await supabase
     .from('materials')
     .update(updates)
@@ -40,6 +63,19 @@ router.put('/:id', async (req, res) => {
     .select('*, supplier:suppliers(id, name, wa_number)')
     .single();
   if (error) return res.status(500).json({ error: error.message });
+
+  if (updates.price_per_purchase_unit !== undefined && oldPrice !== null) {
+    await logPriceChange({
+      materialId: id,
+      supplierId: data.supplier_id,
+      brand: data.brand,
+      oldPrice,
+      newPrice: data.price_per_purchase_unit,
+      source: 'manual',
+      note: 'Edit manual via Master Data',
+    });
+  }
+
   res.json(data);
 });
 
@@ -83,6 +119,18 @@ router.post('/:id/variants', async (req, res) => {
     .select('*, supplier:suppliers(id, name)')
     .single();
   if (error) return res.status(500).json({ error: error.message });
+
+  // Catat harga awal merk baru sebagai baseline analisa harga
+  await logPriceChange({
+    materialId: req.params.id,
+    variantId: data.id,
+    supplierId: data.supplier_id,
+    brand: data.brand,
+    oldPrice: null,
+    newPrice: data.price_per_purchase_unit,
+    source: 'initial',
+  });
+
   res.status(201).json(data);
 });
 
@@ -92,6 +140,18 @@ router.put('/:mid/variants/:vid', async (req, res) => {
   const updates = {};
   allowed.forEach((k) => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
   if (updates.supplier_id === '') updates.supplier_id = null;
+
+  // Ambil harga lama dulu agar perubahan manual bisa dicatat di log harga
+  let oldPrice = null;
+  if (updates.price_per_purchase_unit !== undefined) {
+    const { data: existing } = await supabase
+      .from('material_variants')
+      .select('price_per_purchase_unit')
+      .eq('id', req.params.vid)
+      .single();
+    oldPrice = existing?.price_per_purchase_unit ?? null;
+  }
+
   const { data, error } = await supabase
     .from('material_variants')
     .update(updates)
@@ -100,6 +160,20 @@ router.put('/:mid/variants/:vid', async (req, res) => {
     .select('*, supplier:suppliers(id, name)')
     .single();
   if (error) return res.status(500).json({ error: error.message });
+
+  if (updates.price_per_purchase_unit !== undefined && oldPrice !== null) {
+    await logPriceChange({
+      materialId: req.params.mid,
+      variantId: req.params.vid,
+      supplierId: data.supplier_id,
+      brand: data.brand,
+      oldPrice,
+      newPrice: data.price_per_purchase_unit,
+      source: 'manual',
+      note: 'Edit manual via Master Data',
+    });
+  }
+
   res.json(data);
 });
 
