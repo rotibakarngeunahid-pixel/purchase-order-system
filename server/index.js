@@ -47,6 +47,11 @@ app.use(
       if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
       // Izinkan semua subdomain rotibakarngeunah.my.id
       if (/^https?:\/\/[a-z0-9-]+\.rotibakarngeunah\.my\.id$/.test(origin)) return callback(null, true);
+      // Izinkan domain Vercel project ini sendiri (alias produksi + URL deployment/preview).
+      // Tanpa ini, POST dari halaman publik (mis. upload foto distribusi) ditolak
+      // saat diakses via *.vercel.app — browser selalu mengirim header Origin untuk POST.
+      if (/^https:\/\/purchase-order-system-[a-z0-9-]+\.vercel\.app$/.test(origin)) return callback(null, true);
+      if (/^https:\/\/purchaseorder-[a-z0-9-]+\.vercel\.app$/.test(origin)) return callback(null, true);
       callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
@@ -97,6 +102,13 @@ app.use('/api/price-logs', authMiddleware, priceLogsRouter);
 
 // Global error handler
 app.use((err, req, res, next) => {
+  // Penolakan CORS bukan kesalahan server — balas 403 dengan pesan jelas
+  // agar mudah didiagnosis (bukan 500 "Internal server error" generik)
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      error: `Akses dari origin ini tidak diizinkan (${req.headers.origin || 'tanpa origin'}).`,
+    });
+  }
   console.error(err.stack);
   res.status(500).json({ error: 'Internal server error' });
 });
