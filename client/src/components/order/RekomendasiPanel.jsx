@@ -140,9 +140,8 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
 
   const thisOutletItems = useMemo(() => {
     if (!currentOutlet) return items;
-    return items.filter(
-      (item) => item.nama_cabang.toLowerCase() === currentOutlet.name.toLowerCase()
-    );
+    const outletKey = (currentOutlet.inventori_cabang_name || currentOutlet.name).toLowerCase();
+    return items.filter((item) => item.nama_cabang.toLowerCase() === outletKey);
   }, [items, currentOutlet]);
 
   const filteredItems = useMemo(() => {

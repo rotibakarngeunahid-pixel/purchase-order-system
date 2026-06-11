@@ -640,7 +640,7 @@ function OutletsTab() {
   const [outlets, setOutlets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ name: '' });
+  const [form, setForm] = useState({ name: '', inventori_cabang_name: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -653,8 +653,8 @@ function OutletsTab() {
     setLoading(false);
   }
 
-  const startAdd = () => { setEditingId('new'); setForm({ name: '' }); setError(''); };
-  const startEdit = (o) => { setEditingId(o.id); setForm({ name: o.name }); setError(''); };
+  const startAdd = () => { setEditingId('new'); setForm({ name: '', inventori_cabang_name: '' }); setError(''); };
+  const startEdit = (o) => { setEditingId(o.id); setForm({ name: o.name, inventori_cabang_name: o.inventori_cabang_name || '' }); setError(''); };
   const cancelEdit = () => { setEditingId(null); setError(''); };
 
   const handleSave = async () => {
@@ -687,11 +687,15 @@ function OutletsTab() {
         <button onClick={startAdd} disabled={editingId !== null} className="btn-primary text-sm">+ Tambah Outlet</button>
       </div>
       {error && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
-      <div className="card overflow-hidden max-w-lg">
+      <div className="card overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-100">
               <th className="px-4 py-3 text-left font-medium text-gray-600">Nama Outlet</th>
+              <th className="px-4 py-3 text-left font-medium text-gray-600">
+                Nama di Inventori
+                <span className="block text-[10px] font-normal text-gray-400">Untuk cocokkan rekomendasi staff</span>
+              </th>
               <th className="px-4 py-3 text-center font-medium text-gray-600">Status</th>
               <th className="px-4 py-3 text-center font-medium text-gray-600">Aksi</th>
             </tr>
@@ -700,7 +704,10 @@ function OutletsTab() {
             {editingId === 'new' && (
               <tr className="bg-yellow-50">
                 <td className="px-4 py-2">
-                  <input autoFocus className="input text-sm" placeholder="Nama outlet" value={form.name} onChange={(e) => setForm({ name: e.target.value })} />
+                  <input autoFocus className="input text-sm" placeholder="Nama outlet" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                </td>
+                <td className="px-4 py-2">
+                  <input className="input text-sm" placeholder="Nama cabang di sistem inventori (opsional)" value={form.inventori_cabang_name} onChange={(e) => setForm((f) => ({ ...f, inventori_cabang_name: e.target.value }))} />
                 </td>
                 <td />
                 <td className="px-4 py-2 text-center">
@@ -715,7 +722,10 @@ function OutletsTab() {
               editingId === o.id ? (
                 <tr key={o.id} className="bg-yellow-50">
                   <td className="px-4 py-2">
-                    <input autoFocus className="input text-sm" value={form.name} onChange={(e) => setForm({ name: e.target.value })} />
+                    <input autoFocus className="input text-sm" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input className="input text-sm" placeholder="Nama cabang di sistem inventori (opsional)" value={form.inventori_cabang_name} onChange={(e) => setForm((f) => ({ ...f, inventori_cabang_name: e.target.value }))} />
                   </td>
                   <td />
                   <td className="px-4 py-2 text-center">
@@ -728,6 +738,9 @@ function OutletsTab() {
               ) : (
                 <tr key={o.id} className={`hover:bg-gray-50 ${!o.is_active ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3 font-medium text-gray-800">{o.name}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">
+                    {o.inventori_cabang_name || <span className="text-gray-300 italic">—</span>}
+                  </td>
                   <td className="px-4 py-3 text-center">
                     <button onClick={() => toggleActive(o)} className={`w-10 h-5 rounded-full transition-colors ${o.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
                       <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${o.is_active ? 'translate-x-5' : ''}`} />

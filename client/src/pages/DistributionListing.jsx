@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import axios from 'axios';
 import { toInputDate, formatDateID } from '../lib/api';
 
@@ -85,6 +86,130 @@ async function compressImage(file) {
   }
 }
 
+// ── Camera Capture Modal ─────────────────────────────────────────────────────
+
+function CameraCapture({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [ready, setReady] = useState(false);
+  const [camError, setCamError] = useState('');
+
+  useEffect(() => {
+    async function startCamera() {
+      try {
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+          });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          setReady(true);
+        }
+      } catch (err) {
+        if (err.name === 'NotAllowedError') {
+          setCamError('Izin kamera ditolak. Berikan akses kamera di pengaturan browser, lalu coba lagi.');
+        } else if (err.name === 'NotFoundError') {
+          setCamError('Kamera tidak ditemukan di perangkat ini.');
+        } else {
+          setCamError('Gagal membuka kamera. Pastikan tidak ada aplikasi lain yang memakai kamera.');
+        }
+      }
+    }
+    startCamera();
+    return () => { streamRef.current?.getTracks().forEach((t) => t.stop()); };
+  }, []);
+
+  function stopStream() {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }
+
+  function handleCapture() {
+    if (!videoRef.current || !ready) return;
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const file = new File([blob], `foto_${Date.now()}.jpg`, { type: 'image/jpeg' });
+      stopStream();
+      onCapture(file);
+    }, 'image/jpeg', 0.92);
+  }
+
+  function handleClose() {
+    stopStream();
+    onClose();
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+      {camError ? (
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-4">
+          <div className="text-5xl">📷</div>
+          <p className="text-white text-sm leading-relaxed">{camError}</p>
+          <button
+            onClick={handleClose}
+            className="bg-white text-black px-6 py-2.5 rounded-xl font-semibold text-sm"
+          >
+            Tutup
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="relative flex-1 overflow-hidden bg-black">
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              playsInline
+              muted
+              autoPlay
+            />
+            {!ready && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+            <button
+              onClick={handleClose}
+              className="absolute top-4 right-4 w-10 h-10 bg-black/50 text-white rounded-full flex items-center justify-center text-xl font-bold"
+            >
+              ✕
+            </button>
+            <div className="absolute top-4 left-4 bg-black/50 rounded-lg px-3 py-1">
+              <p className="text-white text-xs font-medium">Arahkan kamera ke bahan</p>
+            </div>
+          </div>
+          <div className="bg-black py-6 flex items-center justify-center">
+            <button
+              onClick={handleCapture}
+              disabled={!ready}
+              aria-label="Ambil foto"
+              className={`w-18 h-18 rounded-full border-4 flex items-center justify-center transition-all active:scale-90 ${
+                ready ? 'border-white' : 'border-gray-600'
+              }`}
+              style={{ width: 72, height: 72 }}
+            >
+              <div className={`rounded-full transition-colors ${
+                ready ? 'bg-white w-14 h-14' : 'bg-gray-600 w-14 h-14'
+              }`} />
+            </button>
+          </div>
+        </>
+      )}
+    </div>,
+    document.body
+  );
+}
+
 // ── Photo Upload Card ────────────────────────────────────────────────────────
 
 function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadSuccess }) {
@@ -96,7 +221,7 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
   const [uploadedPhotos, setUploadedPhotos] = useState(alreadyUploaded || null);
   const [lightboxUrl, setLightboxUrl] = useState(null);
   const [showTooltip, setShowTooltip] = useState(false);
-  const fileInputRef = useRef(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   useEffect(() => {
     publicApi.get('/api/public/distribution/photo-guide')
@@ -121,19 +246,9 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
   const instruction = guide?.instruction || defaultInstruction;
   const examplePhotos = guide?.example_photos || [];
 
-  const handleFileSelect = (e) => {
-    const file = (e.target.files || [])[0];
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const handleCapturedFile = (file) => {
+    setCameraOpen(false);
     if (!file) return;
-
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
-      setUploadError(`${file.name}: Format tidak didukung.`);
-      return;
-    }
-    if (file.size > 10 * 1024 * 1024) {
-      setUploadError(`${file.name}: Terlalu besar. Maksimal 10MB.`);
-      return;
-    }
     setUploadError('');
     setSelectedPhotos((prev) => {
       prev.forEach((p) => URL.revokeObjectURL(p.preview));
@@ -337,25 +452,27 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
           )}
         </div>
 
+        {/* Camera modal */}
+        {cameraOpen && (
+          <CameraCapture
+            onCapture={handleCapturedFile}
+            onClose={() => setCameraOpen(false)}
+          />
+        )}
+
         {/* Upload zone */}
         {selectedPhotos.length === 0 && uploadStatus === 'idle' && (
-          <label className="block cursor-pointer">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="sr-only"
-              onChange={handleFileSelect}
-            />
-            <div className="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center hover:border-blue-400 hover:bg-blue-50/50 transition-colors active:scale-[0.99]">
-              <div className="text-4xl mb-2">📷</div>
-              <p className="text-sm font-semibold text-blue-700">Ketuk untuk ambil foto langsung</p>
-              <p className="text-xs text-gray-400 mt-1">
-                1 foto bukti • Foto harus diambil langsung (kamera)
-              </p>
-            </div>
-          </label>
+          <button
+            type="button"
+            onClick={() => setCameraOpen(true)}
+            className="w-full border-2 border-dashed border-blue-300 rounded-xl p-6 text-center hover:border-blue-400 hover:bg-blue-50/50 transition-colors active:scale-[0.99]"
+          >
+            <div className="text-4xl mb-2">📷</div>
+            <p className="text-sm font-semibold text-blue-700">Ketuk untuk ambil foto langsung</p>
+            <p className="text-xs text-gray-400 mt-1">
+              1 foto bukti • Foto harus diambil langsung (kamera)
+            </p>
+          </button>
         )}
 
         {/* Inline file error */}
