@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import api, { formatDateID } from '../../lib/api';
+import api, { formatDateID, getLocalOperationalYesterday } from '../../lib/api';
 
 function PhotoLightbox({ url, onClose }) {
   useEffect(() => {
@@ -118,8 +118,10 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get('/api/inventori/rekomendasi?status=pending');
-      setItems(res.data?.data || []);
+      const yesterday = getLocalOperationalYesterday();
+      const res = await api.get(`/api/inventori/rekomendasi?status=pending&tanggal=${yesterday}`);
+      const all = res.data?.data || [];
+      setItems(all.filter((item) => item.tanggal && item.tanggal.startsWith(yesterday)));
     } catch (err) {
       if (err.response?.status === 503) {
         setError('Integrasi inventori belum aktif di server. Hubungi admin untuk mengatur env INVENTORI_GAS_URL & INVENTORI_API_KEY di Vercel.');

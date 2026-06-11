@@ -6,7 +6,7 @@ const GAS_KEY = () => (process.env.INVENTORI_API_KEY || '').trim();
 
 // GET /api/inventori/rekomendasi?status=pending
 router.get('/', async (req, res) => {
-  const { status = 'pending', cabang_id, bahan_id } = req.query;
+  const { status = 'pending', cabang_id, bahan_id, tanggal } = req.query;
   const url = GAS_URL();
   const key = GAS_KEY();
 
@@ -21,6 +21,7 @@ router.get('/', async (req, res) => {
   const params = new URLSearchParams({ action: 'getRekomendasiOrder', status, api_key: key });
   if (cabang_id) params.append('cabang_id', cabang_id);
   if (bahan_id)  params.append('bahan_id',  bahan_id);
+  if (tanggal)   params.append('tanggal',   tanggal);
 
   try {
     const controller = new AbortController();
