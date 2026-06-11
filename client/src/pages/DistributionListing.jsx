@@ -22,6 +22,9 @@ function loadUploadedPhotos(date, outletName) {
 function saveUploadedPhotos(date, outletName, data) {
   localStorage.setItem(PHOTO_KEY(date, outletName), JSON.stringify(data));
 }
+function clearUploadedPhotos(date, outletName) {
+  localStorage.removeItem(PHOTO_KEY(date, outletName));
+}
 
 function mergeOutletTabs(masterOutlets, distributionOutlets) {
   const map = new Map((masterOutlets || []).map((outlet) => [String(outlet.id), outlet]));
@@ -214,6 +217,21 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
       selectedPhotos.forEach((p) => URL.revokeObjectURL(p.preview));
       setSelectedPhotos([]);
     } catch (err) {
+      // 409 = foto hari ini sudah pernah dikirim (mis. dari HP lain) → tampilkan foto yang ada
+      if (err.response?.status === 409 && err.response.data?.already_uploaded) {
+        const uploadData = {
+          photos: err.response.data.photos || [],
+          uploadedAt: err.response.data.uploaded_at || new Date().toISOString(),
+        };
+        setUploadStatus('done');
+        setUploadProgress('');
+        setUploadedPhotos(uploadData);
+        saveUploadedPhotos(date, outletName, uploadData);
+        onUploadSuccess?.(uploadData);
+        selectedPhotos.forEach((p) => URL.revokeObjectURL(p.preview));
+        setSelectedPhotos([]);
+        return;
+      }
       setUploadStatus('error');
       setUploadError(`${extractErrorMessage(err)} Periksa koneksi dan coba lagi.`);
       setUploadProgress('');
@@ -254,7 +272,10 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
         <div className="p-4">
           <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
             <p className="text-green-700 font-semibold text-sm">
-              ✅ Foto bukti berhasil dikirim — {ts}
+              ✅ Foto bukti berhasil dikirim{ts ? ` — ${ts}` : ''}
+            </p>
+            <p className="text-green-600/80 text-xs mt-1">
+              Foto bukti hanya bisa dikirim 1× per hari untuk setiap cabang.
             </p>
             {uploadedPhotos.failed > 0 && (
               <p className="text-yellow-600 text-xs mt-1">
@@ -490,9 +511,30 @@ export default function DistributionListing() {
   }, [date, selectedOutletId]);
 
   useEffect(() => {
-    if (date && selectedOutletName) {
-      setAlreadyUploaded(loadUploadedPhotos(date, selectedOutletName));
-    }
+    if (!date || !selectedOutletName) return undefined;
+
+    // Tampilkan cache lokal dulu (cepat), lalu konfirmasi ke server (sumber kebenaran).
+    // Tanpa cek server, staff bisa upload ulang dari HP/browser lain.
+    setAlreadyUploaded(loadUploadedPhotos(date, selectedOutletName));
+
+    let cancelled = false;
+    publicApi
+      .get('/api/public/distribution/photo-status', { params: { branch: selectedOutletName, date } })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.data?.uploaded) {
+          const data = { photos: res.data.photos || [], uploadedAt: res.data.uploaded_at };
+          setAlreadyUploaded(data);
+          saveUploadedPhotos(date, selectedOutletName, data);
+        } else {
+          // Server bilang belum ada foto — buang cache lokal basi (mis. dihapus admin)
+          clearUploadedPhotos(date, selectedOutletName);
+          setAlreadyUploaded(null);
+        }
+      })
+      .catch(() => {}); // offline/gagal → tetap pakai cache lokal
+
+    return () => { cancelled = true; };
   }, [date, selectedOutletName]);
 
   // ── Handlers ──

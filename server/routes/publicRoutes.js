@@ -94,6 +94,25 @@ async function processAndWatermark(buffer, branchName, witaTime) {
     .toBuffer();
 }
 
+// Foto bukti dibatasi 1x per cabang per hari — cari record yang sudah ada
+async function findExistingPhotos(branch, date) {
+  const { data, error } = await supabase
+    .from('distribution_photos')
+    .select('photos, uploaded_at')
+    .eq('branch', branch)
+    .eq('date', date)
+    .order('uploaded_at', { ascending: true });
+
+  if (error) throw error;
+
+  const records = data || [];
+  if (records.length === 0) return null;
+  return {
+    photos: records.flatMap((r) => r.photos || []),
+    uploaded_at: records[0].uploaded_at,
+  };
+}
+
 const FINAL_RECEIPT_STATUSES = ['received', 'received_partial'];
 
 function isRotiTawar(name) {
@@ -511,6 +530,21 @@ router.post('/distribution/upload-photo', (req, res) => {
     const photoDate = date || `${year}-${month}-${day}`;
     const branchSlug = branch.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+    // Satu foto bukti per cabang per hari — tolak jika sudah pernah kirim
+    try {
+      const existing = await findExistingPhotos(branch, photoDate);
+      if (existing) {
+        return res.status(409).json({
+          error: 'Foto bukti untuk cabang ini sudah dikirim hari ini.',
+          already_uploaded: true,
+          ...existing,
+        });
+      }
+    } catch (checkErr) {
+      console.error('[DistPhotos] Pre-upload check error:', checkErr.message);
+      return res.status(500).json({ error: 'Gagal memeriksa status foto. Coba lagi.' });
+    }
+
     await ensureDistribusiBucket();
 
     const results = [];
@@ -579,6 +613,15 @@ router.post('/distribution/upload-photo', (req, res) => {
     });
 
     if (dbError) {
+      // 23505 = unique violation (race dua upload bersamaan) → perlakukan sebagai sudah terkirim
+      if (dbError.code === '23505') {
+        const existing = await findExistingPhotos(branch, photoDate).catch(() => null);
+        return res.status(409).json({
+          error: 'Foto bukti untuk cabang ini sudah dikirim hari ini.',
+          already_uploaded: true,
+          ...(existing || { photos: [], uploaded_at: null }),
+        });
+      }
       console.error('[DistPhotos] DB save error:', dbError.message);
       return res.status(500).json({
         error: 'Foto terunggah tapi gagal tercatat di arsip admin. Coba kirim ulang.',
@@ -598,6 +641,23 @@ router.post('/distribution/upload-photo', (req, res) => {
       console.error('[DistPhotos] Background cleanup error:', err.message)
     );
   });
+});
+
+// GET /api/public/distribution/photo-status?branch=&date=
+// Cek apakah cabang sudah mengirim foto bukti untuk tanggal tertentu
+router.get('/distribution/photo-status', async (req, res) => {
+  const { branch, date } = req.query;
+  if (!branch || !date) {
+    return res.status(400).json({ error: 'Parameter branch dan date wajib diisi.' });
+  }
+
+  try {
+    const existing = await findExistingPhotos(branch, date);
+    if (!existing) return res.json({ uploaded: false });
+    res.json({ uploaded: true, ...existing });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/public/distribution/photo-guide
