@@ -3,9 +3,12 @@ const router = express.Router();
 const supabase = require('../services/supabase');
 const multer = require('multer');
 // Supabase Storage digunakan sebagai backend upload foto distribusi.
-let sharpLib;
-try { sharpLib = require('sharp'); } catch { sharpLib = null; }
 const { cleanupOldDistributionPhotos } = require('../services/photoCleanup');
+const {
+  processAndWatermark,
+  getWITATime,
+  isSharpAvailable,
+} = require('../services/photoWatermark');
 
 // ── Upload helpers ──────────────────────────────────────────────────────────
 
@@ -19,16 +22,6 @@ const uploadMiddleware = multer({
     cb(err);
   },
 });
-
-// WITA = UTC+8
-function getWITATime() {
-  return new Date(Date.now() + 8 * 60 * 60 * 1000);
-}
-
-function formatWITA(d) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)}/${d.getUTCFullYear()} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
-}
 
 function randomStr(n) {
   return Array.from({ length: n }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
@@ -46,52 +39,6 @@ async function ensureDistribusiBucket() {
   } catch (err) {
     console.error('[DistPhotos] Bucket init error:', err.message);
   }
-}
-
-function escapeXml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-// Resize ke maks 1920px, watermark WITA, encode WebP quality 75 effort 6
-async function processAndWatermark(buffer, branchName, witaTime) {
-  if (!sharpLib) return buffer;
-
-  const MAX_DIM = 1920;
-
-  // Pass 1: auto-rotate + resize → dapatkan dimensi final
-  const { data: resizedBuf, info } = await sharpLib(buffer)
-    .rotate()
-    .resize(MAX_DIM, MAX_DIM, { fit: 'inside', withoutEnlargement: true })
-    .toBuffer({ resolveWithObject: true });
-
-  const w = info.width;
-  const h = info.height;
-
-  // Bangun SVG watermark sesuai dimensi final
-  const fontSize = Math.max(14, Math.round(w * 0.018));
-  const text = `RBN • ${escapeXml(branchName)} • ${formatWITA(witaTime)} WITA`;
-  const textW = Math.round(text.length * fontSize * 0.58);
-  const padH = 12;
-  const padV = 7;
-  const barH = fontSize + padV * 2;
-  const barY = h - barH - 10;
-  const svgBuf = Buffer.from(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
-    `<rect x="${w - textW - padH * 2}" y="${barY}" width="${textW + padH * 2}" height="${barH}" rx="4" fill="rgba(0,0,0,0.60)"/>` +
-    `<text x="${w - padH}" y="${barY + padV + fontSize - 2}" font-family="Arial,Helvetica,sans-serif" font-size="${fontSize}" fill="white" text-anchor="end">${text}</text>` +
-    `</svg>`
-  );
-
-  // Pass 2: composite watermark + encode WebP (quality 75, effort 6)
-  return sharpLib(resizedBuf)
-    .composite([{ input: svgBuf, blend: 'over' }])
-    .webp({ quality: 75, effort: 6, smartSubsample: true })
-    .toBuffer();
 }
 
 // Foto bukti dibatasi 1x per cabang per hari — cari record yang sudah ada
@@ -560,7 +507,7 @@ router.post('/distribution/upload-photo', (req, res) => {
       try {
         try {
           buffer = await processAndWatermark(file.buffer, branch, witaNow);
-          converted = !!sharpLib;
+          converted = isSharpAvailable();
         } catch (convErr) {
           console.error('[DistPhotos] WebP conversion error, using original:', convErr.message);
         }

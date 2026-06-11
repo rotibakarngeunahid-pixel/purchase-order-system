@@ -378,38 +378,82 @@ function PhotoUploadCard({ outletName, date, allDone, alreadyUploaded, onUploadS
           hour: '2-digit', minute: '2-digit',
         })
       : '';
+    const mainPhoto = uploadedPhotos.photos[0];
+    const extraPhotos = uploadedPhotos.photos.slice(1);
     return (
       <div className="bg-white rounded-2xl shadow-sm overflow-hidden">
         {Lightbox}
-        <div className="px-4 py-3.5 bg-green-50 border-b border-green-100">
-          <h2 className="font-bold text-green-700 text-base">📷 Foto Bukti Bahan Masuk</h2>
+
+        {/* Header sukses */}
+        <div className="px-4 py-3.5 bg-gradient-to-r from-green-600 to-emerald-500 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-xl flex-shrink-0">
+            ✅
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-bold text-white text-base leading-tight">Foto Bukti Terkirim</h2>
+            <p className="text-green-50/90 text-xs mt-0.5">
+              Bahan masuk hari ini sudah terdokumentasi
+            </p>
+          </div>
         </div>
-        <div className="p-4">
-          <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
-            <p className="text-green-700 font-semibold text-sm">
-              ✅ Foto bukti berhasil dikirim{ts ? ` — ${ts}` : ''}
-            </p>
-            <p className="text-green-600/80 text-xs mt-1">
-              Foto bukti hanya bisa dikirim 1× per hari untuk setiap cabang.
-            </p>
-            {uploadedPhotos.failed > 0 && (
-              <p className="text-yellow-600 text-xs mt-1">
-                {uploadedPhotos.failed} foto gagal diunggah
-              </p>
-            )}
+
+        <div className="p-4 space-y-3">
+          {/* Preview foto besar — ketuk untuk perbesar */}
+          <div
+            className="relative rounded-xl overflow-hidden bg-gray-100 border border-green-200 cursor-pointer active:opacity-90 shadow-sm"
+            style={{ aspectRatio: '4/3' }}
+            onClick={() => setLightboxUrl(mainPhoto.url)}
+          >
+            <img
+              src={mainPhoto.url}
+              alt="Foto bukti bahan masuk"
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+            <div className="absolute top-2.5 right-2.5 bg-green-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-md">
+              ✓ Terkirim
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent px-3 pt-6 pb-2">
+              <p className="text-white text-[11px] font-semibold">🔍 Ketuk untuk perbesar</p>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-3">
-            {uploadedPhotos.photos.map((photo, idx) => (
-              <div key={idx} className="relative">
-                <div className="w-24 h-24 rounded-xl overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer" onClick={() => setLightboxUrl(photo.url)}>
-                  <img src={photo.url} alt={photo.filename} className="w-full h-full object-cover" loading="lazy" />
+
+          {/* Foto tambahan (data lama bisa berisi lebih dari 1) */}
+          {extraPhotos.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {extraPhotos.map((photo, idx) => (
+                <div
+                  key={idx}
+                  className="w-20 h-20 rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer active:opacity-80"
+                  onClick={() => setLightboxUrl(photo.url)}
+                >
+                  <img src={photo.url} alt={`Foto bukti ${idx + 2}`} className="w-full h-full object-cover" loading="lazy" />
                 </div>
-                <p className="text-[10px] text-gray-400 mt-1 w-24 truncate text-center" title={photo.filename}>
-                  {photo.filename}
-                </p>
-              </div>
-            ))}
+              ))}
+            </div>
+          )}
+
+          {/* Detail pengiriman */}
+          <div className="bg-gray-50 rounded-xl divide-y divide-gray-100 border border-gray-100">
+            <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+              <span className="text-xs text-gray-500">🏪 Cabang</span>
+              <span className="text-sm font-semibold text-gray-800 text-right truncate">{outletName}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+              <span className="text-xs text-gray-500">🕐 Waktu kirim</span>
+              <span className="text-sm font-semibold text-gray-800">{ts || '—'}</span>
+            </div>
           </div>
+
+          {uploadedPhotos.failed > 0 && (
+            <p className="text-yellow-600 text-xs bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
+              ⚠ {uploadedPhotos.failed} foto gagal diunggah
+            </p>
+          )}
+
+          <p className="text-[11px] text-gray-400 text-center">
+            Foto bukti hanya bisa dikirim 1× per hari untuk setiap cabang.
+          </p>
         </div>
       </div>
     );
