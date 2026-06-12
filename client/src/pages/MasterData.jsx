@@ -635,6 +635,31 @@ function MaterialsTab() {
   );
 }
 
+function CabangSelect({ value, onChange, options }) {
+  if (options.length === 0) {
+    return (
+      <input
+        className="input text-sm"
+        placeholder="Nama cabang di sistem inventori (opsional)"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  return (
+    <select
+      className="input text-sm"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">— Pilih cabang inventori —</option>
+      {options.map((c) => (
+        <option key={c.cabang_id} value={c.nama_cabang}>{c.nama_cabang}</option>
+      ))}
+    </select>
+  );
+}
+
 // ─── Outlets Tab ──────────────────────────────────────────────────────────────
 function OutletsTab() {
   const [outlets, setOutlets] = useState([]);
@@ -643,8 +668,14 @@ function OutletsTab() {
   const [form, setForm] = useState({ name: '', inventori_cabang_name: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [inventoriCabangList, setInventoriCabangList] = useState([]);
 
-  useEffect(() => { loadOutlets(); }, []);
+  useEffect(() => {
+    loadOutlets();
+    api.get('/api/inventori/cabang')
+      .then((res) => setInventoriCabangList(res.data?.data || []))
+      .catch(() => {});
+  }, []);
 
   async function loadOutlets() {
     setLoading(true);
@@ -707,7 +738,7 @@ function OutletsTab() {
                   <input autoFocus className="input text-sm" placeholder="Nama outlet" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                 </td>
                 <td className="px-4 py-2">
-                  <input className="input text-sm" placeholder="Nama cabang di sistem inventori (opsional)" value={form.inventori_cabang_name} onChange={(e) => setForm((f) => ({ ...f, inventori_cabang_name: e.target.value }))} />
+                  <CabangSelect value={form.inventori_cabang_name} onChange={(v) => setForm((f) => ({ ...f, inventori_cabang_name: v }))} options={inventoriCabangList} />
                 </td>
                 <td />
                 <td className="px-4 py-2 text-center">
@@ -725,7 +756,7 @@ function OutletsTab() {
                     <input autoFocus className="input text-sm" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                   </td>
                   <td className="px-4 py-2">
-                    <input className="input text-sm" placeholder="Nama cabang di sistem inventori (opsional)" value={form.inventori_cabang_name} onChange={(e) => setForm((f) => ({ ...f, inventori_cabang_name: e.target.value }))} />
+                    <CabangSelect value={form.inventori_cabang_name} onChange={(v) => setForm((f) => ({ ...f, inventori_cabang_name: v }))} options={inventoriCabangList} />
                   </td>
                   <td />
                   <td className="px-4 py-2 text-center">
