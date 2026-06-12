@@ -238,10 +238,17 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
             )}
 
             {!loading && !error && filteredItems.length === 0 && (
-              <p className="text-xs text-gray-400 text-center py-3">
-                ✅ Tidak ada rekomendasi
-                {isPerOutlet && !showAll && currentOutlet ? ` untuk ${currentOutlet.name}` : ''}.
-              </p>
+              <div className="py-2">
+                <p className="text-xs text-gray-400 text-center py-2">
+                  ✅ Tidak ada rekomendasi
+                  {isPerOutlet && !showAll && currentOutlet ? ` untuk ${currentOutlet.name}` : ''}.
+                </p>
+                {isPerOutlet && !showAll && currentOutlet && !currentOutlet.inventori_cabang_name && totalCount > 0 && (
+                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-1 text-center">
+                    ⚠ Outlet ini belum dipetakan ke cabang inventori ({totalCount} rekomendasi ada di tab "Semua"). Atur kolom <strong>"Nama di Inventori"</strong> di Master Data → Outlet.
+                  </p>
+                )}
+              </div>
             )}
 
             {!loading && !error && filteredItems.length > 0 && (
