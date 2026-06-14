@@ -722,4 +722,24 @@ router.put('/:po_id/reset', async (req, res) => {
   res.json({ ...updated, pos_sync: posSync });
 });
 
+// POST re-trigger sinkronisasi stok ke POS untuk PO yang sudah diterima
+// Berguna saat: env var POS_API_URL baru ditambah, mapping baru dikonfigurasi, atau sync sebelumnya gagal
+router.post('/:po_id/resync', async (req, res) => {
+  const { po_id } = req.params;
+
+  const { data: po, error: fetchError } = await supabase
+    .from('purchase_orders')
+    .select('id, status')
+    .eq('id', po_id)
+    .single();
+
+  if (fetchError || !po) return res.status(404).json({ error: 'PO tidak ditemukan' });
+  if (!['received', 'received_partial'].includes(po.status)) {
+    return res.status(400).json({ error: `PO berstatus '${po.status}', hanya PO yang sudah diterima yang bisa di-resync.` });
+  }
+
+  const posSync = await posStockSync.syncPOReviseToInventory(po_id, po.status);
+  res.json({ success: true, pos_sync: posSync });
+});
+
 module.exports = router;
