@@ -452,6 +452,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [outlets, setOutlets] = useState([]);
   // Jumlah item tambahan berharga Rp 0 yang menunggu konfirmasi simpan
   const [zeroPriceConfirmCount, setZeroPriceConfirmCount] = useState(0);
+  // Nama bahan yang qty_received > 0 tapi belum ada distribusi cabang sama sekali
+  const [noDistWarningItems, setNoDistWarningItems] = useState([]);
   // branchDistributions: { [po_item_id | _tempId]: { [outlet_id]: qty_string } }
   // Digunakan untuk ORDERED items (keyed by po_item_id) dan ADJ items (keyed by _tempId/id)
   const [branchDistributions, setBranchDistributions] = useState(() => {
@@ -866,6 +868,18 @@ function ReceiveModal({ po, onClose, onSaved }) {
       return;
     }
 
+    // Peringatan distribusi cabang kosong — stok POS tidak bisa masuk tanpa data ini
+    const emptyDist = orderedItems.filter((item) => {
+      if (!(Number(item.qty_received) > 0)) return false;
+      const distMap = branchDistributions[item.id] || {};
+      const totalDist = Object.values(distMap).reduce((s, q) => s + (Number(q) || 0), 0);
+      return totalDist === 0;
+    });
+    if (emptyDist.length > 0) {
+      setNoDistWarningItems(emptyDist.map((i) => i.material?.name || 'Bahan tanpa nama'));
+      return;
+    }
+
     await doSave();
   };
 
@@ -1006,6 +1020,27 @@ function ReceiveModal({ po, onClose, onSaved }) {
         >
           {zeroPriceConfirmCount} item tambahan memiliki harga Rp 0 dan tidak akan
           terhitung di total pengeluaran. Lanjutkan menyimpan?
+        </ConfirmDialog>
+      )}
+      {noDistWarningItems.length > 0 && (
+        <ConfirmDialog
+          title="Distribusi Cabang Belum Diisi"
+          confirmLabel="Simpan Tanpa Distribusi"
+          onConfirm={async () => {
+            setNoDistWarningItems([]);
+            await doSave();
+          }}
+          onCancel={() => setNoDistWarningItems([])}
+        >
+          <p className="mb-2">
+            Bahan berikut belum ada distribusi cabangnya, sehingga stok POS <strong>tidak akan bertambah</strong> secara otomatis:
+          </p>
+          <ul className="list-disc list-inside text-sm text-red-700 mb-2">
+            {noDistWarningItems.map((name, i) => <li key={i}>{name}</li>)}
+          </ul>
+          <p className="text-sm text-gray-600">
+            Scroll ke bagian <strong>Distribusi Bahan ke Cabang</strong> dan isi berapa qty yang diterima tiap cabang, lalu simpan ulang.
+          </p>
         </ConfirmDialog>
       )}
 
