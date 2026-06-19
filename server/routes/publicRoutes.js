@@ -208,49 +208,61 @@ async function getPurchaseReportDistributionItems(date) {
   }));
 }
 
-async function getAdjustmentDistributionItems(sessionId) {
+// Bahan tambahan (source=adjustment) dipecah PER CABANG sesuai distribusi yang
+// tersimpan, agar muncul di tab tiap cabang (Buduk, Pemogan, dst.) — bukan satu
+// grup "Bahan Menyusul" terpisah. Tiap baris = (bahan tambahan × cabang).
+async function getAdjustmentBranchItems(sessionId) {
   const { data: finalPOs, error: poError } = await supabase
     .from('purchase_orders')
-    .select('id, supplier:suppliers(id, name)')
+    .select('id')
     .eq('session_id', sessionId)
     .in('status', FINAL_RECEIPT_STATUSES);
 
   if (poError) throw poError;
 
-  const poMap = {};
-  const finalPOIds = (finalPOs || []).map((po) => {
-    poMap[po.id] = po;
-    return po.id;
-  }).filter(Boolean);
-
+  const finalPOIds = (finalPOs || []).map((po) => po.id).filter(Boolean);
   if (finalPOIds.length === 0) return [];
 
   const { data, error } = await supabase
     .from('purchase_order_items')
     .select(`
       id, po_id, material_id, qty_received, source, adjustment_note, variant_id,
-      material:materials(id, name, purchase_unit)
+      material:materials(id, name, purchase_unit),
+      branch_distributions:purchase_item_branch_distribution(outlet_id, qty, outlet:outlets(id, name))
     `)
     .in('po_id', finalPOIds)
     .eq('source', 'adjustment')
     .gt('qty_received', 0);
 
   if (error && isMissingSourceColumnError(error)) return [];
+  // Tabel distribusi belum ada (migration belum jalan) → jangan gagalkan halaman
+  if (error && String(error.message || '').toLowerCase().includes('purchase_item_branch_distribution')) {
+    return [];
+  }
   if (error) throw error;
 
-  return (data || []).map((item) => {
-    const po = poMap[item.po_id];
-    return {
-      id: `adjustment-${item.id}`,
-      material_id: item.material_id,
-      material_name: item.material?.name,
-      purchase_unit: item.material?.purchase_unit,
-      qty: item.qty_received,
-      source: 'adjustment',
-      adjustment_note: item.adjustment_note,
-      supplier: po?.supplier || null,
-    };
+  const rows = [];
+  (data || []).forEach((item) => {
+    (item.branch_distributions || []).forEach((dist) => {
+      const qty = Number(dist.qty || 0);
+      if (!dist.outlet_id || qty <= 0) return;
+      rows.push({
+        outlet: dist.outlet || { id: dist.outlet_id, name: dist.outlet_id },
+        item: {
+          // ID unik per (item × cabang) agar checklist & key tidak bentrok antar tab
+          id: `adjustment-${item.id}-${dist.outlet_id}`,
+          material_id: item.material_id,
+          material_name: item.material?.name,
+          purchase_unit: item.material?.purchase_unit,
+          qty,
+          source: 'adjustment',
+          adjustment_note: item.adjustment_note || null,
+        },
+      });
+    });
   });
+
+  return rows;
 }
 
 // Distribusi: publik, tidak perlu login
@@ -373,24 +385,22 @@ router.get('/distribution', async (req, res) => {
     outletMap[oid].items.push(item);
   });
 
-  let outlets = Object.values(outletMap);
+  // Bahan tambahan: masukkan ke tab cabang masing-masing sesuai distribusi tersimpan
   if (session) {
     try {
-      const adjustmentItems = await getAdjustmentDistributionItems(session.id);
-      if (adjustmentItems.length > 0) {
-        outlets = [
-          ...outlets,
-          {
-            outlet: { id: '__adjustments__', name: 'Bahan Menyusul' },
-            is_adjustment_group: true,
-            items: adjustmentItems,
-          },
-        ];
-      }
+      const adjustmentBranchItems = await getAdjustmentBranchItems(session.id);
+      adjustmentBranchItems.forEach(({ outlet, item }) => {
+        const oid = outlet?.id;
+        if (!oid) return;
+        if (!outletMap[oid]) outletMap[oid] = { outlet, items: [] };
+        outletMap[oid].items.push(item);
+      });
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }
   }
+
+  const outlets = Object.values(outletMap);
 
   res.json({
     date,

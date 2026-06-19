@@ -609,6 +609,16 @@ function ReceiveModal({ po, onClose, onSaved }) {
       ...prev,
       [itemId]: { ...(prev[itemId] || {}), [outletId]: qty },
     }));
+    // Untuk bahan tambahan, mengisi distribusi = mengisi qty. Hapus error baris
+    // terkait begitu user mulai mendistribusikan.
+    const adj = adjustmentItems.find((item) => (item.id || item._tempId) === itemId);
+    if (adj && rowErrors[adj._tempId]) {
+      setRowErrors((prev) => {
+        const next = { ...prev };
+        delete next[adj._tempId];
+        return next;
+      });
+    }
   };
 
   const removeAdjustmentRow = (tempId) => {
@@ -634,13 +644,6 @@ function ReceiveModal({ po, onClose, onSaved }) {
     setAdjustmentItems((prev) =>
       prev.map((item) => (item._tempId === tempId ? { ...item, [field]: value } : item))
     );
-    if (field === 'qty_received') {
-      const item = adjustmentItems.find((i) => i._tempId === tempId);
-      const itemKey = item?.id || tempId;
-      setBranchDistributions((prev) =>
-        reconcileDistributionForReceivedQty(prev, itemKey, value)
-      );
-    }
     if (rowErrors[tempId]) {
       setRowErrors((prev) => {
         const next = { ...prev };
@@ -788,12 +791,20 @@ function ReceiveModal({ po, onClose, onSaved }) {
 
   // ── Derived values ──
 
+  // Untuk bahan tambahan, distribusi cabang adalah SUMBER KEBENARAN qty diterima:
+  // qty diterima = total distribusi ke semua cabang. Biaya = qty × harga/satuan.
+  const adjKey = (item) => item.id || item._tempId;
+  const getAdjDistTotal = (item) => {
+    const distMap = branchDistributions[adjKey(item)] || {};
+    return Object.values(distMap).reduce((sum, qty) => sum + (Number(qty) || 0), 0);
+  };
+
   const orderedActualTotal = orderedItems.reduce(
     (sum, item) => sum + Number(item.qty_received || 0) * Number(item.price_actual || 0),
     0
   );
   const adjustmentTotal = adjustmentItems.reduce(
-    (sum, item) => sum + Number(item.qty_received || 0) * Number(item.price_actual || 0),
+    (sum, item) => sum + getAdjDistTotal(item) * Number(item.price_actual || 0),
     0
   );
   const totalActual = orderedActualTotal + adjustmentTotal;
@@ -848,11 +859,13 @@ function ReceiveModal({ po, onClose, onSaved }) {
       if (!adj.material_id) {
         errors[adj._tempId] = 'Pilih bahan terlebih dahulu';
         hasErrors = true;
-      } else if (!adj.qty_received || Number(adj.qty_received) <= 0) {
-        errors[adj._tempId] = 'Qty diterima harus lebih dari 0';
-        hasErrors = true;
       } else if (!adj.supplier_id) {
         errors[adj._tempId] = 'Pilih supplier terlebih dahulu';
+        hasErrors = true;
+      } else if (getAdjDistTotal(adj) <= 0) {
+        // Bahan tambahan wajib punya distribusi cabang — qty diterima berasal dari sini
+        errors[adj._tempId] =
+          'Isi distribusi ke cabang (minimal 1 cabang) di bagian "Distribusi Bahan Tambahan ke Cabang"';
         hasErrors = true;
       }
     }
@@ -896,9 +909,10 @@ function ReceiveModal({ po, onClose, onSaved }) {
           addPositiveDistributionPayload(branch_distributions, item.id, outletId, qty);
         });
       });
-      // Adj items yang sudah punya ID real (bukan baru) juga masuk branch_distributions biasa
+      // Adj items yang sudah punya ID real (bukan baru) juga masuk branch_distributions biasa.
+      // Sumber qty = distribusi cabang saat ini (bukan qty_received lama yang tersimpan).
       adjustmentItems.filter((adj) => adj.id).forEach((item) => {
-        if (!(Number(item.qty_received) > 0)) return;
+        if (!(getAdjDistTotal(item) > 0)) return;
         const distMap = branchDistributions[item.id] || {};
         Object.entries(distMap).forEach(([outletId, qty]) => {
           addPositiveDistributionPayload(branch_distributions, item.id, outletId, qty);
@@ -928,7 +942,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
               material_id: item.material_id,
               variant_id: item.variant_id || null,
               supplier_id: item.supplier_id || null,
-              qty_received: Number(item.qty_received || 0),
+              // Qty diterima bahan tambahan = total distribusi cabang (sumber kebenaran)
+              qty_received: getAdjDistTotal(item),
               price_actual: Number(item.price_actual || 0),
               adjustment_note: item.adjustment_note || null,
               ...(inlineDist !== undefined ? { inline_branch_distributions: inlineDist } : {}),
@@ -1265,9 +1280,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
 
           {/* ── Distribusi Bahan Tambahan ke Cabang (Adjustment) ── */}
           {(() => {
-            const adjItemsToDistribute = adjustmentItems.filter(
-              (item) => item.material_id && Number(item.qty_received) > 0
-            );
+            // Tampil begitu bahan dipilih — qty diterima berasal dari distribusi ini
+            const adjItemsToDistribute = adjustmentItems.filter((item) => item.material_id);
             if (adjItemsToDistribute.length === 0 || outlets.length === 0) return null;
             return (
               <div>
@@ -1275,20 +1289,17 @@ function ReceiveModal({ po, onClose, onSaved }) {
                   Distribusi Bahan Tambahan ke Cabang
                 </h4>
                 <p className="text-xs text-gray-400 mb-3">
-                  Bahan tambahan di luar order awal — tentukan distribusi ke setiap cabang.
+                  Bahan tambahan di luar order awal. <strong>Qty diterima &amp; biaya diambil dari distribusi ini</strong> — isi berapa banyak tiap cabang menerima (wajib minimal 1 cabang).
                 </p>
                 <div className="space-y-4">
                   {adjItemsToDistribute.map((item) => {
-                    const key = item.id || item._tempId;
+                    const key = adjKey(item);
                     const mat = materials.find((m) => m.id === item.material_id);
                     const distMap = branchDistributions[key] || {};
-                    const totalDist = Object.values(distMap).reduce(
-                      (s, q) => s + (Number(q) || 0), 0
-                    );
-                    const received = Number(item.qty_received) || 0;
-                    const remaining = received - totalDist;
-                    const isBalanced = remaining === 0;
-                    const isOver = remaining < 0;
+                    const totalDist = getAdjDistTotal(item);
+                    const price = Number(item.price_actual || 0);
+                    const subtotal = totalDist * price;
+                    const isEmpty = totalDist <= 0;
                     return (
                       <div key={key} className="border border-blue-200 rounded-xl p-4 bg-blue-50/50">
                         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -1304,39 +1315,44 @@ function ReceiveModal({ po, onClose, onSaved }) {
                             </span>
                           </div>
                           <div className="text-xs">
-                            <span className="text-gray-500">Qty Tambahan: </span>
-                            <span className="font-semibold text-gray-700">{received}</span>
-                            <span className="mx-2 text-gray-300">|</span>
-                            <span className="text-gray-500">Terdistribusi: </span>
-                            <span className={`font-semibold ${isBalanced ? 'text-green-600' : isOver ? 'text-red-600' : 'text-brand-orange'}`}>
+                            <span className="text-gray-500">Diterima: </span>
+                            <span className={`font-semibold ${isEmpty ? 'text-red-600' : 'text-gray-700'}`}>
                               {totalDist}
                             </span>
-                            {!isBalanced && (
-                              <span className={`ml-1 ${isOver ? 'text-red-600' : 'text-brand-orange'}`}>
-                                ({isOver ? `melebihi ${Math.abs(remaining)}` : `sisa ${remaining}`})
-                              </span>
-                            )}
-                            {isBalanced && totalDist > 0 && (
-                              <span className="ml-1 text-green-600">✓</span>
+                            <span className="mx-2 text-gray-300">|</span>
+                            <span className="text-gray-500">Biaya: </span>
+                            <span className="font-semibold text-blue-600">{formatRupiah(subtotal)}</span>
+                            {isEmpty && (
+                              <span className="ml-2 text-red-600">Belum ada distribusi</span>
                             )}
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
-                          {outlets.map((outlet) => (
-                            <div key={outlet.id} className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600 flex-1 truncate" title={outlet.name}>
-                                {outlet.name}
-                              </span>
-                              <input
-                                type="number"
-                                min="0"
-                                value={distMap[outlet.id] || ''}
-                                onChange={(e) => updateBranchDist(key, outlet.id, e.target.value)}
-                                className="w-16 text-center border border-gray-300 rounded-md px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red bg-white"
-                                placeholder="0"
-                              />
-                            </div>
-                          ))}
+                          {outlets.map((outlet) => {
+                            const cabangQty = Number(distMap[outlet.id] || 0);
+                            return (
+                              <div key={outlet.id} className="flex flex-col gap-0.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-gray-600 flex-1 truncate" title={outlet.name}>
+                                    {outlet.name}
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={distMap[outlet.id] || ''}
+                                    onChange={(e) => updateBranchDist(key, outlet.id, e.target.value)}
+                                    className="w-16 text-center border border-gray-300 rounded-md px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red bg-white"
+                                    placeholder="0"
+                                  />
+                                </div>
+                                {cabangQty > 0 && price > 0 && (
+                                  <span className="text-[10px] text-gray-400 text-right pr-0.5">
+                                    {formatRupiah(cabangQty * price)}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -1489,24 +1505,21 @@ function ReceiveModal({ po, onClose, onSaved }) {
                               Tambahan
                             </span>
                           </td>
-                          <td className="px-3 py-2.5">
-                            <input
-                              type="number"
-                              min="0"
-                              value={adj.qty_received}
-                              onChange={(e) =>
-                                updateAdjustment(adj._tempId, 'qty_received', e.target.value)
-                              }
-                              className={`w-20 text-center border rounded-md px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-red ${
+                          <td className="px-3 py-2.5 text-center">
+                            {/* Qty diterima bahan tambahan = total distribusi cabang (read-only) */}
+                            <div
+                              className={`w-20 mx-auto text-sm font-semibold tabular-nums ${
                                 adj.material_id &&
-                                (!adj.qty_received || Number(adj.qty_received) <= 0) &&
+                                getAdjDistTotal(adj) <= 0 &&
                                 rowError &&
                                 !isWarning
-                                  ? 'border-red-400'
-                                  : 'border-gray-300'
+                                  ? 'text-red-600'
+                                  : 'text-gray-800'
                               }`}
-                              placeholder="0"
-                            />
+                            >
+                              {getAdjDistTotal(adj)}
+                            </div>
+                            <div className="text-[10px] text-gray-400 mt-0.5">dari distribusi</div>
                           </td>
                           <td className="px-3 py-2.5">
                             <input
@@ -1533,7 +1546,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
                           </td>
                           <td className="px-3 py-2.5 text-right font-medium text-gray-800">
                             {formatRupiah(
-                              Number(adj.qty_received || 0) * Number(adj.price_actual || 0)
+                              getAdjDistTotal(adj) * Number(adj.price_actual || 0)
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-center">
