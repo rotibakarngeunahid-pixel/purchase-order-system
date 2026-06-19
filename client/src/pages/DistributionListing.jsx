@@ -46,6 +46,22 @@ function sortItems(items) {
   });
 }
 
+// Gabungkan bahan yang sama (mis. Roti Tawar pesanan + tambahan) jadi SATU baris
+// dengan qty dijumlahkan — tanpa pemisahan "menyusul"/"utama".
+function mergeItemsByMaterial(items) {
+  const map = new Map();
+  for (const item of items) {
+    const key = item.material_id || item.material_name || item.id;
+    const existing = map.get(key);
+    if (existing) {
+      existing.qty = (Number(existing.qty) || 0) + (Number(item.qty) || 0);
+    } else {
+      map.set(key, { ...item, id: `material-${key}`, qty: Number(item.qty) || 0 });
+    }
+  }
+  return Array.from(map.values());
+}
+
 function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -629,7 +645,7 @@ export default function DistributionListing() {
   );
   const isAdjustmentGroup = !!outletData?.is_adjustment_group;
   const rawItems = outletData?.items || [];
-  const items = sortItems(rawItems);
+  const items = sortItems(mergeItemsByMaterial(rawItems));
   const checkedCount = items.filter((item) => checks[item.id]).length;
   const allDone = items.length > 0 && checkedCount === items.length;
   const progressPct = items.length > 0 ? (checkedCount / items.length) * 100 : 0;
@@ -807,15 +823,12 @@ export default function DistributionListing() {
                 {items.map((item, idx) => {
                   const checked = !!checks[item.id];
                   const isRoti = item.material_name?.toLowerCase().includes('roti tawar');
-                  const isAdjustment = item.source === 'adjustment';
                   return (
                     <div
                       key={item.id}
                       className={`flex items-center border-b border-gray-100 last:border-b-0 transition-colors active:bg-gray-50 ${
                         checked
                           ? 'bg-green-50'
-                          : isAdjustment
-                          ? 'bg-blue-50/50'
                           : isRoti
                           ? 'bg-orange-50/40'
                           : 'bg-white'
@@ -832,16 +845,6 @@ export default function DistributionListing() {
                           checked ? 'line-through text-gray-400' : isRoti ? 'text-brand-red font-semibold' : 'text-gray-800'
                         }`}>
                           {item.material_name}
-                          {isAdjustment && !checked && (
-                            <span className="ml-2 text-[10px] font-bold bg-blue-600 text-white px-1.5 py-0.5 rounded-full align-middle">
-                              MENYUSUL
-                            </span>
-                          )}
-                          {isRoti && !checked && (
-                            <span className="ml-2 text-[10px] font-bold bg-brand-red text-white px-1.5 py-0.5 rounded-full align-middle">
-                              UTAMA
-                            </span>
-                          )}
                         </span>
                       </button>
 
@@ -875,9 +878,7 @@ export default function DistributionListing() {
                 })}
 
                 <div className="bg-brand-red px-4 py-4 flex items-center justify-between">
-                  <span className="text-white text-sm font-semibold">
-                    {isAdjustmentGroup ? 'Total Bahan Menyusul' : 'Total Bahan Masuk'}
-                  </span>
+                  <span className="text-white text-sm font-semibold">Total Bahan Masuk</span>
                   <span className="text-white font-bold">{items.length} item</span>
                 </div>
               </div>
