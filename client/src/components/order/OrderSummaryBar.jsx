@@ -1,7 +1,8 @@
 import { Store, Package, ShoppingCart, CheckSquare2 } from 'lucide-react';
 import { calcGrandTotal, calcFilledOutlets, getMatrixKey } from '../../lib/orderHelpers';
+import { formatRupiah } from '../../lib/api';
 
-export default function OrderSummaryBar({ outlets, materials, matrix, outletOpen }) {
+export default function OrderSummaryBar({ outlets, materials, matrix, outletOpen, orderEstimate }) {
   const activeOutlets = outlets.filter((o) => outletOpen[o.id] !== false);
   const grandTotal = calcGrandTotal(outlets, materials, matrix);
   const filledOutlets = calcFilledOutlets(outlets, materials, matrix);
@@ -44,6 +45,23 @@ export default function OrderSummaryBar({ outlets, materials, matrix, outletOpen
           </div>
         ))}
       </div>
+
+      {orderEstimate && (
+        <div className="card p-3 mb-3 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-xs text-gray-500">Estimasi Total Order</div>
+            <div className="text-xl font-bold text-brand-red tabular-nums">
+              {formatRupiah(orderEstimate.total)}
+            </div>
+          </div>
+          {orderEstimate.hasMissingPrices && (
+            <div className="text-xs text-orange-500 flex items-center gap-1">
+              <span>⚠</span>
+              <span>Beberapa bahan belum memiliki harga</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card p-3 mb-4">
         <div className="flex items-center justify-between gap-3 mb-2">

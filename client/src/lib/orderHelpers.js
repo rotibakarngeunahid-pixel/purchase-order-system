@@ -101,3 +101,36 @@ export const calcFilledOutlets = (outlets, materials, matrix) =>
   outlets.filter((outlet) =>
     materials.some((mat) => (Number(matrix[getMatrixKey(outlet.id, mat.id)]) || 0) > 0)
   ).length;
+
+// Ambil harga satuan beli dari material. Mengembalikan null jika tidak ada harga.
+export const getMaterialUnitPrice = (material) => {
+  if (!material) return null;
+  const price = Number(material.price_per_purchase_unit);
+  return Number.isFinite(price) && price > 0 ? price : null;
+};
+
+// Hitung estimasi total harga purchase order dari matrix input.
+// Hasil: { total, hasMissingPrices, missingPriceCount }
+export const calculateOrderEstimate = (matrix = {}, materials = [], outlets = []) => {
+  let total = 0;
+  const missingMaterialIds = new Set();
+
+  for (const outlet of outlets) {
+    for (const material of materials) {
+      const qty = toNonNegativeNumber(matrix[getMatrixKey(outlet.id, material.id)]);
+      if (qty <= 0) continue;
+      const price = getMaterialUnitPrice(material);
+      if (price === null) {
+        missingMaterialIds.add(material.id);
+      } else {
+        total += qty * price;
+      }
+    }
+  }
+
+  return {
+    total: Math.max(0, total),
+    hasMissingPrices: missingMaterialIds.size > 0,
+    missingPriceCount: missingMaterialIds.size,
+  };
+};

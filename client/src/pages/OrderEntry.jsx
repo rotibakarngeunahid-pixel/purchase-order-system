@@ -8,7 +8,7 @@ import api, {
 } from '../lib/api';
 import { previewRotiOrder } from '../services/rotiTawarService';
 import { checkHolidaysBulk, saveHolidayMetadataBulk } from '../services/holidayService';
-import { buildRotiTawarLiveSummary, getMatrixKey } from '../lib/orderHelpers';
+import { buildRotiTawarLiveSummary, getMatrixKey, calculateOrderEstimate } from '../lib/orderHelpers';
 import OrderEntryHeader from '../components/order/OrderEntryHeader';
 import OrderSummaryBar from '../components/order/OrderSummaryBar';
 import OutletControlsPanel from '../components/order/OutletControlsPanel';
@@ -523,6 +523,10 @@ export default function OrderEntry() {
     () => buildRotiTawarLiveSummary({ materials, outlets, matrix, rotiDetail }),
     [materials, outlets, matrix, rotiDetail]
   );
+  const orderEstimate = useMemo(
+    () => calculateOrderEstimate(matrix, materials, outlets),
+    [matrix, materials, outlets]
+  );
 
   // --- Loading screen ---
   // Full-screen hanya untuk muat pertama; saat ganti tanggal cukup overlay tipis
@@ -708,6 +712,7 @@ export default function OrderEntry() {
         materials={materials}
         matrix={matrix}
         outletOpen={outletOpen}
+        orderEstimate={orderEstimate}
       />
 
       {/* Input mode tabs */}
