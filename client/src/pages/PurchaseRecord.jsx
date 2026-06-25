@@ -450,6 +450,13 @@ function ReceiveModal({ po, onClose, onSaved }) {
   const [quickAddVariantFor, setQuickAddVariantFor] = useState(null);
   const [quickAddMaterialForRowId, setQuickAddMaterialForRowId] = useState(null);
   const [outlets, setOutlets] = useState([]);
+  // Loading states untuk melindungi tombol Simpan Penerimaan
+  const [isLoadingMasterData, setIsLoadingMasterData] = useState(true);
+  const [isSessionOrdersLoading, setIsSessionOrdersLoading] = useState(!!po.session?.id);
+  const [isVariantsLoading, setIsVariantsLoading] = useState(
+    (po.items || []).some((i) => i.material_id)
+  );
+  const [distributionError, setDistributionError] = useState('');
   // Jumlah item tambahan berharga Rp 0 yang menunggu konfirmasi simpan
   const [zeroPriceConfirmCount, setZeroPriceConfirmCount] = useState(0);
   // Nama bahan yang qty_received > 0 tapi belum ada distribusi cabang sama sekali
@@ -482,14 +489,23 @@ function ReceiveModal({ po, onClose, onSaved }) {
         setMaterials(mats);
         setSuppliers(sups);
         setOutlets(outs);
+        setIsLoadingMasterData(false);
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error(err);
+        setDistributionError('Gagal memuat data cabang/bahan. Silakan muat ulang halaman.');
+        setIsLoadingMasterData(false);
+      });
   }, []);
 
   // Load data order per outlet dari sesi awal untuk auto-populate distribusi semua bahan
   useEffect(() => {
     const sessionId = po.session?.id;
-    if (!sessionId) return;
+    if (!sessionId) {
+      setIsSessionOrdersLoading(false);
+      return;
+    }
+    setIsSessionOrdersLoading(true);
     api.get(`/api/orders/session/${sessionId}`)
       .then((res) => {
         // Buat map: material_id → { outlet_id: qty } untuk semua bahan
@@ -500,8 +516,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
           byMaterial[item.material_id][item.outlet_id] = Number(item.qty);
         });
         setSessionOrders(byMaterial);
+        setIsSessionOrdersLoading(false);
       })
-      .catch(() => {}); // non-fatal
+      .catch(() => {
+        setIsSessionOrdersLoading(false); // non-fatal, tetap lanjut
+      });
   }, [po.session?.id]);
 
   // Auto-populate branchDistributions dari data order sesi untuk semua ordered items
@@ -533,7 +552,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
   // Satu request untuk semua varian aktif — menggantikan N request per bahan.
   useEffect(() => {
     const materialIds = [...new Set((po.items || []).map((i) => i.material_id).filter(Boolean))];
-    if (materialIds.length === 0) return;
+    if (materialIds.length === 0) {
+      setIsVariantsLoading(false);
+      return;
+    }
+    setIsVariantsLoading(true);
     api.get('/api/purchase-report/variants')
       .then((res) => {
         const map = {};
@@ -543,8 +566,12 @@ function ReceiveModal({ po, onClose, onSaved }) {
           map[variant.material_id].push(variant);
         });
         setVariantsMap(map);
+        setIsVariantsLoading(false);
       })
-      .catch(console.error);
+      .catch((err) => {
+        console.error(err);
+        setIsVariantsLoading(false); // non-fatal untuk distribusi
+      });
   }, [po.id]);
 
   const loadVariantsForMaterial = async (materialId) => {
@@ -790,6 +817,10 @@ function ReceiveModal({ po, onClose, onSaved }) {
   };
 
   // ── Derived values ──
+
+  // Tombol Simpan Penerimaan hanya aktif ketika semua data distribusi sudah siap
+  const isDistributionLoading = isLoadingMasterData || isSessionOrdersLoading || isVariantsLoading;
+  const isSaveDisabled = saving || isDistributionLoading || !!distributionError;
 
   // Untuk bahan tambahan, distribusi cabang adalah SUMBER KEBENARAN qty diterima:
   // qty diterima = total distribusi ke semua cabang. Biaya = qty × harga/satuan.
@@ -1602,20 +1633,28 @@ function ReceiveModal({ po, onClose, onSaved }) {
               <span className="font-bold text-brand-red">{formatRupiah(totalActual)}</span>
             </div>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <button
-              onClick={handleResetForm}
-              title="Reset form ke nilai awal"
-              className="px-3 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-300 hover:bg-gray-50"
-            >
-              Reset Form
-            </button>
-            <button onClick={onClose} className="btn-outline text-sm">
-              Batal
-            </button>
-            <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">
-              {saving ? 'Menyimpan...' : 'Simpan Penerimaan'}
-            </button>
+          <div className="flex flex-col items-end gap-2">
+            {distributionError && (
+              <p className="text-xs text-red-600 max-w-xs text-right">{distributionError}</p>
+            )}
+            {isDistributionLoading && !distributionError && (
+              <p className="text-xs text-gray-400">Menyiapkan distribusi bahan...</p>
+            )}
+            <div className="flex gap-2 flex-wrap justify-end">
+              <button
+                onClick={handleResetForm}
+                title="Reset form ke nilai awal"
+                className="px-3 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-300 hover:bg-gray-50"
+              >
+                Reset Form
+              </button>
+              <button onClick={onClose} className="btn-outline text-sm">
+                Batal
+              </button>
+              <button onClick={handleSave} disabled={isSaveDisabled} className="btn-primary text-sm">
+                {saving ? 'Menyimpan...' : 'Simpan Penerimaan'}
+              </button>
+            </div>
           </div>
         </div>
       </div>
