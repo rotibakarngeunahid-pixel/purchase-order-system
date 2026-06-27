@@ -39,7 +39,7 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const allowed = ['code', 'name', 'brand', 'supplier_id', 'package_qty', 'package_unit', 'purchase_unit', 'price_per_purchase_unit', 'is_active'];
+  const allowed = ['code', 'name', 'brand', 'supplier_id', 'package_qty', 'package_unit', 'purchase_unit', 'price_per_purchase_unit', 'is_active', 'inventory_material_id', 'inventory_material_name'];
   const updates = {};
   allowed.forEach((key) => {
     if (req.body[key] !== undefined) updates[key] = req.body[key];

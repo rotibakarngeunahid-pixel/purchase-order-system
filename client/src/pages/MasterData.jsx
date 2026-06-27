@@ -635,26 +635,36 @@ function MaterialsTab() {
   );
 }
 
-function CabangSelect({ value, onChange, options }) {
+// Memetakan outlet ke cabang Inventori berdasarkan ID (sumber kebenaran utama),
+// nama hanya disimpan sebagai label/fallback. Bila daftar cabang tidak bisa
+// dimuat, jatuh ke input nama bebas (tanpa ID).
+function CabangSelect({ valueId, valueName, onChange, options }) {
   if (options.length === 0) {
     return (
       <input
         className="input text-sm"
         placeholder="Nama cabang di sistem inventori (opsional)"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={valueName}
+        onChange={(e) => onChange('', e.target.value)}
       />
     );
   }
+  // Pilih berdasarkan ID; bila ID kosong (data lama), cocokkan via nama.
+  const selectedId =
+    valueId || (options.find((c) => c.nama_cabang === valueName)?.cabang_id ?? '');
   return (
     <select
       className="input text-sm"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
+      value={selectedId}
+      onChange={(e) => {
+        const id = e.target.value;
+        const opt = options.find((c) => String(c.cabang_id) === String(id));
+        onChange(id, opt ? opt.nama_cabang : '');
+      }}
     >
       <option value="">— Pilih cabang inventori —</option>
       {options.map((c) => (
-        <option key={c.cabang_id} value={c.nama_cabang}>{c.nama_cabang}</option>
+        <option key={c.cabang_id} value={c.cabang_id}>{c.nama_cabang}</option>
       ))}
     </select>
   );
@@ -665,7 +675,7 @@ function OutletsTab() {
   const [outlets, setOutlets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ name: '', inventori_cabang_name: '', min_stock_roti: 0 });
+  const [form, setForm] = useState({ name: '', inventori_branch_id: '', inventori_cabang_name: '', min_stock_roti: 0 });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [inventoriCabangList, setInventoriCabangList] = useState([]);
@@ -684,8 +694,8 @@ function OutletsTab() {
     setLoading(false);
   }
 
-  const startAdd = () => { setEditingId('new'); setForm({ name: '', inventori_cabang_name: '', min_stock_roti: 0 }); setError(''); };
-  const startEdit = (o) => { setEditingId(o.id); setForm({ name: o.name, inventori_cabang_name: o.inventori_cabang_name || '', min_stock_roti: o.min_stock_roti ?? 0 }); setError(''); };
+  const startAdd = () => { setEditingId('new'); setForm({ name: '', inventori_branch_id: '', inventori_cabang_name: '', min_stock_roti: 0 }); setError(''); };
+  const startEdit = (o) => { setEditingId(o.id); setForm({ name: o.name, inventori_branch_id: o.inventori_branch_id || '', inventori_cabang_name: o.inventori_cabang_name || '', min_stock_roti: o.min_stock_roti ?? 0 }); setError(''); };
   const cancelEdit = () => { setEditingId(null); setError(''); };
 
   const handleSave = async () => {
@@ -742,7 +752,7 @@ function OutletsTab() {
                   <input autoFocus className="input text-sm" placeholder="Nama outlet" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                 </td>
                 <td className="px-4 py-2">
-                  <CabangSelect value={form.inventori_cabang_name} onChange={(v) => setForm((f) => ({ ...f, inventori_cabang_name: v }))} options={inventoriCabangList} />
+                  <CabangSelect valueId={form.inventori_branch_id} valueName={form.inventori_cabang_name} onChange={(id, name) => setForm((f) => ({ ...f, inventori_branch_id: id, inventori_cabang_name: name }))} options={inventoriCabangList} />
                 </td>
                 <td className="px-4 py-2">
                   <input type="number" min="0" className="input text-sm w-24 mx-auto text-center" value={form.min_stock_roti} onChange={(e) => setForm((f) => ({ ...f, min_stock_roti: Number(e.target.value) }))} />
@@ -763,7 +773,7 @@ function OutletsTab() {
                     <input autoFocus className="input text-sm" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
                   </td>
                   <td className="px-4 py-2">
-                    <CabangSelect value={form.inventori_cabang_name} onChange={(v) => setForm((f) => ({ ...f, inventori_cabang_name: v }))} options={inventoriCabangList} />
+                    <CabangSelect valueId={form.inventori_branch_id} valueName={form.inventori_cabang_name} onChange={(id, name) => setForm((f) => ({ ...f, inventori_branch_id: id, inventori_cabang_name: name }))} options={inventoriCabangList} />
                   </td>
                   <td className="px-4 py-2">
                     <input type="number" min="0" className="input text-sm w-24 mx-auto text-center" value={form.min_stock_roti} onChange={(e) => setForm((f) => ({ ...f, min_stock_roti: Number(e.target.value) }))} />
@@ -780,7 +790,18 @@ function OutletsTab() {
                 <tr key={o.id} className={`hover:bg-gray-50 ${!o.is_active ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3 font-medium text-gray-800">{o.name}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
-                    {o.inventori_cabang_name || <span className="text-gray-300 italic">—</span>}
+                    {o.inventori_cabang_name || o.inventori_branch_id ? (
+                      <span className="inline-flex items-center gap-1">
+                        {o.inventori_cabang_name || <span className="text-gray-400 italic">(tanpa nama)</span>}
+                        {o.inventori_branch_id ? (
+                          <span className="text-[9px] text-green-700 bg-green-50 border border-green-200 px-1 py-px rounded" title="Termapping via ID cabang Inventori">ID ✓</span>
+                        ) : (
+                          <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-200 px-1 py-px rounded" title="Hanya cocok via nama — pilih ulang cabang untuk menyimpan ID">nama</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-gray-300 italic">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-center text-gray-600 tabular-nums">
                     {o.min_stock_roti ? o.min_stock_roti : <span className="text-gray-300 italic">—</span>}

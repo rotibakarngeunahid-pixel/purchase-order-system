@@ -411,18 +411,60 @@ export default function OrderEntry() {
     }
   };
 
-  const handleAddRekToOrder = (materialId, rekomendasiId) => {
-    // Di per-outlet mode: tambahkan ke outlet yang sedang dipilih
-    // Di mode lain: tambahkan ke outlet aktif pertama
-    const targetOutlet =
-      inputMode === 'per-outlet'
-        ? outlets[Math.min(selectedOutletIdx, outlets.length - 1)]
-        : outlets.find((o) => outletOpen[o.id] !== false);
-    if (!targetOutlet) return;
+  // Tambah rekomendasi staff ke order. SELALU ke outlet ASAL rekomendasi
+  // (item.po_outlet_id), bukan outlet yang sedang disorot di UI. Order disimpan
+  // dulu; rekomendasi baru ditandai 'processed' di Inventori SETELAH save sukses.
+  // Mengembalikan true bila order tersimpan (panel akan menandai "Ditambahkan").
+  const handleAddRekToOrder = async (item) => {
+    const targetOutlet = outlets.find((o) => String(o.id) === String(item.po_outlet_id));
+    const materialId = item.po_material_id;
+    if (!targetOutlet || !materialId) return false; // tombol di panel sudah disabled
+
+    if (session && session.status !== 'draft') {
+      setSaveStatus('error');
+      setSaveError('Sesi sudah dikirim. Tidak dapat menambah rekomendasi.');
+      return false;
+    }
+
     const key = getMatrixKey(targetOutlet.id, materialId);
     const currentQty = Number(matrix[key]) || 0;
-    handleCellChange(targetOutlet.id, materialId, Math.max(currentQty, 1));
-    setRekAddedIds((prev) => new Set([...prev, rekomendasiId]));
+    const newQty = Math.max(currentQty, 1); // qty default 1, jangan turunkan yang sudah ada
+
+    // Optimistic update + batalkan debounce yang mungkin antre untuk sel ini
+    setMatrix((prev) => ({ ...prev, [key]: newQty }));
+    if (saveTimers.current[key]) { clearTimeout(saveTimers.current[key]); delete saveTimers.current[key]; }
+    delete pendingValues.current[key];
+
+    let sess = sessionRef.current;
+    try {
+      setSaveStatus('saving');
+      if (!sess) sess = await getOrCreateSession(orderDateRef.current);
+      if (sess.status !== 'draft') return false;
+      await api.post(`/api/orders/session/${sess.id}/request`, {
+        outlet_id: targetOutlet.id,
+        material_id: materialId,
+        qty: newQty,
+      });
+      showSaved();
+    } catch (err) {
+      // Save gagal → rollback & JANGAN proses rekomendasi (tetap pending).
+      setMatrix((prev) => ({ ...prev, [key]: currentQty }));
+      setSaveStatus('error');
+      setSaveError('Gagal menyimpan rekomendasi ke order. Coba lagi.');
+      return false;
+    }
+
+    // Order tersimpan → tandai ditambahkan (UI) lalu proses rekomendasi (best-effort).
+    setRekAddedIds((prev) => new Set([...prev, item.rekomendasi_id]));
+    try {
+      await api.post('/api/inventori/rekomendasi/process', {
+        rekomendasi_ids: [item.rekomendasi_id],
+        note: `Ditambahkan ke order PO${sess?.id ? ` ${sess.id}` : ''}, outlet ${targetOutlet.name}, bahan ${item.nama_bahan}, qty ${newQty}`,
+      });
+    } catch (_) {
+      // Order sudah tersimpan; proses gagal akan ter-retry saat panel refresh.
+    }
+    return true;
   };
 
   const handleToggleOpen = (id) =>
@@ -775,6 +817,7 @@ export default function OrderEntry() {
             addedIds={rekAddedIds}
             currentOutlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
             inputMode={inputMode}
+            orderDate={orderDate}
           />
           <RotiTawarPanel {...rotiPanelProps} />
         </div>
@@ -796,6 +839,7 @@ export default function OrderEntry() {
           addedIds={rekAddedIds}
           currentOutlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
           inputMode={inputMode}
+          orderDate={orderDate}
         />
         <RotiTawarPanel {...rotiPanelProps} />
       </div>

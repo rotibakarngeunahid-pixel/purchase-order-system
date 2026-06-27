@@ -1,6 +1,38 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import api, { formatDateID, getLocalOperationalYesterday } from '../../lib/api';
+import api, {
+  formatDateID,
+  getLocalOperationalDate,
+  getLocalOperationalYesterday,
+} from '../../lib/api';
+
+// ── Helper tanggal operasional (WITA, cutoff 03:00) ────────────────────────────
+function shiftDate(dateStr, deltaDays) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+  return d.toISOString().split('T')[0];
+}
+
+function daysBetween(fromStr, toStr) {
+  const a = new Date(`${fromStr}T00:00:00Z`).getTime();
+  const b = new Date(`${toStr}T00:00:00Z`).getTime();
+  return Math.round((b - a) / 86400000);
+}
+
+const DATE_FILTERS = [
+  { id: '7d', label: '7 Hari' },
+  { id: 'today', label: 'Hari Ini' },
+  { id: 'yesterday', label: 'Kemarin' },
+  { id: 'all', label: 'Semua' },
+];
+
+const IGNORE_REASONS = [
+  'Stok masih cukup',
+  'Sudah dibeli manual',
+  'Salah input staff',
+  'Bahan tidak tersedia',
+  'Lainnya',
+];
 
 function PhotoLightbox({ url, onClose }) {
   useEffect(() => {
@@ -39,12 +71,103 @@ function getGDriveThumbnailUrl(url) {
   return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w200`;
 }
 
-function RekomendasiItem({ item, material, isAdded, onAdd, showCabang }) {
+// ── Modal pilih alasan abaikan ─────────────────────────────────────────────────
+function IgnoreReasonModal({ item, onCancel, onConfirm }) {
+  const [reason, setReason] = useState('');
+  const [detail, setDetail] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const finalReason = reason === 'Lainnya' ? (detail.trim() || 'Lainnya') : reason;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-semibold text-gray-900 mb-1">Abaikan rekomendasi?</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          <span className="font-medium text-gray-700">{item.nama_bahan}</span>
+          {' · '}{item.po_outlet_name || item.nama_cabang}
+        </p>
+        <p className="text-xs text-gray-500 mb-2">Pilih alasan (wajib):</p>
+        <div className="space-y-1.5 mb-3">
+          {IGNORE_REASONS.map((r) => (
+            <label key={r} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="radio"
+                name="ignore-reason"
+                value={r}
+                checked={reason === r}
+                onChange={() => setReason(r)}
+                className="accent-orange-500"
+              />
+              {r}
+            </label>
+          ))}
+        </div>
+        {reason === 'Lainnya' && (
+          <input
+            autoFocus
+            className="input text-sm w-full mb-3"
+            placeholder="Tulis alasan singkat"
+            value={detail}
+            onChange={(e) => setDetail(e.target.value)}
+          />
+        )}
+        <div className="flex gap-2 justify-end">
+          <button onClick={onCancel} className="btn-outline text-sm" disabled={busy}>
+            Batal
+          </button>
+          <button
+            onClick={async () => {
+              if (!finalReason) return;
+              setBusy(true);
+              const ok = await onConfirm(item, finalReason);
+              if (!ok) setBusy(false);
+            }}
+            disabled={!reason || busy}
+            className="btn-primary text-sm"
+          >
+            {busy ? '...' : 'Abaikan'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang }) {
   const [lightbox, setLightbox] = useState(false);
+  const [adding, setAdding] = useState(false);
   const hasNumber = item.tipe_stok !== 'foto' && item.stok_akhir !== null && item.stok_akhir !== undefined;
   const thumbUrl = !hasNumber ? getGDriveThumbnailUrl(item.foto_url) : null;
   const fullUrl  = thumbUrl ? `https://drive.google.com/thumbnail?id=${item.foto_url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1]}&sz=w1200` : null;
   const unit = material?.package_unit || '';
+
+  const canAddOutlet = !!item.po_outlet_id;
+  const canAddMaterial = !!item.po_material_id;
+  const canAdd = canAddOutlet && canAddMaterial;
+
+  const ageDays = item.tanggal ? daysBetween(item.tanggal, getLocalOperationalDate()) : 0;
+  const isStale = ageDays >= 2;
+
+  const handleAdd = async () => {
+    if (adding) return;
+    setAdding(true);
+    const ok = await onAdd(item);
+    if (!ok) setAdding(false); // sukses → parent menandai isAdded
+  };
 
   return (
     <div className="flex items-start gap-2.5 py-2.5 border-b border-orange-100 last:border-0">
@@ -69,62 +192,101 @@ function RekomendasiItem({ item, material, isAdded, onAdd, showCabang }) {
             {item.nama_bahan}
           </span>
           <div className="flex-shrink-0">
-            {!material && (
-              <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
-                Belum dipetakan
-              </span>
-            )}
-            {material && !isAdded && (
-              <button
-                onClick={() => onAdd(material.id, item.rekomendasi_id)}
-                className="text-xs bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white px-2.5 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap"
-              >
-                + Tambah
-              </button>
-            )}
-            {material && isAdded && (
+            {isAdded ? (
               <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-lg font-medium whitespace-nowrap">
                 ✓ Ditambahkan
               </span>
+            ) : !canAddMaterial ? (
+              <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
+                Perlu mapping bahan
+              </span>
+            ) : !canAddOutlet ? (
+              <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
+                Cabang belum dipetakan
+              </span>
+            ) : (
+              <button
+                onClick={handleAdd}
+                disabled={adding}
+                className="text-xs bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:opacity-60 text-white px-2.5 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap"
+              >
+                {adding ? '...' : '+ Tambah'}
+              </button>
             )}
           </div>
         </div>
         <p className="text-[11px] text-gray-400 mt-0.5 leading-tight">
           {showCabang && (
-            <span className="font-medium text-orange-600">{item.nama_cabang} · </span>
+            <span className="font-medium text-orange-600">
+              {item.po_outlet_name || item.nama_cabang} ·{' '}
+            </span>
           )}
           {formatDateID(item.tanggal)}
+          {isStale && (
+            <span className="ml-1 text-[9px] text-amber-600 bg-amber-50 border border-amber-200 px-1 py-px rounded">
+              {ageDays} hari
+            </span>
+          )}
         </p>
         {hasNumber && (
           <p className="text-xs text-orange-600 font-semibold mt-0.5">
             Sisa: {item.stok_akhir}{unit ? ` ${unit}` : ''}
           </p>
         )}
+        {!canAddOutlet && !isAdded && (
+          <p className="text-[10px] text-amber-600 mt-0.5">
+            Cabang Inventori belum dipetakan ke Outlet PO.
+          </p>
+        )}
+        {!isAdded && (
+          <button
+            type="button"
+            onClick={() => onIgnore(item)}
+            className="text-[10px] text-gray-400 hover:text-gray-600 mt-1 underline"
+          >
+            Abaikan
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, currentOutlet, inputMode }) {
+export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, currentOutlet, inputMode, orderDate }) {
   const [items, setItems]       = useState([]);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(null);
   const [collapsed, setCollapsed] = useState(false);
   const [showAll, setShowAll]   = useState(false);
+  const [dateFilter, setDateFilter] = useState('7d');
+  const [ignoreTarget, setIgnoreTarget] = useState(null);
 
-  useEffect(() => { fetchRekomendasi(); }, []);
+  // Refetch saat filter tanggal atau tanggal order berubah (RF-09).
+  useEffect(() => { fetchRekomendasi(); /* eslint-disable-next-line */ }, [dateFilter, orderDate]);
 
   async function fetchRekomendasi() {
     setLoading(true);
     setError(null);
     try {
-      const yesterday = getLocalOperationalYesterday();
-      const res = await api.get(`/api/inventori/rekomendasi?status=pending&tanggal=${yesterday}`);
-      const all = res.data?.data || [];
-      setItems(all.filter((item) => item.tanggal && item.tanggal.startsWith(yesterday)));
+      const params = new URLSearchParams({ status: 'pending' });
+      const today = getLocalOperationalDate();
+      if (dateFilter === '7d') {
+        params.set('date_from', shiftDate(today, -7));
+        params.set('date_to', today);
+      } else if (dateFilter === 'today') {
+        params.set('date_from', today);
+        params.set('date_to', today);
+      } else if (dateFilter === 'yesterday') {
+        const y = getLocalOperationalYesterday();
+        params.set('date_from', y);
+        params.set('date_to', y);
+      }
+      // 'all' → tanpa parameter tanggal (semua pending lintas tanggal)
+      const res = await api.get(`/api/inventori/rekomendasi?${params.toString()}`);
+      setItems(res.data?.data || []);
     } catch (err) {
       if (err.response?.status === 503) {
-        setError('Integrasi inventori belum aktif di server. Hubungi admin untuk mengatur env INVENTORI_GAS_URL & INVENTORI_API_KEY di Vercel.');
+        setError('Integrasi inventori belum aktif di server. Hubungi admin untuk mengatur env INVENTORY_API_URL di server.');
         return;
       }
       setError('Gagal memuat rekomendasi. Panel ini tidak mempengaruhi order.');
@@ -142,8 +304,9 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
 
   const thisOutletItems = useMemo(() => {
     if (!currentOutlet) return items;
-    const outletKey = (currentOutlet.inventori_cabang_name || currentOutlet.name).toLowerCase();
-    return items.filter((item) => item.nama_cabang.toLowerCase() === outletKey);
+    return items.filter(
+      (item) => item.po_outlet_id && String(item.po_outlet_id) === String(currentOutlet.id)
+    );
   }, [items, currentOutlet]);
 
   const filteredItems = useMemo(() => {
@@ -151,26 +314,59 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     return thisOutletItems;
   }, [items, thisOutletItems, isPerOutlet, showAll, currentOutlet]);
 
-  async function handleMarkProcessed() {
-    const ids = filteredItems
-      .filter((i) => !addedIds.has(i.rekomendasi_id))
-      .map((i) => i.rekomendasi_id);
-    if (ids.length === 0) return;
+  const unmappedBranchCount = useMemo(
+    () => items.filter((i) => !i.po_outlet_id).length,
+    [items]
+  );
+  const currentOutletMapped = !!(
+    currentOutlet && (currentOutlet.inventori_branch_id || currentOutlet.inventori_cabang_name)
+  );
+
+  // Klik "Tambah" → parent menyimpan order ke outlet ASAL lalu memproses
+  // rekomendasi di Inventori. Resolve true bila sukses (parent set addedIds).
+  async function handleAdd(item) {
+    try {
+      return await onAddToOrder(item);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Abaikan eksplisit dengan alasan → tandai processed di Inventori + buang lokal.
+  async function handleIgnoreConfirm(item, reason) {
     try {
       await api.post('/api/inventori/rekomendasi/process', {
-        rekomendasi_ids: ids,
-        note: showAll || !currentOutlet ? 'Diabaikan oleh admin' : `Diabaikan untuk ${currentOutlet.name}`,
+        rekomendasi_ids: [item.rekomendasi_id],
+        note: `Diabaikan oleh admin PO: ${reason}`,
       });
-    } catch (_) {}
-    setItems((prev) => prev.filter((item) => !ids.includes(item.rekomendasi_id)));
+      setItems((prev) => prev.filter((i) => i.rekomendasi_id !== item.rekomendasi_id));
+      setIgnoreTarget(null);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   const showCabang = !isPerOutlet || showAll;
   const totalCount = items.length;
   const displayCount = filteredItems.length;
 
+  const filterLabel =
+    dateFilter === '7d' ? '7 hari terakhir'
+    : dateFilter === 'today' ? 'hari ini'
+    : dateFilter === 'yesterday' ? 'kemarin'
+    : 'semua tanggal';
+
   return (
     <div className="bg-orange-50 border border-orange-200 rounded-xl overflow-hidden">
+      {ignoreTarget && (
+        <IgnoreReasonModal
+          item={ignoreTarget}
+          onCancel={() => setIgnoreTarget(null)}
+          onConfirm={handleIgnoreConfirm}
+        />
+      )}
+
       {/* Header */}
       <button
         type="button"
@@ -190,16 +386,30 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
 
       {!collapsed && (
         <div className="border-t border-orange-200">
-          {/* Filter toggle — hanya tampil di per-outlet mode dan ada data */}
+          {/* Filter tanggal (queue pending) */}
+          <div className="flex border-b border-orange-200 text-[11px] font-semibold">
+            {DATE_FILTERS.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setDateFilter(f.id)}
+                className={`flex-1 py-1.5 transition-colors border-l first:border-l-0 border-orange-200 ${
+                  dateFilter === f.id ? 'bg-orange-500 text-white' : 'text-orange-600 hover:bg-orange-100'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Filter cabang — hanya per-outlet mode dan ada data */}
           {isPerOutlet && currentOutlet && totalCount > 0 && !loading && !error && (
             <div className="flex border-b border-orange-200 text-xs font-semibold">
               <button
                 type="button"
                 onClick={() => setShowAll(false)}
                 className={`flex-1 py-1.5 transition-colors ${
-                  !showAll
-                    ? 'bg-orange-500 text-white'
-                    : 'text-orange-600 hover:bg-orange-100'
+                  !showAll ? 'bg-orange-400 text-white' : 'text-orange-600 hover:bg-orange-100'
                 }`}
               >
                 {currentOutlet.name} ({thisOutletItems.length})
@@ -208,9 +418,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
                 type="button"
                 onClick={() => setShowAll(true)}
                 className={`flex-1 py-1.5 transition-colors border-l border-orange-200 ${
-                  showAll
-                    ? 'bg-orange-500 text-white'
-                    : 'text-orange-600 hover:bg-orange-100'
+                  showAll ? 'bg-orange-400 text-white' : 'text-orange-600 hover:bg-orange-100'
                 }`}
               >
                 Semua ({totalCount})
@@ -228,25 +436,45 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
             {!loading && error && (
               <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 my-2">
                 <p>⚠ {error}</p>
-                <button
-                  onClick={fetchRekomendasi}
-                  className="underline mt-1 hover:text-amber-900"
-                >
+                <button onClick={fetchRekomendasi} className="underline mt-1 hover:text-amber-900">
                   Coba Lagi
                 </button>
               </div>
             )}
 
+            {/* Empty state diagnostik */}
             {!loading && !error && filteredItems.length === 0 && (
-              <div className="py-2">
-                <p className="text-xs text-gray-400 text-center py-2">
-                  ✅ Tidak ada rekomendasi
-                  {isPerOutlet && !showAll && currentOutlet ? ` untuk ${currentOutlet.name}` : ''}.
-                </p>
-                {isPerOutlet && !showAll && currentOutlet && !currentOutlet.inventori_cabang_name && totalCount > 0 && (
-                  <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mb-1 text-center">
-                    ⚠ Outlet ini belum dipetakan ke cabang inventori ({totalCount} rekomendasi ada di tab "Semua"). Atur kolom <strong>"Nama di Inventori"</strong> di Master Data → Outlet.
+              <div className="py-2 space-y-1.5">
+                {totalCount === 0 ? (
+                  <p className="text-xs text-gray-400 text-center py-2">
+                    ✅ Tidak ada rekomendasi pending ({filterLabel}).
                   </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-500 text-center py-1">
+                      Tidak ada rekomendasi untuk{' '}
+                      <strong>{currentOutlet?.name || 'cabang ini'}</strong>.
+                    </p>
+                    {!currentOutletMapped ? (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 text-center">
+                        ⚠ Outlet ini belum dipetakan ke cabang Inventori. Atur kolom{' '}
+                        <strong>"Nama di Inventori"</strong> di Master Data → Outlet.
+                      </p>
+                    ) : (
+                      <div className="text-xs text-orange-700 bg-orange-100/60 border border-orange-200 rounded-lg p-2 text-center">
+                        Ada <strong>{totalCount}</strong> rekomendasi pending di cabang lain
+                        {unmappedBranchCount > 0 && (
+                          <> ({unmappedBranchCount} belum termapping ke outlet PO)</>
+                        )}.
+                        <button
+                          onClick={() => setShowAll(true)}
+                          className="block w-full mt-1.5 underline font-medium hover:text-orange-900"
+                        >
+                          Lihat Semua
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -259,21 +487,12 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
                     item={item}
                     material={findMaterial(item)}
                     isAdded={addedIds.has(item.rekomendasi_id)}
-                    onAdd={onAddToOrder}
+                    onAdd={handleAdd}
+                    onIgnore={setIgnoreTarget}
                     showCabang={showCabang}
                   />
                 ))}
               </div>
-            )}
-
-            {!loading && !error && filteredItems.length > 0 && (
-              <button
-                type="button"
-                onClick={handleMarkProcessed}
-                className="w-full text-[11px] text-orange-400 hover:text-orange-600 mt-1 mb-1 py-1.5 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors"
-              >
-                Tandai {showAll || !isPerOutlet ? 'semua' : currentOutlet?.name} sudah diproses
-              </button>
             )}
           </div>
         </div>
