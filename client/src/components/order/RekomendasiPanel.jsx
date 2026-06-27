@@ -64,11 +64,23 @@ function PhotoLightbox({ url, onClose }) {
   );
 }
 
-function getGDriveThumbnailUrl(url) {
+// Foto stok dari Inventori bisa berupa:
+//  - URL langsung server gambar (Inventori baru: image.rotibakarngeunah.my.id/...jpg)
+//  - URL Google Drive lama (.../file/d/<id>/...) → pakai endpoint thumbnail Drive
+// Kembalikan { thumb, full } atau null bila bukan foto.
+function resolvePhoto(url) {
   if (!url) return null;
-  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  if (!match) return null;
-  return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w200`;
+  const gd = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (gd) {
+    return {
+      thumb: `https://drive.google.com/thumbnail?id=${gd[1]}&sz=w200`,
+      full: `https://drive.google.com/thumbnail?id=${gd[1]}&sz=w1200`,
+    };
+  }
+  if (/^https?:\/\//i.test(url)) {
+    return { thumb: url, full: url };
+  }
+  return null;
 }
 
 // ── Modal pilih alasan abaikan ─────────────────────────────────────────────────
@@ -151,8 +163,9 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
   const [lightbox, setLightbox] = useState(false);
   const [adding, setAdding] = useState(false);
   const hasNumber = item.tipe_stok !== 'foto' && item.stok_akhir !== null && item.stok_akhir !== undefined;
-  const thumbUrl = !hasNumber ? getGDriveThumbnailUrl(item.foto_url) : null;
-  const fullUrl  = thumbUrl ? `https://drive.google.com/thumbnail?id=${item.foto_url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1]}&sz=w1200` : null;
+  const photo = !hasNumber ? resolvePhoto(item.foto_url) : null;
+  const thumbUrl = photo?.thumb || null;
+  const fullUrl  = photo?.full || null;
   const unit = material?.package_unit || '';
 
   const canAddOutlet = !!item.po_outlet_id;
