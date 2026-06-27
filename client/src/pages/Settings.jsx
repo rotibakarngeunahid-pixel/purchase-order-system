@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import api from '../lib/api';
-import RotiTawarConfig from '../components/RotiTawarConfig';
 import Toast from '../components/ui/Toast';
 import useToast from '../components/ui/useToast';
 
@@ -317,10 +316,6 @@ export default function Settings() {
         </button>
       </div>
 
-      {/* Roti Tawar Auto-Calc Config */}
-      <Section title="Konfigurasi Roti Tawar Auto-Calc">
-        <RotiTawarConfig />
-      </Section>
     </div>
   );
 }

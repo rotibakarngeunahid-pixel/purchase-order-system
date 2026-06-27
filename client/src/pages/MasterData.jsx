@@ -665,7 +665,7 @@ function OutletsTab() {
   const [outlets, setOutlets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState({ name: '', inventori_cabang_name: '' });
+  const [form, setForm] = useState({ name: '', inventori_cabang_name: '', min_stock_roti: 0 });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [inventoriCabangList, setInventoriCabangList] = useState([]);
@@ -684,8 +684,8 @@ function OutletsTab() {
     setLoading(false);
   }
 
-  const startAdd = () => { setEditingId('new'); setForm({ name: '', inventori_cabang_name: '' }); setError(''); };
-  const startEdit = (o) => { setEditingId(o.id); setForm({ name: o.name, inventori_cabang_name: o.inventori_cabang_name || '' }); setError(''); };
+  const startAdd = () => { setEditingId('new'); setForm({ name: '', inventori_cabang_name: '', min_stock_roti: 0 }); setError(''); };
+  const startEdit = (o) => { setEditingId(o.id); setForm({ name: o.name, inventori_cabang_name: o.inventori_cabang_name || '', min_stock_roti: o.min_stock_roti ?? 0 }); setError(''); };
   const cancelEdit = () => { setEditingId(null); setError(''); };
 
   const handleSave = async () => {
@@ -725,7 +725,11 @@ function OutletsTab() {
               <th className="px-4 py-3 text-left font-medium text-gray-600">Nama Outlet</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">
                 Nama di Inventori
-                <span className="block text-[10px] font-normal text-gray-400">Untuk cocokkan rekomendasi staff</span>
+                <span className="block text-[10px] font-normal text-gray-400">Cocokkan rekomendasi staff & stok roti</span>
+              </th>
+              <th className="px-4 py-3 text-center font-medium text-gray-600">
+                Min Stok Roti
+                <span className="block text-[10px] font-normal text-gray-400">Auto-calc roti tawar</span>
               </th>
               <th className="px-4 py-3 text-center font-medium text-gray-600">Status</th>
               <th className="px-4 py-3 text-center font-medium text-gray-600">Aksi</th>
@@ -739,6 +743,9 @@ function OutletsTab() {
                 </td>
                 <td className="px-4 py-2">
                   <CabangSelect value={form.inventori_cabang_name} onChange={(v) => setForm((f) => ({ ...f, inventori_cabang_name: v }))} options={inventoriCabangList} />
+                </td>
+                <td className="px-4 py-2">
+                  <input type="number" min="0" className="input text-sm w-24 mx-auto text-center" value={form.min_stock_roti} onChange={(e) => setForm((f) => ({ ...f, min_stock_roti: Number(e.target.value) }))} />
                 </td>
                 <td />
                 <td className="px-4 py-2 text-center">
@@ -758,6 +765,9 @@ function OutletsTab() {
                   <td className="px-4 py-2">
                     <CabangSelect value={form.inventori_cabang_name} onChange={(v) => setForm((f) => ({ ...f, inventori_cabang_name: v }))} options={inventoriCabangList} />
                   </td>
+                  <td className="px-4 py-2">
+                    <input type="number" min="0" className="input text-sm w-24 mx-auto text-center" value={form.min_stock_roti} onChange={(e) => setForm((f) => ({ ...f, min_stock_roti: Number(e.target.value) }))} />
+                  </td>
                   <td />
                   <td className="px-4 py-2 text-center">
                     <div className="flex gap-2 justify-center">
@@ -771,6 +781,9 @@ function OutletsTab() {
                   <td className="px-4 py-3 font-medium text-gray-800">{o.name}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">
                     {o.inventori_cabang_name || <span className="text-gray-300 italic">—</span>}
+                  </td>
+                  <td className="px-4 py-3 text-center text-gray-600 tabular-nums">
+                    {o.min_stock_roti ? o.min_stock_roti : <span className="text-gray-300 italic">—</span>}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <button onClick={() => toggleActive(o)} className={`w-10 h-5 rounded-full transition-colors ${o.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>

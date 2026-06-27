@@ -3,7 +3,13 @@ const router = express.Router();
 const supabase = require('../services/supabase');
 const { getReportingDate, resolveRotiReferenceDate } = require('../services/reportingDate');
 
-const GAS_BASE = 'https://script.google.com/macros/s/AKfycbxEqwArPOXtQbAOoMSWoYRiUAUHZK3cCRecxxH39_SKpixUEy90WL20q5HqGf6hgFi4/exec';
+// Stok roti tawar diambil dari Sistem Inventori BARU (Next.js REST API publik),
+// menggantikan Google Apps Script lama. Pemetaan cabang & min stok kini dipusatkan
+// di Master Data → Outlet (kolom inventori_cabang_name + min_stock_roti).
+const API_BASE = () =>
+  (process.env.INVENTORY_API_URL || 'https://inventory.rotibakarngeunah.my.id/api')
+    .trim()
+    .replace(/\/+$/, '');
 
 function calcOptimalOrder(totalNeeded) {
   if (totalNeeded <= 0) return { order: 0, bonus: 0, fulfilled: 0 };
@@ -23,79 +29,78 @@ router.get('/preview', async (req, res) => {
   const orderDate = req.query.order_date || req.query.tanggal || getReportingDate();
   const referenceDate = req.query.reference_date || req.query.tanggal || resolveRotiReferenceDate(orderDate);
 
-  // Fetch stok dari GAS API menggunakan referenceDate
-  let gasData;
+  // 1) Stok roti tawar semua cabang dari inventori baru utk tanggal referensi
+  let rotiItems;
   try {
-    const gasRes = await fetch(`${GAS_BASE}?action=getDashboard&tanggal=${referenceDate}`, {
-      signal: AbortSignal.timeout(15000),
-    });
-    const gasJson = await gasRes.json();
-    if (gasJson.status !== 'ok' || !Array.isArray(gasJson.data)) {
-      throw new Error('Unexpected GAS response');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const url = `${API_BASE()}/dashboard/material-stock?date=${encodeURIComponent(referenceDate)}&q=${encodeURIComponent('roti tawar')}`;
+    const resp = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller.signal });
+    clearTimeout(timeout);
+    const body = await resp.json().catch(() => null);
+    if (!resp.ok || body?.success !== true) {
+      return res.status(502).json({ error: body?.error?.message || `Sistem inventori error (${resp.status})` });
     }
-    gasData = gasJson.data;
+    rotiItems = (body.data && body.data.items) || [];
   } catch (err) {
-    return res.status(502).json({ error: 'GAS API unreachable' });
+    const msg = err.name === 'AbortError'
+      ? 'Sistem inventori tidak merespons (timeout).'
+      : 'Sistem inventori tidak dapat dihubungi.';
+    return res.status(502).json({ error: msg });
   }
 
-  // Filter hanya baris roti tawar
-  const rotiRows = gasData.filter((row) =>
-    String(row.nama_bahan || '').toLowerCase().includes('roti tawar')
-  );
-
-  // Jika tidak ada data roti sama sekali untuk tanggal referensi, kembalikan error
-  if (rotiRows.length === 0) {
+  if (rotiItems.length === 0) {
     return res.status(422).json({
-      error: `Data stok roti untuk tanggal referensi ${referenceDate} belum tersedia. Pastikan data sudah diinput di sistem inventory.`,
+      error: `Data stok roti untuk tanggal referensi ${referenceDate} belum tersedia. Pastikan data sudah diinput di sistem inventori.`,
       order_date: orderDate,
       reference_date: referenceDate,
     });
   }
 
-  // Load mapping aktif
-  const { data: mappings, error: mapErr } = await supabase
-    .from('roti_branch_mapping')
-    .select('inv_cabang_id, display_name')
+  // 2) Outlet aktif yang dipetakan ke cabang inventori + punya min stok roti
+  const { data: outlets, error: outErr } = await supabase
+    .from('outlets')
+    .select('id, name, inventori_cabang_name, min_stock_roti, is_active')
     .eq('is_active', true);
+  if (outErr) return res.status(500).json({ error: outErr.message });
 
-  if (mapErr) return res.status(500).json({ error: mapErr.message });
-  if (!mappings || mappings.length === 0) {
-    return res.status(400).json({ error: 'No active branch mapping' });
+  const eligible = (outlets || []).filter(
+    (o) => o.inventori_cabang_name && Number(o.min_stock_roti) > 0
+  );
+  if (eligible.length === 0) {
+    return res.status(400).json({
+      error: 'Belum ada outlet dengan "Nama di Inventori" + "Min Stok Roti" terisi. Atur di Master Data → Outlet.',
+    });
   }
 
-  // Load min_stock
-  const { data: stocks, error: stockErr } = await supabase
-    .from('roti_min_stock')
-    .select('inv_cabang_id, min_stock');
-
-  if (stockErr) return res.status(500).json({ error: stockErr.message });
-
-  const stockMap = {};
-  (stocks || []).forEach((s) => { stockMap[s.inv_cabang_id] = s.min_stock; });
-
-  const hasMinStock = mappings.some((m) => stockMap[m.inv_cabang_id] != null);
-  if (!hasMinStock) {
-    return res.status(400).json({ error: 'No min stock configured' });
+  // 3) Map stok roti per nama cabang inventori (case-insensitive)
+  const stockByBranchName = new Map();
+  for (const it of rotiItems) {
+    const key = String(it.branch_name || '').trim().toLowerCase();
+    if (!key) continue;
+    const val = Math.floor(Number(it.stock_end) || 0);
+    // Jika ada >1 baris untuk satu cabang (mis. varian roti), jumlahkan.
+    stockByBranchName.set(key, (stockByBranchName.get(key) || 0) + val);
   }
 
+  // 4) Hitung kebutuhan per outlet
   const warnings = [];
-
-  // Hitung need per cabang
-  const branches = mappings.map((m) => {
-    const gasRow = rotiRows.find((r) => r.cabang_id === m.inv_cabang_id);
-    if (!gasRow) {
-      warnings.push(`Data stok cabang "${m.display_name}" tidak ditemukan pada tanggal referensi ${referenceDate}.`);
+  const branches = eligible.map((o) => {
+    const invKey = String(o.inventori_cabang_name).trim().toLowerCase();
+    const found = stockByBranchName.has(invKey);
+    if (!found) {
+      warnings.push(`Data stok cabang "${o.inventori_cabang_name}" (outlet ${o.name}) tidak ditemukan pada tanggal referensi ${referenceDate}.`);
     }
-    const currentStock = gasRow ? Math.floor(Number(gasRow.stok_akhir)) : 0;
-    const minStock = stockMap[m.inv_cabang_id] ?? 0;
+    const currentStock = found ? stockByBranchName.get(invKey) : 0;
+    const minStock = Number(o.min_stock_roti) || 0;
     const need = Math.max(0, minStock - currentStock);
     return {
-      inv_cabang_id: m.inv_cabang_id,
-      display_name: m.display_name,
+      inv_cabang_id: o.id,        // dipakai sebagai key unik di UI
+      display_name: o.name,       // dicocokkan ke outlet di frontend
       current_stock: currentStock,
       min_stock: minStock,
       need,
-      data_found: !!gasRow,
+      data_found: found,
     };
   });
 
@@ -113,84 +118,6 @@ router.get('/preview', async (req, res) => {
     branches,
     warnings,
   });
-});
-
-// GET /api/roti-tawar/mapping
-router.get('/mapping', async (req, res) => {
-  const { data: mappings, error: mapErr } = await supabase
-    .from('roti_branch_mapping')
-    .select('id, inv_cabang_id, display_name, is_active, created_at')
-    .order('created_at', { ascending: true });
-
-  if (mapErr) return res.status(500).json({ error: mapErr.message });
-
-  const { data: stocks, error: stockErr } = await supabase
-    .from('roti_min_stock')
-    .select('inv_cabang_id, min_stock');
-
-  if (stockErr) return res.status(500).json({ error: stockErr.message });
-
-  const stockMap = {};
-  (stocks || []).forEach((s) => { stockMap[s.inv_cabang_id] = s.min_stock; });
-
-  const result = (mappings || []).map((row) => ({
-    id: row.id,
-    inv_cabang_id: row.inv_cabang_id,
-    display_name: row.display_name,
-    is_active: row.is_active,
-    min_stock: stockMap[row.inv_cabang_id] ?? 0,
-  }));
-
-  res.json(result);
-});
-
-// PUT /api/roti-tawar/mapping
-router.put('/mapping', async (req, res) => {
-  const { mappings } = req.body;
-  if (!Array.isArray(mappings) || mappings.length === 0) {
-    return res.status(400).json({ error: 'mappings array wajib diisi' });
-  }
-
-  // Upsert roti_branch_mapping
-  const branchRows = mappings.map(({ inv_cabang_id, display_name, is_active }) => ({
-    inv_cabang_id,
-    display_name,
-    is_active: is_active ?? true,
-  }));
-
-  const { error: mapErr } = await supabase
-    .from('roti_branch_mapping')
-    .upsert(branchRows, { onConflict: 'inv_cabang_id' });
-
-  if (mapErr) return res.status(500).json({ error: mapErr.message });
-
-  // Upsert roti_min_stock
-  const stockRows = mappings.map(({ inv_cabang_id, min_stock }) => ({
-    inv_cabang_id,
-    min_stock: Number(min_stock) || 0,
-    updated_at: new Date().toISOString(),
-  }));
-
-  const { error: stockErr } = await supabase
-    .from('roti_min_stock')
-    .upsert(stockRows, { onConflict: 'inv_cabang_id' });
-
-  if (stockErr) return res.status(500).json({ error: stockErr.message });
-
-  res.json({ success: true });
-});
-
-// GET /api/roti-tawar/inventory-branches
-router.get('/inventory-branches', async (req, res) => {
-  try {
-    const gasRes = await fetch(`${GAS_BASE}?action=getCabang`, {
-      signal: AbortSignal.timeout(15000),
-    });
-    const gasJson = await gasRes.json();
-    res.json(gasJson);
-  } catch (err) {
-    res.status(502).json({ error: 'GAS API unreachable' });
-  }
 });
 
 module.exports = router;
