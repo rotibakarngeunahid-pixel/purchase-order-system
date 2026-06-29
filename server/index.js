@@ -24,6 +24,7 @@ const dataDeletionRouter = require('./routes/dataDeletion');
 const distributionPhotosRouter = require('./routes/distributionPhotos');
 const inventoriRekomendasiRouter = require('./routes/inventoriRekomendasi');
 const inventoriCabangRouter = require('./routes/inventoriCabang');
+const inventoriBahanRouter = require('./routes/inventoriBahan');
 const priceLogsRouter = require('./routes/priceLogs');
 
 const app = express();
@@ -100,6 +101,7 @@ app.use('/api/data-deletion', authMiddleware, dataDeletionRouter);
 app.use('/api/distribution-photos', authMiddleware, distributionPhotosRouter);
 app.use('/api/inventori/rekomendasi', authMiddleware, inventoriRekomendasiRouter);
 app.use('/api/inventori/cabang', authMiddleware, inventoriCabangRouter);
+app.use('/api/inventori/bahan', authMiddleware, inventoriBahanRouter);
 app.use('/api/price-logs', authMiddleware, priceLogsRouter);
 
 // Global error handler

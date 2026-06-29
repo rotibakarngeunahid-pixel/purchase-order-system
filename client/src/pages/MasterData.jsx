@@ -459,6 +459,185 @@ function SuppliersTab() {
   );
 }
 
+// ─── Bahan Mapping Modal ──────────────────────────────────────────────────────
+function BahanMappingModal({ material, onClose, onSaved }) {
+  const [invBahanList, setInvBahanList] = useState([]);
+  const [loadingList, setLoadingList] = useState(true);
+  const [selectedId, setSelectedId] = useState(material.inventory_material_id || '');
+  const [selectedName, setSelectedName] = useState(material.inventory_material_name || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  useModalDismiss(onClose);
+
+  useEffect(() => {
+    api.get('/api/inventori/bahan')
+      .then((res) => setInvBahanList(res.data?.data || []))
+      .catch(() => {})
+      .finally(() => setLoadingList(false));
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    setError('');
+    try {
+      await api.put(`/api/materials/${material.id}`, {
+        inventory_material_id: selectedId || null,
+        inventory_material_name: selectedName || null,
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+      setSaving(false);
+    }
+  }
+
+  async function handleClearLink() {
+    setSaving(true);
+    setError('');
+    try {
+      await api.put(`/api/materials/${material.id}`, {
+        inventory_material_id: null,
+        inventory_material_name: null,
+      });
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+      setSaving(false);
+    }
+  }
+
+  const isMapped = !!material.inventory_material_id;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="bg-brand-red px-6 py-4 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
+          <div>
+            <h3 className="text-white font-semibold text-base">Link Inventori</h3>
+            <p className="text-red-200 text-xs mt-0.5 truncate max-w-[260px]">{material.name}</p>
+          </div>
+          <button onClick={onClose} className="text-white hover:text-red-200 text-2xl leading-none">×</button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5">
+          {/* Info */}
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3.5 text-xs text-orange-800 leading-relaxed">
+            Hubungkan <strong>{material.name}</strong> ke bahan di sistem Inventori agar rekomendasi
+            staf otomatis terpetakan ke bahan ini.
+          </div>
+
+          {/* Status saat ini */}
+          {isMapped && (
+            <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl">
+              <span className="text-green-600 text-sm">✓</span>
+              <div>
+                <p className="text-xs font-semibold text-green-800">Sudah terhubung</p>
+                <p className="text-[11px] text-green-700 mt-0.5">
+                  {material.inventory_material_name || '(tanpa nama)'}{' '}
+                  <span className="text-green-500 font-mono">ID: {material.inventory_material_id}</span>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Pilih bahan inventori */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+              Bahan di Sistem Inventori
+            </label>
+            {loadingList ? (
+              <div className="input text-sm text-gray-400 cursor-wait">Memuat daftar bahan inventori...</div>
+            ) : invBahanList.length > 0 ? (
+              <select
+                className="input text-sm"
+                value={selectedId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const opt = invBahanList.find((b) => b.bahan_id === id);
+                  setSelectedId(id);
+                  setSelectedName(opt ? opt.nama_bahan : '');
+                }}
+              >
+                <option value="">— Pilih bahan dari inventori —</option>
+                {invBahanList.map((b) => (
+                  <option key={b.bahan_id} value={b.bahan_id}>
+                    {b.nama_bahan} (ID: {b.bahan_id})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <input
+                    className="input text-sm"
+                    placeholder="ID bahan inventori, cth: 5"
+                    value={selectedId}
+                    onChange={(e) => setSelectedId(e.target.value)}
+                  />
+                  <p className="text-[10px] text-gray-400 mt-1">
+                    Lihat ID di panel Rekomendasi Order — hover badge{' '}
+                    <span className="text-amber-600 font-medium">Perlu mapping bahan</span>.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Nama bahan (label, opsional)</label>
+                  <input
+                    className="input text-sm"
+                    placeholder="Nama bahan di sistem inventori"
+                    value={selectedName}
+                    onChange={(e) => setSelectedName(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {error && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 pb-5 flex items-center justify-between gap-3">
+          <div>
+            {isMapped && (
+              <button
+                onClick={handleClearLink}
+                disabled={saving}
+                className="text-xs text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+              >
+                Hapus Link
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="btn-outline text-sm">Batal</button>
+            <button
+              onClick={handleSave}
+              disabled={saving || !selectedId}
+              className="btn-primary text-sm"
+            >
+              {saving ? 'Menyimpan...' : 'Simpan Link'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Materials Tab ────────────────────────────────────────────────────────────
 function MaterialsTab() {
   const [materials, setMaterials] = useState([]);
@@ -468,6 +647,7 @@ function MaterialsTab() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [variantsFor, setVariantsFor] = useState(null);
+  const [mappingFor, setMappingFor] = useState(null);
 
   const emptyForm = { code: '', name: '', brand: '', supplier_id: '', package_qty: 1, package_unit: 'Pcs', purchase_unit: 'Pcs', price_per_purchase_unit: 0 };
   const [form, setForm] = useState(emptyForm);
@@ -553,6 +733,13 @@ function MaterialsTab() {
           onClose={() => setVariantsFor(null)}
         />
       )}
+      {mappingFor && (
+        <BahanMappingModal
+          material={mappingFor}
+          onClose={() => setMappingFor(null)}
+          onSaved={reload}
+        />
+      )}
 
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-gray-500">{materials.length} bahan terdaftar</p>
@@ -606,7 +793,26 @@ function MaterialsTab() {
                 ) : (
                   <tr key={m.id} className={`hover:bg-gray-50 ${!m.is_active ? 'opacity-50' : ''}`}>
                     <td className="px-3 py-3 font-mono text-xs text-gray-600">{m.code}</td>
-                    <td className="px-3 py-3 font-medium text-gray-800">{m.name}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-medium text-gray-800">{m.name}</span>
+                        {m.inventory_material_id ? (
+                          <span
+                            className="text-[9px] text-green-700 bg-green-50 border border-green-200 px-1 py-px rounded whitespace-nowrap"
+                            title={`Terhubung ke: ${m.inventory_material_name || m.inventory_material_id} (ID: ${m.inventory_material_id})`}
+                          >
+                            Inv ID ✓
+                          </span>
+                        ) : (
+                          <span
+                            className="text-[9px] text-amber-600 bg-amber-50 border border-amber-200 px-1 py-px rounded whitespace-nowrap"
+                            title="Belum terhubung ke bahan inventori — klik Link untuk memetakan"
+                          >
+                            Belum dipetakan
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-3 text-gray-500 text-xs">{m.brand || <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-3 text-gray-600">{m.supplier?.name || <span className="text-gray-300">—</span>}</td>
                     <td className="px-3 py-3 text-center text-gray-600">{m.package_qty}</td>
@@ -622,6 +828,7 @@ function MaterialsTab() {
                       <div className="flex gap-2 justify-center">
                         <button onClick={() => startEdit(m)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
                         <button onClick={() => setVariantsFor(m)} className="text-blue-600 text-xs font-medium hover:underline">Varian</button>
+                        <button onClick={() => setMappingFor(m)} className="text-purple-600 text-xs font-medium hover:underline">Link</button>
                       </div>
                     </td>
                   </tr>

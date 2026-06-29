@@ -210,7 +210,10 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
                 ✓ Ditambahkan
               </span>
             ) : !canAddMaterial ? (
-              <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
+              <span
+                className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-medium whitespace-nowrap cursor-help"
+                title={`Bahan "${item.nama_bahan}" (ID inventori: ${item.bahan_id}) belum terpetakan ke bahan PO.\nBuka Master Data → Bahan Baku → klik Link pada bahan yang sesuai.`}
+              >
                 Perlu mapping bahan
               </span>
             ) : !canAddOutlet ? (
