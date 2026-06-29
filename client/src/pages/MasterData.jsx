@@ -797,19 +797,21 @@ function MaterialsTab() {
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-medium text-gray-800">{m.name}</span>
                         {m.inventory_material_id ? (
-                          <span
-                            className="text-[9px] text-green-700 bg-green-50 border border-green-200 px-1 py-px rounded whitespace-nowrap"
-                            title={`Terhubung ke: ${m.inventory_material_name || m.inventory_material_id} (ID: ${m.inventory_material_id})`}
+                          <button
+                            onClick={() => setMappingFor(m)}
+                            className="text-[9px] text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded whitespace-nowrap hover:bg-green-100 transition-colors cursor-pointer"
+                            title={`Terhubung ke: ${m.inventory_material_name || m.inventory_material_id} (ID: ${m.inventory_material_id}) — klik untuk ubah`}
                           >
-                            Inv ID ✓
-                          </span>
+                            🔗 {m.inventory_material_name || `ID ${m.inventory_material_id}`}
+                          </button>
                         ) : (
-                          <span
-                            className="text-[9px] text-amber-600 bg-amber-50 border border-amber-200 px-1 py-px rounded whitespace-nowrap"
-                            title="Belum terhubung ke bahan inventori — klik Link untuk memetakan"
+                          <button
+                            onClick={() => setMappingFor(m)}
+                            className="text-[9px] text-amber-700 bg-amber-50 border border-amber-300 border-dashed px-1.5 py-0.5 rounded whitespace-nowrap hover:bg-amber-100 transition-colors cursor-pointer"
+                            title="Belum terhubung ke bahan inventori — klik untuk memetakan"
                           >
-                            Belum dipetakan
-                          </span>
+                            + Link Inventori
+                          </button>
                         )}
                       </div>
                     </td>
@@ -828,7 +830,6 @@ function MaterialsTab() {
                       <div className="flex gap-2 justify-center">
                         <button onClick={() => startEdit(m)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
                         <button onClick={() => setVariantsFor(m)} className="text-blue-600 text-xs font-medium hover:underline">Varian</button>
-                        <button onClick={() => setMappingFor(m)} className="text-purple-600 text-xs font-medium hover:underline">Link</button>
                       </div>
                     </td>
                   </tr>
