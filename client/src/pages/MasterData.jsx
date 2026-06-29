@@ -571,7 +571,7 @@ function BahanMappingModal({ material, onClose, onSaved }) {
                 <option value="">— Pilih bahan dari inventori —</option>
                 {invBahanList.map((b) => (
                   <option key={b.bahan_id} value={b.bahan_id}>
-                    {b.nama_bahan} (ID: {b.bahan_id})
+                    {b.nama_bahan}{b.kategori ? ` — ${b.kategori}` : ''}{b.satuan ? ` (${b.satuan})` : ''}
                   </option>
                 ))}
               </select>
