@@ -318,21 +318,42 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
 
   const isPerOutlet = inputMode === 'per-outlet';
 
+  // Deduplikasi: jika material + outlet sama muncul di beberapa tanggal (staff
+  // lapor berulang karena belum diproses), tampilkan hanya yang paling baru.
+  // _groupIds menyimpan semua rekomendasi_id dalam grup agar saat ignore/tambah
+  // semua entry lama ikut diproses sekaligus.
+  const deduplicatedItems = useMemo(() => {
+    const groups = new Map();
+    for (const item of items) {
+      const matKey = item.po_material_id != null ? `m:${item.po_material_id}` : `b:${item.bahan_id}`;
+      const outKey = item.po_outlet_id != null ? `o:${item.po_outlet_id}` : `c:${item.cabang_id}`;
+      const key = `${matKey}|${outKey}`;
+      const g = groups.get(key);
+      if (!g) {
+        groups.set(key, { rep: item, ids: [item.rekomendasi_id] });
+      } else {
+        g.ids.push(item.rekomendasi_id);
+        if ((item.tanggal || '') > (g.rep.tanggal || '')) g.rep = item;
+      }
+    }
+    return Array.from(groups.values()).map(({ rep, ids }) => ({ ...rep, _groupIds: ids }));
+  }, [items]);
+
   const thisOutletItems = useMemo(() => {
-    if (!currentOutlet) return items;
-    return items.filter(
+    if (!currentOutlet) return deduplicatedItems;
+    return deduplicatedItems.filter(
       (item) => item.po_outlet_id && String(item.po_outlet_id) === String(currentOutlet.id)
     );
-  }, [items, currentOutlet]);
+  }, [deduplicatedItems, currentOutlet]);
 
   const filteredItems = useMemo(() => {
-    if (!isPerOutlet || showAll || !currentOutlet) return items;
+    if (!isPerOutlet || showAll || !currentOutlet) return deduplicatedItems;
     return thisOutletItems;
-  }, [items, thisOutletItems, isPerOutlet, showAll, currentOutlet]);
+  }, [deduplicatedItems, thisOutletItems, isPerOutlet, showAll, currentOutlet]);
 
   const unmappedBranchCount = useMemo(
-    () => items.filter((i) => !i.po_outlet_id).length,
-    [items]
+    () => deduplicatedItems.filter((i) => !i.po_outlet_id).length,
+    [deduplicatedItems]
   );
   const currentOutletMapped = !!(
     currentOutlet && (currentOutlet.inventori_branch_id || currentOutlet.inventori_cabang_name)
@@ -349,13 +370,16 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   }
 
   // Abaikan eksplisit dengan alasan → tandai processed di Inventori + buang lokal.
+  // _groupIds berisi semua rekomendasi_id dalam grup (termasuk duplikat lama).
   async function handleIgnoreConfirm(item, reason) {
+    const groupIds = item._groupIds || [item.rekomendasi_id];
     try {
       await api.post('/api/inventori/rekomendasi/process', {
-        rekomendasi_ids: [item.rekomendasi_id],
+        rekomendasi_ids: groupIds,
         note: `Diabaikan oleh admin PO: ${reason}`,
       });
-      setItems((prev) => prev.filter((i) => i.rekomendasi_id !== item.rekomendasi_id));
+      const idsSet = new Set(groupIds);
+      setItems((prev) => prev.filter((i) => !idsSet.has(i.rekomendasi_id)));
       setIgnoreTarget(null);
       return true;
     } catch (_) {
@@ -364,7 +388,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   }
 
   const showCabang = !isPerOutlet || showAll;
-  const totalCount = items.length;
+  const totalCount = deduplicatedItems.length;
   const displayCount = filteredItems.length;
 
   const filterLabel =
@@ -502,7 +526,11 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
                     key={item.rekomendasi_id}
                     item={item}
                     material={findMaterial(item)}
-                    isAdded={addedIds.has(item.rekomendasi_id)}
+                    isAdded={
+                      item._groupIds
+                        ? item._groupIds.some((id) => addedIds.has(id))
+                        : addedIds.has(item.rekomendasi_id)
+                    }
                     onAdd={handleAdd}
                     onIgnore={setIgnoreTarget}
                     showCabang={showCabang}

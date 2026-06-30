@@ -455,10 +455,12 @@ export default function OrderEntry() {
     }
 
     // Order tersimpan → tandai ditambahkan (UI) lalu proses rekomendasi (best-effort).
-    setRekAddedIds((prev) => new Set([...prev, item.rekomendasi_id]));
+    // _groupIds berisi semua ID duplikat (lintas tanggal) agar semuanya diproses.
+    const groupIds = item._groupIds || [item.rekomendasi_id];
+    setRekAddedIds((prev) => new Set([...prev, ...groupIds]));
     try {
       await api.post('/api/inventori/rekomendasi/process', {
-        rekomendasi_ids: [item.rekomendasi_id],
+        rekomendasi_ids: groupIds,
         note: `Ditambahkan ke order PO${sess?.id ? ` ${sess.id}` : ''}, outlet ${targetOutlet.name}, bahan ${item.nama_bahan}, qty ${newQty}`,
       });
     } catch (_) {
