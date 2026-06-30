@@ -272,6 +272,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   const [items, setItems]       = useState([]);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(null);
+  const [truncated, setTruncated] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [showAll, setShowAll]   = useState(false);
   const [dateFilter, setDateFilter] = useState('7d');
@@ -283,6 +284,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   async function fetchRekomendasi() {
     setLoading(true);
     setError(null);
+    setTruncated(false);
     try {
       const params = new URLSearchParams({ status: 'pending' });
       const today = getLocalOperationalDate();
@@ -300,6 +302,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
       // 'all' → tanpa parameter tanggal (semua pending lintas tanggal)
       const res = await api.get(`/api/inventori/rekomendasi?${params.toString()}`);
       setItems(res.data?.data || []);
+      setTruncated(res.data?.meta?.truncated === true);
     } catch (err) {
       if (err.response?.status === 503) {
         setError('Integrasi inventori belum aktif di server. Hubungi admin untuk mengatur env INVENTORY_API_URL di server.');
@@ -322,11 +325,20 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   // lapor berulang karena belum diproses), tampilkan hanya yang paling baru.
   // _groupIds menyimpan semua rekomendasi_id dalam grup agar saat ignore/tambah
   // semua entry lama ikut diproses sekaligus.
+  // Catatan null-safety: jika bahan_id/cabang_id null (material_id tidak diketahui
+  // dari inventori), pakai rekomendasi_id sebagai fallback agar item berbeda TIDAK
+  // di-collapse ke satu grup hanya karena ID-nya sama-sama null.
   const deduplicatedItems = useMemo(() => {
     const groups = new Map();
     for (const item of items) {
-      const matKey = item.po_material_id != null ? `m:${item.po_material_id}` : `b:${item.bahan_id}`;
-      const outKey = item.po_outlet_id != null ? `o:${item.po_outlet_id}` : `c:${item.cabang_id}`;
+      const validBahan = item.bahan_id != null && item.bahan_id !== 'null' && item.bahan_id !== 'undefined';
+      const validCabang = item.cabang_id != null && item.cabang_id !== 'null' && item.cabang_id !== 'undefined';
+      const matKey = item.po_material_id != null
+        ? `m:${item.po_material_id}`
+        : validBahan ? `b:${item.bahan_id}` : `x:${item.rekomendasi_id}`;
+      const outKey = item.po_outlet_id != null
+        ? `o:${item.po_outlet_id}`
+        : validCabang ? `c:${item.cabang_id}` : `y:${item.rekomendasi_id}`;
       const key = `${matKey}|${outKey}`;
       const g = groups.get(key);
       if (!g) {
@@ -470,6 +482,12 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
             {loading && (
               <div className="text-xs text-orange-600 text-center py-3">
                 <span className="inline-block animate-spin mr-1">⟳</span> Memuat...
+              </div>
+            )}
+
+            {!loading && truncated && (
+              <div className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2 my-2">
+                ⚠ API inventori hanya mengembalikan sebagian data (terpotong). Kemungkinan ada rekomendasi yang tidak muncul. Hubungi admin inventori untuk meningkatkan limit per_page.
               </div>
             )}
 

@@ -106,6 +106,8 @@ router.get('/', async (req, res) => {
   try {
     const params = new URLSearchParams();
     params.set('status', String(status));
+    params.set('per_page', '500');   // minta semua sekaligus; cegah pagination tersembunyi
+    params.set('limit', '500');      // fallback nama param lain yang umum
     if (date_from) params.set('date_from', String(date_from));
     if (date_to) params.set('date_to', String(date_to));
     if (tanggal) params.set('date', String(tanggal));
@@ -127,6 +129,8 @@ router.get('/', async (req, res) => {
 
     const rowsRaw = (body.data && body.data.recommendations) || [];
     const meta = (body.data && body.data.meta) || null;
+    // total item di API (untuk deteksi pagination tersembunyi)
+    const apiTotal = meta?.total ?? meta?.count ?? meta?.totalCount ?? rowsRaw.length;
     const [outletMap, poMatMap] = await Promise.all([loadOutletMap(), loadPoMaterialMap()]);
 
     let unmappedBranch = 0;
@@ -140,11 +144,11 @@ router.get('/', async (req, res) => {
       return {
         rekomendasi_id:        String(r.id),
         tanggal:               r.report_date,
-        cabang_id:             String(r.branch_id),
+        cabang_id:             r.branch_id   != null ? String(r.branch_id)   : null,
         nama_cabang:           r.branch_name || '',
-        staff_id:              r.staff_id != null ? String(r.staff_id) : '',
+        staff_id:              r.staff_id    != null ? String(r.staff_id)    : '',
         nama_staff:            r.staff_name || '',
-        bahan_id:              String(r.material_id),
+        bahan_id:              r.material_id != null ? String(r.material_id) : null,
         nama_bahan:            r.material_name || '',
         tipe_stok:             r.input_type || 'foto',
         stok_akhir:            (r.stock_end !== null && r.stock_end !== undefined && r.stock_end !== '') ? Number(r.stock_end) : null,
@@ -169,6 +173,8 @@ router.get('/', async (req, res) => {
       meta: {
         ...(meta || {}),
         returned: data.length,
+        total_in_api: apiTotal,
+        truncated: rowsRaw.length < apiTotal,
         unmapped_branch: unmappedBranch,
         unmapped_material: unmappedMaterial,
       },
