@@ -74,10 +74,12 @@ export default function OrderEntry() {
   const orderDateRef = useRef(orderDate);
   const rekItemsRef = useRef([]);
   const rekAddedIdsRef = useRef(rekAddedIds);
+  const matrixRef = useRef(matrix);
   sessionRef.current = session;
   orderDateRef.current = orderDate;
   rekItemsRef.current = rekItems;
   rekAddedIdsRef.current = rekAddedIds;
+  matrixRef.current = matrix;
 
   const handleRekItemsChange = useCallback((items) => setRekItems(items), []);
 
@@ -122,6 +124,31 @@ export default function OrderEntry() {
       // pending di Inventori dan muncul lagi saat panel di-refresh.
     }
   };
+
+  // Rekonsiliasi: rekomendasi pending yang bahannya SUDAH terisi qty > 0 di
+  // order draft (mis. qty diisi sebelum data rekomendasi termuat, atau diisi
+  // pagi hari lalu sesi dibuka ulang) → langsung ditandai "Ditambahkan".
+  // Berjalan saat data rekomendasi atau sesi (beserta item ordernya) termuat.
+  useEffect(() => {
+    const locked = !!(session?.status && session.status !== 'draft');
+    if (locked || rekItems.length === 0) return;
+    const m = matrixRef.current;
+    const idsToProcess = [];
+    for (const it of rekItems) {
+      if (!it.po_outlet_id || !it.po_material_id) continue;
+      const ids = it._groupIds || [it.rekomendasi_id];
+      if (ids.some((id) => rekAddedIdsRef.current.has(id))) continue;
+      const qty = Number(m[getMatrixKey(it.po_outlet_id, it.po_material_id)]) || 0;
+      if (qty > 0) idsToProcess.push(...ids);
+    }
+    if (idsToProcess.length === 0) return;
+    setRekAddedIds((prev) => new Set([...prev, ...idsToProcess]));
+    const sessId = sessionRef.current?.id;
+    api.post('/api/inventori/rekomendasi/process', {
+      rekomendasi_ids: idsToProcess,
+      note: `Dipenuhi manual via input order${sessId ? ` PO ${sessId}` : ''} (qty sudah terisi)`,
+    }).catch(() => { /* best-effort; tetap pending bila gagal */ });
+  }, [rekItems, session]);
 
   // --- Holiday helpers ---
   // holidayMap format: { [outlet_id]: { date1_holiday, calculation_days } }
