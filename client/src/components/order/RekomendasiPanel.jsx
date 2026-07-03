@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import api, {
   formatDateID,
@@ -19,11 +19,11 @@ function daysBetween(fromStr, toStr) {
   return Math.round((b - a) / 86400000);
 }
 
+// Hanya H-1 (default) dan H-2. Rekomendasi lebih lama dianggap kedaluwarsa
+// karena staff melapor ulang tiap malam (permintaan admin, Jul 2026).
 const DATE_FILTERS = [
-  { id: '7d', label: '7 Hari' },
-  { id: 'today', label: 'Hari Ini' },
   { id: 'yesterday', label: 'Kemarin' },
-  { id: 'all', label: 'Semua' },
+  { id: '2days', label: '2 Hari Lalu' },
 ];
 
 const IGNORE_REASONS = [
@@ -275,12 +275,8 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   const [truncated, setTruncated] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [showAll, setShowAll]   = useState(false);
-  const [dateFilter, setDateFilter] = useState('7d');
+  const [dateFilter, setDateFilter] = useState('yesterday');
   const [ignoreTarget, setIgnoreTarget] = useState(null);
-  // Auto-buka tab "Semua" hanya SEKALI saat data pertama masuk, agar rekomendasi
-  // cabang lain tidak tersembunyi ketika outlet aktif kebetulan tidak punya
-  // rekomendasi (mis. halaman selalu terbuka di outlet pertama).
-  const autoShowAllDone = useRef(false);
 
   // Refetch saat filter tanggal atau tanggal order berubah (RF-09).
   useEffect(() => { fetchRekomendasi(); /* eslint-disable-next-line */ }, [dateFilter, orderDate]);
@@ -291,19 +287,16 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     setTruncated(false);
     try {
       const params = new URLSearchParams({ status: 'pending' });
-      const today = getLocalOperationalDate();
-      if (dateFilter === '7d') {
-        params.set('date_from', shiftDate(today, -7));
-        params.set('date_to', today);
-      } else if (dateFilter === 'today') {
-        params.set('date_from', today);
-        params.set('date_to', today);
-      } else if (dateFilter === 'yesterday') {
+      if (dateFilter === '2days') {
+        const d2 = shiftDate(getLocalOperationalDate(), -2);
+        params.set('date_from', d2);
+        params.set('date_to', d2);
+      } else {
+        // default: kemarin (H-1) — laporan malam terakhir dari staff
         const y = getLocalOperationalYesterday();
         params.set('date_from', y);
         params.set('date_to', y);
       }
-      // 'all' → tanpa parameter tanggal (semua pending lintas tanggal)
       const res = await api.get(`/api/inventori/rekomendasi?${params.toString()}`);
       setItems(res.data?.data || []);
       setTruncated(res.data?.meta?.truncated === true);
@@ -368,15 +361,6 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     );
   }, [deduplicatedItems, currentOutlet]);
 
-  // Outlet aktif tidak punya rekomendasi tapi cabang lain punya → tampilkan
-  // "Semua" otomatis (sekali) agar tidak terlihat seperti "tidak terdeteksi".
-  useEffect(() => {
-    if (autoShowAllDone.current || loading) return;
-    if (deduplicatedItems.length === 0) return;
-    autoShowAllDone.current = true;
-    if (isPerOutlet && currentOutlet && thisOutletItems.length === 0) setShowAll(true);
-  }, [loading, deduplicatedItems, thisOutletItems, isPerOutlet, currentOutlet]);
-
   const filteredItems = useMemo(() => {
     if (!isPerOutlet || showAll || !currentOutlet) return deduplicatedItems;
     return thisOutletItems;
@@ -421,11 +405,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   const showCabang = !isPerOutlet || showAll;
   const totalCount = deduplicatedItems.length;
 
-  const filterLabel =
-    dateFilter === '7d' ? '7 hari terakhir'
-    : dateFilter === 'today' ? 'hari ini'
-    : dateFilter === 'yesterday' ? 'kemarin'
-    : 'semua tanggal';
+  const filterLabel = dateFilter === '2days' ? '2 hari lalu' : 'kemarin';
 
   return (
     <div className="bg-orange-50 border border-orange-200 rounded-xl overflow-hidden">
