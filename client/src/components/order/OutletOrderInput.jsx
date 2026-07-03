@@ -39,6 +39,8 @@ export default function OutletOrderInput({
   // Controlled state dari parent (opsional — jika tidak diberikan, pakai local state)
   selectedOutletIdx,
   onSelectOutletIdx,
+  // { [outlet_id]: Set(material_id) } — rekomendasi staff pending dari Inventori
+  recommendedByOutlet = {},
 }) {
   const [localIdx, setLocalIdx] = useState(0);
   // Gunakan controlled state jika disediakan parent, otherwise local
@@ -64,6 +66,11 @@ export default function OutletOrderInput({
   const info = holidayMap[selectedOutlet.id] || null;
   const isOverridden = outletOverride[selectedOutlet.id] || false;
   const hasHoliday = !!info;
+  const recommendedSet = recommendedByOutlet[String(selectedOutlet.id)] || null;
+  const recCount = (id) => {
+    const s = recommendedByOutlet[String(id)];
+    return s ? s.size : 0;
+  };
 
   return (
     <div className="flex gap-4 items-start">
@@ -152,6 +159,14 @@ export default function OutletOrderInput({
                   )}
                 </div>
 
+                {recCount(outlet.id) > 0 && (
+                  <span
+                    title={`${recCount(outlet.id)} rekomendasi staff belum diproses`}
+                    className="text-[10px] font-bold bg-orange-100 text-orange-600 border border-orange-200 rounded-full px-1.5 py-0.5 flex-shrink-0 tabular-nums"
+                  >
+                    📋 {recCount(outlet.id)}
+                  </span>
+                )}
                 {total > 0 && (
                   <span
                     className={`text-xs font-bold tabular-nums flex-shrink-0 ${
@@ -210,6 +225,15 @@ export default function OutletOrderInput({
                       />
                     )}
                     <span className="whitespace-nowrap">{outlet.name}</span>
+                    {recCount(outlet.id) > 0 && (
+                      <span
+                        className={`text-[10px] font-bold rounded-full px-1 ${
+                          active ? 'bg-orange-200 text-orange-800' : 'bg-orange-100 text-orange-600'
+                        }`}
+                      >
+                        📋{recCount(outlet.id)}
+                      </span>
+                    )}
                     {total > 0 && (
                       <span
                         className={`text-xs font-bold rounded-full px-1.5 ${
@@ -370,6 +394,7 @@ export default function OutletOrderInput({
               const stockLow = stockInfo && stockInfo.current_stock < stockInfo.min_stock;
               const icon = getMaterialIcon(mat.name);
               const hue = getMaterialHue(mat.name);
+              const isRecommended = !!(recommendedSet && recommendedSet.has(mat.id));
 
               return (
                 <div
@@ -377,6 +402,8 @@ export default function OutletOrderInput({
                   className={`rounded-xl border p-3.5 transition-all duration-200 hover:scale-[1.015] hover:shadow-md active:scale-100 cursor-default ${
                     isFilled
                       ? 'border-green-200 bg-green-50 shadow-sm'
+                      : isRecommended
+                      ? 'border-orange-300 bg-orange-50 shadow-sm ring-1 ring-orange-200'
                       : `${hue.border} ${hue.bg} hover:shadow-sm`
                   }`}
                 >
@@ -404,6 +431,14 @@ export default function OutletOrderInput({
                       {isRoti && (
                         <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full">
                           Roti Tawar
+                        </span>
+                      )}
+                      {isRecommended && (
+                        <span
+                          title="Staff inventori merekomendasikan bahan ini untuk diorder"
+                          className="text-[10px] font-semibold bg-orange-100 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded-full"
+                        >
+                          📋 Rekomendasi staff
                         </span>
                       )}
                     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import api, {
   formatDateID,
@@ -268,7 +268,7 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
   );
 }
 
-export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, currentOutlet, inputMode, orderDate }) {
+export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, currentOutlet, inputMode, orderDate, onItemsChange }) {
   const [items, setItems]       = useState([]);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState(null);
@@ -277,6 +277,10 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   const [showAll, setShowAll]   = useState(false);
   const [dateFilter, setDateFilter] = useState('7d');
   const [ignoreTarget, setIgnoreTarget] = useState(null);
+  // Auto-buka tab "Semua" hanya SEKALI saat data pertama masuk, agar rekomendasi
+  // cabang lain tidak tersembunyi ketika outlet aktif kebetulan tidak punya
+  // rekomendasi (mis. halaman selalu terbuka di outlet pertama).
+  const autoShowAllDone = useRef(false);
 
   // Refetch saat filter tanggal atau tanggal order berubah (RF-09).
   useEffect(() => { fetchRekomendasi(); /* eslint-disable-next-line */ }, [dateFilter, orderDate]);
@@ -351,12 +355,27 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     return Array.from(groups.values()).map(({ rep, ids }) => ({ ...rep, _groupIds: ids }));
   }, [items]);
 
+  // Laporkan hasil dedup ke parent (OrderEntry) supaya bisa dipakai menandai
+  // bahan rekomendasi di kartu input & auto-proses saat qty diisi manual.
+  useEffect(() => {
+    if (onItemsChange) onItemsChange(deduplicatedItems);
+  }, [deduplicatedItems, onItemsChange]);
+
   const thisOutletItems = useMemo(() => {
     if (!currentOutlet) return deduplicatedItems;
     return deduplicatedItems.filter(
       (item) => item.po_outlet_id && String(item.po_outlet_id) === String(currentOutlet.id)
     );
   }, [deduplicatedItems, currentOutlet]);
+
+  // Outlet aktif tidak punya rekomendasi tapi cabang lain punya → tampilkan
+  // "Semua" otomatis (sekali) agar tidak terlihat seperti "tidak terdeteksi".
+  useEffect(() => {
+    if (autoShowAllDone.current || loading) return;
+    if (deduplicatedItems.length === 0) return;
+    autoShowAllDone.current = true;
+    if (isPerOutlet && currentOutlet && thisOutletItems.length === 0) setShowAll(true);
+  }, [loading, deduplicatedItems, thisOutletItems, isPerOutlet, currentOutlet]);
 
   const filteredItems = useMemo(() => {
     if (!isPerOutlet || showAll || !currentOutlet) return deduplicatedItems;
@@ -401,7 +420,6 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
 
   const showCabang = !isPerOutlet || showAll;
   const totalCount = deduplicatedItems.length;
-  const displayCount = filteredItems.length;
 
   const filterLabel =
     dateFilter === '7d' ? '7 hari terakhir'
@@ -427,9 +445,11 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-orange-800">📋 Rekomendasi Staff</span>
+          {/* Badge = TOTAL pending semua cabang, agar rekomendasi tetap terdeteksi
+              meski outlet yang sedang dipilih kebetulan tidak punya rekomendasi. */}
           {!loading && totalCount > 0 && (
             <span className="text-[11px] bg-orange-500 text-white px-1.5 py-0.5 rounded-full font-bold leading-none">
-              {displayCount}
+              {totalCount}
             </span>
           )}
         </div>

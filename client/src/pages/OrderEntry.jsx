@@ -62,6 +62,9 @@ export default function OrderEntry() {
   const [showRotiDistModal, setShowRotiDistModal] = useState(false);
   const [rotiDistQtys, setRotiDistQtys] = useState({});
   const [rekAddedIds, setRekAddedIds] = useState(new Set());
+  // Rekomendasi staff (hasil dedup dari RekomendasiPanel) di-lift ke sini agar
+  // bisa dipakai menandai bahan di kartu input & auto-proses saat qty diisi manual.
+  const [rekItems, setRekItems] = useState([]);
 
   // Refs for use inside async callbacks
   const saveTimers = useRef({});
@@ -69,8 +72,56 @@ export default function OrderEntry() {
   const savedTimer = useRef(null);
   const sessionRef = useRef(null);
   const orderDateRef = useRef(orderDate);
+  const rekItemsRef = useRef([]);
+  const rekAddedIdsRef = useRef(rekAddedIds);
   sessionRef.current = session;
   orderDateRef.current = orderDate;
+  rekItemsRef.current = rekItems;
+  rekAddedIdsRef.current = rekAddedIds;
+
+  const handleRekItemsChange = useCallback((items) => setRekItems(items), []);
+
+  // Peta outlet → Set(material_id PO) dari rekomendasi pending yang belum
+  // ditambahkan, untuk menandai kartu bahan di mode per-outlet.
+  const rekPendingByOutlet = useMemo(() => {
+    const map = {};
+    for (const item of rekItems) {
+      if (!item.po_outlet_id || !item.po_material_id) continue;
+      const ids = item._groupIds || [item.rekomendasi_id];
+      if (ids.some((id) => rekAddedIds.has(id))) continue;
+      const key = String(item.po_outlet_id);
+      if (!map[key]) map[key] = new Set();
+      map[key].add(item.po_material_id);
+    }
+    return map;
+  }, [rekItems, rekAddedIds]);
+
+  // Qty diisi manual (stepper/matrix) untuk bahan+outlet yang sedang
+  // direkomendasikan staff → tandai rekomendasi 'processed' di Inventori juga.
+  // Tanpa ini rekomendasi menumpuk pending berhari-hari padahal bahannya
+  // sudah diorder (mis. kasus Nanas/Mentega yang diisi manual tiap hari).
+  const processRekForCell = async (outletId, materialId, qty, sessId) => {
+    if (!qty || qty <= 0) return;
+    const matches = rekItemsRef.current.filter(
+      (it) =>
+        it.po_outlet_id && it.po_material_id &&
+        String(it.po_outlet_id) === String(outletId) &&
+        String(it.po_material_id) === String(materialId) &&
+        !(it._groupIds || [it.rekomendasi_id]).some((id) => rekAddedIdsRef.current.has(id))
+    );
+    if (matches.length === 0) return;
+    const ids = matches.flatMap((it) => it._groupIds || [it.rekomendasi_id]);
+    setRekAddedIds((prev) => new Set([...prev, ...ids]));
+    try {
+      await api.post('/api/inventori/rekomendasi/process', {
+        rekomendasi_ids: ids,
+        note: `Dipenuhi manual via input order${sessId ? ` PO ${sessId}` : ''}, qty ${qty}`,
+      });
+    } catch (_) {
+      // Best-effort: order sudah tersimpan; bila gagal, rekomendasi tetap
+      // pending di Inventori dan muncul lagi saat panel di-refresh.
+    }
+  };
 
   // --- Holiday helpers ---
   // holidayMap format: { [outlet_id]: { date1_holiday, calculation_days } }
@@ -252,6 +303,9 @@ export default function OrderEntry() {
           qty: pending.qty,
         });
         showSaved();
+        // Order tersimpan → bila bahan ini sedang direkomendasikan staff untuk
+        // outlet ini, tandai rekomendasinya selesai (best-effort, non-blocking).
+        processRekForCell(pending.outletId, pending.materialId, pending.qty, sess.id);
       } catch (err) {
         setSaveStatus('error');
         setSaveError('Gagal menyimpan. Coba ketik ulang atau refresh halaman.');
@@ -790,6 +844,7 @@ export default function OrderEntry() {
               onCancelOverride={handleCancelOverride}
               selectedOutletIdx={selectedOutletIdx}
               onSelectOutletIdx={setSelectedOutletIdx}
+              recommendedByOutlet={rekPendingByOutlet}
             />
           )}
           {inputMode === 'per-bahan' && (
@@ -820,6 +875,7 @@ export default function OrderEntry() {
             currentOutlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
             inputMode={inputMode}
             orderDate={orderDate}
+            onItemsChange={handleRekItemsChange}
           />
           <RotiTawarPanel {...rotiPanelProps} />
         </div>
@@ -842,6 +898,7 @@ export default function OrderEntry() {
           currentOutlet={outlets[Math.min(selectedOutletIdx, outlets.length - 1)] || null}
           inputMode={inputMode}
           orderDate={orderDate}
+          onItemsChange={handleRekItemsChange}
         />
         <RotiTawarPanel {...rotiPanelProps} />
       </div>
