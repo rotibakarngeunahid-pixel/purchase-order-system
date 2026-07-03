@@ -170,7 +170,13 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
 
   const canAddOutlet = !!item.po_outlet_id;
   const canAddMaterial = !!item.po_material_id;
-  const canAdd = canAddOutlet && canAddMaterial;
+
+  // Rekomendasi yang sudah diproses (ditambahkan ke order / diabaikan) tetap
+  // ditampilkan sebagai riwayat agar admin tahu bahwa item TERDETEKSI dan
+  // sudah ditindaklanjuti — bukan hilang tanpa jejak setelah reload.
+  const isProcessed = item.status === 'processed';
+  const wasIgnored = isProcessed && String(item.processed_note || '').startsWith('Diabaikan');
+  const isDone = isAdded || isProcessed;
 
   const ageDays = item.tanggal ? daysBetween(item.tanggal, getLocalOperationalDate()) : 0;
   const isStale = ageDays >= 2;
@@ -183,7 +189,7 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
   };
 
   return (
-    <div className="flex items-start gap-2.5 py-2.5 border-b border-orange-100 last:border-0">
+    <div className={`flex items-start gap-2.5 py-2.5 border-b border-orange-100 last:border-0 ${isProcessed && !isAdded ? 'opacity-60' : ''}`}>
       {lightbox && fullUrl && <PhotoLightbox url={fullUrl} onClose={() => setLightbox(false)} />}
       {thumbUrl && (
         <button
@@ -205,10 +211,22 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
             {item.nama_bahan}
           </span>
           <div className="flex-shrink-0">
-            {isAdded ? (
-              <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-lg font-medium whitespace-nowrap">
-                ✓ Ditambahkan
-              </span>
+            {isDone ? (
+              wasIgnored ? (
+                <span
+                  title={item.processed_note || ''}
+                  className="text-xs text-gray-500 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-lg font-medium whitespace-nowrap cursor-help"
+                >
+                  ✕ Diabaikan
+                </span>
+              ) : (
+                <span
+                  title={item.processed_note || ''}
+                  className="text-xs text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-lg font-medium whitespace-nowrap cursor-help"
+                >
+                  ✓ Ditambahkan
+                </span>
+              )
             ) : !canAddMaterial ? (
               <span
                 className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded font-medium whitespace-nowrap cursor-help"
@@ -249,12 +267,12 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
             Sisa: {item.stok_akhir}{unit ? ` ${unit}` : ''}
           </p>
         )}
-        {!canAddOutlet && !isAdded && (
+        {!canAddOutlet && !isDone && (
           <p className="text-[10px] text-amber-600 mt-0.5">
             Cabang Inventori belum dipetakan ke Outlet PO.
           </p>
         )}
-        {!isAdded && (
+        {!isDone && (
           <button
             type="button"
             onClick={() => onIgnore(item)}
@@ -286,7 +304,9 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     setError(null);
     setTruncated(false);
     try {
-      const params = new URLSearchParams({ status: 'pending' });
+      // status=all: yang sudah diproses ikut diambil supaya tetap tampil
+      // sebagai riwayat "✓ Ditambahkan"/"✕ Diabaikan" (bukan hilang tanpa jejak).
+      const params = new URLSearchParams({ status: 'all' });
       if (dateFilter === '2days') {
         const d2 = shiftDate(getLocalOperationalDate(), -2);
         params.set('date_from', d2);
@@ -348,11 +368,18 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     return Array.from(groups.values()).map(({ rep, ids }) => ({ ...rep, _groupIds: ids }));
   }, [items]);
 
-  // Laporkan hasil dedup ke parent (OrderEntry) supaya bisa dipakai menandai
-  // bahan rekomendasi di kartu input & auto-proses saat qty diisi manual.
+  // Hanya yang masih pending yang bisa ditindaklanjuti; yang processed tampil
+  // sebagai riwayat. Hitungan badge/tab memakai pending saja.
+  const pendingItems = useMemo(
+    () => deduplicatedItems.filter((i) => i.status !== 'processed'),
+    [deduplicatedItems]
+  );
+
+  // Laporkan rekomendasi PENDING ke parent (OrderEntry) untuk menandai bahan
+  // di kartu input & auto-proses saat qty diisi manual.
   useEffect(() => {
-    if (onItemsChange) onItemsChange(deduplicatedItems);
-  }, [deduplicatedItems, onItemsChange]);
+    if (onItemsChange) onItemsChange(pendingItems);
+  }, [pendingItems, onItemsChange]);
 
   const thisOutletItems = useMemo(() => {
     if (!currentOutlet) return deduplicatedItems;
@@ -362,13 +389,16 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   }, [deduplicatedItems, currentOutlet]);
 
   const filteredItems = useMemo(() => {
-    if (!isPerOutlet || showAll || !currentOutlet) return deduplicatedItems;
-    return thisOutletItems;
+    const list = (!isPerOutlet || showAll || !currentOutlet) ? deduplicatedItems : thisOutletItems;
+    // Pending dulu, riwayat (processed) di bawah.
+    return [...list].sort(
+      (a, b) => (a.status === 'processed' ? 1 : 0) - (b.status === 'processed' ? 1 : 0)
+    );
   }, [deduplicatedItems, thisOutletItems, isPerOutlet, showAll, currentOutlet]);
 
   const unmappedBranchCount = useMemo(
-    () => deduplicatedItems.filter((i) => !i.po_outlet_id).length,
-    [deduplicatedItems]
+    () => pendingItems.filter((i) => !i.po_outlet_id).length,
+    [pendingItems]
   );
   const currentOutletMapped = !!(
     currentOutlet && (currentOutlet.inventori_branch_id || currentOutlet.inventori_cabang_name)
@@ -384,17 +414,23 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
     }
   }
 
-  // Abaikan eksplisit dengan alasan → tandai processed di Inventori + buang lokal.
+  // Abaikan eksplisit dengan alasan → tandai processed di Inventori, lalu ubah
+  // status lokal jadi processed agar tetap tampil sebagai riwayat "✕ Diabaikan".
   // _groupIds berisi semua rekomendasi_id dalam grup (termasuk duplikat lama).
   async function handleIgnoreConfirm(item, reason) {
     const groupIds = item._groupIds || [item.rekomendasi_id];
+    const note = `Diabaikan oleh admin PO: ${reason}`;
     try {
       await api.post('/api/inventori/rekomendasi/process', {
         rekomendasi_ids: groupIds,
-        note: `Diabaikan oleh admin PO: ${reason}`,
+        note,
       });
       const idsSet = new Set(groupIds);
-      setItems((prev) => prev.filter((i) => !idsSet.has(i.rekomendasi_id)));
+      setItems((prev) =>
+        prev.map((i) =>
+          idsSet.has(i.rekomendasi_id) ? { ...i, status: 'processed', processed_note: note } : i
+        )
+      );
       setIgnoreTarget(null);
       return true;
     } catch (_) {
@@ -404,6 +440,8 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
 
   const showCabang = !isPerOutlet || showAll;
   const totalCount = deduplicatedItems.length;
+  const totalPending = pendingItems.length;
+  const thisOutletPending = thisOutletItems.filter((i) => i.status !== 'processed').length;
 
   const filterLabel = dateFilter === '2days' ? '2 hari lalu' : 'kemarin';
 
@@ -427,9 +465,9 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
           <span className="text-sm font-semibold text-orange-800">📋 Rekomendasi Staff</span>
           {/* Badge = TOTAL pending semua cabang, agar rekomendasi tetap terdeteksi
               meski outlet yang sedang dipilih kebetulan tidak punya rekomendasi. */}
-          {!loading && totalCount > 0 && (
+          {!loading && totalPending > 0 && (
             <span className="text-[11px] bg-orange-500 text-white px-1.5 py-0.5 rounded-full font-bold leading-none">
-              {totalCount}
+              {totalPending}
             </span>
           )}
         </div>
@@ -464,7 +502,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
                   !showAll ? 'bg-orange-400 text-white' : 'text-orange-600 hover:bg-orange-100'
                 }`}
               >
-                {currentOutlet.name} ({thisOutletItems.length})
+                {currentOutlet.name} ({thisOutletPending})
               </button>
               <button
                 type="button"
@@ -473,7 +511,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
                   showAll ? 'bg-orange-400 text-white' : 'text-orange-600 hover:bg-orange-100'
                 }`}
               >
-                Semua ({totalCount})
+                Semua ({totalPending})
               </button>
             </div>
           )}
@@ -505,7 +543,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
               <div className="py-2 space-y-1.5">
                 {totalCount === 0 ? (
                   <p className="text-xs text-gray-400 text-center py-2">
-                    ✅ Tidak ada rekomendasi pending ({filterLabel}).
+                    ✅ Tidak ada rekomendasi ({filterLabel}).
                   </p>
                 ) : (
                   <>
@@ -518,9 +556,9 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
                         ⚠ Outlet ini belum dipetakan ke cabang Inventori. Atur kolom{' '}
                         <strong>"Nama di Inventori"</strong> di Master Data → Outlet.
                       </p>
-                    ) : (
+                    ) : totalPending > 0 ? (
                       <div className="text-xs text-orange-700 bg-orange-100/60 border border-orange-200 rounded-lg p-2 text-center">
-                        Ada <strong>{totalCount}</strong> rekomendasi pending di cabang lain
+                        Ada <strong>{totalPending}</strong> rekomendasi pending di cabang lain
                         {unmappedBranchCount > 0 && (
                           <> ({unmappedBranchCount} belum termapping ke outlet PO)</>
                         )}.
@@ -531,6 +569,10 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
                           Lihat Semua
                         </button>
                       </div>
+                    ) : (
+                      <p className="text-xs text-gray-400 text-center">
+                        ✅ Semua rekomendasi ({filterLabel}) sudah diproses.
+                      </p>
                     )}
                   </>
                 )}
