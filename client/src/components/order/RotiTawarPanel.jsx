@@ -67,7 +67,7 @@ export default function RotiTawarPanel({
   const handleCopySupplierMessage = async () => {
     const qty = formatQty(live.supplierOrder);
     const unit = live.unit ? ` ${live.unit}` : '';
-    const message = `Halo Kak, saya ingin pesan roti: ${qty}${unit} sesuai jumlah order supplier saat ini`;
+    const message = `Halo Kak, saya ingin pesan roti: ${qty}${unit}`;
     try {
       await navigator.clipboard.writeText(message);
       setCopied(true);
