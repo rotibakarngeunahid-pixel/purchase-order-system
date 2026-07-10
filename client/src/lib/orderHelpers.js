@@ -49,6 +49,8 @@ export const buildRotiTawarLiveSummary = ({
       recommendationTotal,
       deltaTotal: null,
       branches: [],
+      materialName: null,
+      unit: null,
     };
   }
 
@@ -88,6 +90,8 @@ export const buildRotiTawarLiveSummary = ({
     recommendationTotal,
     deltaTotal: recommendationTotal == null ? null : currentTotal - recommendationTotal,
     branches,
+    materialName: rotiMaterial.name,
+    unit: rotiMaterial.purchase_unit,
   };
 };
 

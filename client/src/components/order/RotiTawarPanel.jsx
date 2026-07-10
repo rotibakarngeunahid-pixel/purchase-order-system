@@ -1,4 +1,5 @@
-import { Loader2, AlertCircle, X, Zap, Package } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, AlertCircle, X, Zap, Package, Copy, Check } from 'lucide-react';
 import { formatDateID, getLocalOperationalYesterday, getLocalOperationalDate } from '../../lib/api';
 
 function formatQty(value) {
@@ -61,6 +62,20 @@ export default function RotiTawarPanel({
   const hasLiveSummary = live.hasRotiMaterial;
   const hasRecommendation = !!rotiDetail;
   const branchRows = Array.isArray(live.branches) ? live.branches : [];
+  const [copied, setCopied] = useState(false);
+
+  const handleCopySupplierMessage = async () => {
+    const qty = formatQty(live.supplierOrder);
+    const unit = live.unit ? ` ${live.unit}` : '';
+    const message = `Halo Kak, saya ingin pesan roti: ${qty}${unit} sesuai jumlah order supplier saat ini`;
+    try {
+      await navigator.clipboard.writeText(message);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API tidak tersedia (mis. koneksi non-HTTPS); biarkan tanpa feedback.
+    }
+  };
 
   return (
     <div className="card p-4">
@@ -200,6 +215,24 @@ export default function RotiTawarPanel({
               />
             )}
           </div>
+
+          <button
+            type="button"
+            onClick={handleCopySupplierMessage}
+            className="w-full mt-2 inline-flex items-center justify-center gap-2 border border-gray-300 text-gray-600 bg-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            {copied ? (
+              <>
+                <Check className="w-4 h-4 text-green-600" />
+                Tersalin!
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" />
+                Salin Pesan ke Supplier
+              </>
+            )}
+          </button>
 
           {!hasRecommendation && (
             <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
