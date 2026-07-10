@@ -4,6 +4,68 @@ const supabase = require('../services/supabase');
 
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
+// ─── Integrasi Staff Portal — deteksi otomatis outlet Full Shift yang libur ──
+// Outlet "Full Shift" (biasanya 1 staff) yang stafnya mengajukan libur di Staff
+// Portal dan tidak ada pengganti akan otomatis terdeteksi sebagai "libur" di sini,
+// tanpa admin PO perlu input manual di kalender Hari Libur.
+const STAFF_PORTAL_API_URL = () =>
+  (process.env.STAFF_PORTAL_API_URL || '').trim().replace(/\/+$/, '');
+const STAFF_PORTAL_API_KEY = () => (process.env.STAFF_PORTAL_API_KEY || '').trim();
+
+// Normalisasi nama outlet untuk fallback pencocokan. Outlet Staff Portal diberi
+// prefix "Outlet - <nama>" (mis. "Outlet - Bunderan Dalung"), sedangkan nama di PO
+// tidak — prefix itu dibuang dulu agar "Bunderan Dalung" cocok dengan keduanya.
+const norm = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/^outlet\s+/, '');
+
+// Ambil daftar outlet Full Shift yang tutup (semua staf libur) pada tanggal tsb
+// dari Staff Portal. Best-effort: kalau integrasi belum dikonfigurasi atau Staff
+// Portal tidak merespons, kembalikan array kosong — jangan blokir cek libur kalender.
+async function fetchFullShiftDayoffOutlets(dateStr) {
+  const base = STAFF_PORTAL_API_URL();
+  const key = STAFF_PORTAL_API_KEY();
+  if (!base || !key) return [];
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`${base}/public/full-shift-dayoff?date=${encodeURIComponent(dateStr)}`, {
+      headers: { Accept: 'application/json', 'X-API-Key': key },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    const body = await resp.json().catch(() => null);
+    if (!resp.ok || !body?.ok) return [];
+    return Array.isArray(body.outlets) ? body.outlets : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+// Mapping Outlet PO ← outlet Staff Portal: prioritas inventori_branch_id (kedua
+// sistem menunjuk ID cabang yang sama di sistem Inventori pihak ketiga), fallback
+// nama outlet dinormalisasi.
+async function loadStaffPortalOutletMap() {
+  const byId = new Map();
+  const byName = new Map();
+  try {
+    const { data } = await supabase
+      .from('outlets')
+      .select('id, name, inventori_branch_id')
+      .eq('is_active', true);
+    for (const o of data || []) {
+      const entry = { id: o.id, name: o.name };
+      if (o.inventori_branch_id) byId.set(String(o.inventori_branch_id), entry);
+      const key = norm(o.name);
+      if (key && !byName.has(key)) byName.set(key, entry);
+    }
+  } catch (_) { /* best-effort */ }
+  return { byId, byName };
+}
+
 // Tambah n hari ke string tanggal YYYY-MM-DD (timezone-safe, pure date arithmetic)
 function addDays(dateStr, n) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -84,7 +146,10 @@ router.get('/check-bulk', async (req, res) => {
 
   const date1 = addDays(order_date, 1); // order_date + 1
 
-  const hols1 = await fetchHolidaysForDate(date1);
+  const [hols1, staffPortalOutlets] = await Promise.all([
+    fetchHolidaysForDate(date1),
+    fetchFullShiftDayoffOutlets(date1),
+  ]);
 
   // Bangun map per outlet — hanya outlet yang ada libur di H+1
   const holidayMap = {};
@@ -96,6 +161,32 @@ router.get('/check-bulk', async (req, res) => {
     holidayMap[h.outlet_id].date1_holiday = h;
     holidayMap[h.outlet_id].calculation_days = 0; // H+1 libur → 0 hari buka
   });
+
+  // Deteksi otomatis dari Staff Portal: outlet Full Shift yang semua stafnya
+  // libur besok. Kalender libur manual (di atas) tetap diprioritaskan — deteksi
+  // otomatis hanya mengisi outlet yang belum punya entri libur manual untuk H+1.
+  const closedOutlets = staffPortalOutlets.filter((o) => o && o.closed);
+  if (closedOutlets.length > 0) {
+    const { byId, byName } = await loadStaffPortalOutletMap();
+    closedOutlets.forEach((o) => {
+      const matched =
+        (o.inventory_branch_id && byId.get(String(o.inventory_branch_id))) ||
+        byName.get(norm(o.outlet_name));
+      if (!matched || holidayMap[matched.id]) return;
+      holidayMap[matched.id] = {
+        date1_holiday: {
+          id: null,
+          outlet_id: matched.id,
+          holiday_date: date1,
+          holiday_name: 'Libur staf (Full Shift) — deteksi otomatis Staff Portal',
+          note: 'Semua staf outlet ini tercatat libur pada tanggal ini di Staff Portal.',
+          recurrence_type: 'none',
+          day_of_week: null,
+        },
+        calculation_days: 0,
+      };
+    });
+  }
 
   res.json({
     order_date,
