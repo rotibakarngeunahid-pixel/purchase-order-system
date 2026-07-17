@@ -26,6 +26,8 @@ const inventoriRekomendasiRouter = require('./routes/inventoriRekomendasi');
 const inventoriCabangRouter = require('./routes/inventoriCabang');
 const inventoriBahanRouter = require('./routes/inventoriBahan');
 const priceLogsRouter = require('./routes/priceLogs');
+const auditIntegrationRouter = require('./routes/auditIntegration');
+const auditApiKeyMiddleware = require('./middleware/auditApiKey');
 
 const app = express();
 
@@ -103,6 +105,9 @@ app.use('/api/inventori/rekomendasi', authMiddleware, inventoriRekomendasiRouter
 app.use('/api/inventori/cabang', authMiddleware, inventoriCabangRouter);
 app.use('/api/inventori/bahan', authMiddleware, inventoriBahanRouter);
 app.use('/api/price-logs', authMiddleware, priceLogsRouter);
+
+// Integrasi Audit System (baca-saja, auth X-API-Key sendiri via AUDIT_API_KEY)
+app.use('/api/audit-integration', auditApiKeyMiddleware, auditIntegrationRouter);
 
 // Global error handler
 app.use((err, req, res, next) => {
