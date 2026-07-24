@@ -330,6 +330,11 @@ function SuppliersTab() {
     await loadSuppliers();
   };
 
+  const toggleBonus = async (s) => {
+    await api.put(`/api/suppliers/${s.id}`, { gives_roti_tawar_bonus: !s.gives_roti_tawar_bonus });
+    await loadSuppliers();
+  };
+
   const handleDelete = async () => {
     setDeleting(true);
     setError('');
@@ -367,6 +372,7 @@ function SuppliersTab() {
           onChange={(e) => setForm((f) => ({ ...f, wa_number: e.target.value }))}
         />
       </td>
+      <td />
       <td />
       <td className="px-4 py-2 text-center">
         <div className="flex gap-2 justify-center">
@@ -411,6 +417,10 @@ function SuppliersTab() {
             <tr className="bg-gray-50 border-b border-gray-100">
               <th className="px-4 py-3 text-left font-medium text-gray-600">Nama Supplier</th>
               <th className="px-4 py-3 text-left font-medium text-gray-600">Nomor WhatsApp</th>
+              <th className="px-4 py-3 text-center font-medium text-gray-600">
+                Bonus Roti Tawar
+                <span className="block text-[10px] font-normal text-gray-400">Kelipatan 20 dapat 1</span>
+              </th>
               <th className="px-4 py-3 text-center font-medium text-gray-600">Status</th>
               <th className="px-4 py-3 text-center font-medium text-gray-600">Aksi</th>
             </tr>
@@ -427,6 +437,7 @@ function SuppliersTab() {
                     <input className="input text-sm" value={form.wa_number} onChange={(e) => setForm((f) => ({ ...f, wa_number: e.target.value }))} />
                   </td>
                   <td />
+                  <td />
                   <td className="px-4 py-2 text-center">
                     <div className="flex gap-2 justify-center">
                       <button onClick={handleSave} disabled={saving} className="btn-primary text-xs px-3 py-1">{saving ? '...' : 'Simpan'}</button>
@@ -438,6 +449,11 @@ function SuppliersTab() {
                 <tr key={s.id} className={`hover:bg-gray-50 ${!s.is_active ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3 font-medium text-gray-800">{s.name}</td>
                   <td className="px-4 py-3 text-gray-600 font-mono text-xs">{s.wa_number}</td>
+                  <td className="px-4 py-3 text-center" title="Dapat bonus kelipatan 20 pcs roti tawar (+1 gratis)">
+                    <button onClick={() => toggleBonus(s)} className={`w-10 h-5 rounded-full transition-colors ${s.gives_roti_tawar_bonus !== false ? 'bg-green-500' : 'bg-gray-300'}`}>
+                      <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${s.gives_roti_tawar_bonus !== false ? 'translate-x-5' : ''}`} />
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-center">
                     <button onClick={() => toggleActive(s)} className={`w-10 h-5 rounded-full transition-colors ${s.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
                       <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${s.is_active ? 'translate-x-5' : ''}`} />

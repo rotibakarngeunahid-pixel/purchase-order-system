@@ -58,11 +58,15 @@ function calculatePOs(requestItems, materials, routing = {}) {
   const supplierGroups = {};
   Object.values(totals).forEach(({ supplierId, materialId, qty, overrideOutletIds }) => {
     const material = materialMap[materialId];
+    const supplierRecord = suppliersById[supplierId] || material.supplier || null;
+    // Tidak semua supplier memberi bonus kelipatan 20 — default true bila
+    // belum diatur (lihat suppliersById di supplierRouting.js).
+    const suppliesRotiTawarBonus = supplierRecord?.gives_roti_tawar_bonus !== false;
 
     let qtyOrdered = Math.ceil(qty);
     let rotiTawarBonus = null;
 
-    if (isRotiTawar(material.name)) {
+    if (isRotiTawar(material.name) && suppliesRotiTawarBonus) {
       const { order, bonus, fulfilled } = calcRotiTawarSupplierOrder(Math.ceil(qty));
       rotiTawarBonus = { total_needed: Math.ceil(qty), bonus, fulfilled };
       qtyOrdered = order;
@@ -71,7 +75,7 @@ function calculatePOs(requestItems, materials, routing = {}) {
     if (!supplierGroups[supplierId]) {
       supplierGroups[supplierId] = {
         supplier_id: supplierId,
-        supplier: suppliersById[supplierId] || material.supplier || null,
+        supplier: supplierRecord,
         items: [],
         total_estimated: 0,
       };

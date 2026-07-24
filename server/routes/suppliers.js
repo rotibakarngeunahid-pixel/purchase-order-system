@@ -27,11 +27,12 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { name, wa_number, is_active } = req.body;
+  const { name, wa_number, is_active, gives_roti_tawar_bonus } = req.body;
   const updates = {};
   if (name !== undefined) updates.name = name;
   if (wa_number !== undefined) updates.wa_number = wa_number;
   if (is_active !== undefined) updates.is_active = is_active;
+  if (gives_roti_tawar_bonus !== undefined) updates.gives_roti_tawar_bonus = gives_roti_tawar_bonus;
 
   const { data, error } = await supabase
     .from('suppliers')

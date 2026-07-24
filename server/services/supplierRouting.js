@@ -13,7 +13,7 @@ async function loadSupplierRouting() {
       .from('outlet_material_suppliers')
       .select('outlet_id, material_id, supplier_id')
       .eq('is_active', true),
-    supabase.from('suppliers').select('id, name, wa_number'),
+    supabase.from('suppliers').select('id, name, wa_number, gives_roti_tawar_bonus'),
     supabase.from('outlets').select('id, name'),
   ]);
 
@@ -24,7 +24,18 @@ async function loadSupplierRouting() {
     );
     if (!missingTable) throw overridesRes.error;
   }
-  if (suppliersRes.error) throw suppliersRes.error;
+  if (suppliersRes.error) {
+    const message = String(suppliersRes.error.message || '').toLowerCase();
+    const missingBonusColumn = message.includes('gives_roti_tawar_bonus') && (
+      message.includes('column') || message.includes('schema cache') || message.includes('could not find')
+    );
+    if (!missingBonusColumn) throw suppliersRes.error;
+
+    // Migration kolom bonus belum dijalankan — ambil tanpa kolom itu, default ke true di bawah
+    const retry = await supabase.from('suppliers').select('id, name, wa_number');
+    if (retry.error) throw retry.error;
+    suppliersRes.data = retry.data;
+  }
   if (outletsRes.error) throw outletsRes.error;
 
   const supplierOverrides = {};
@@ -33,7 +44,11 @@ async function loadSupplierRouting() {
   });
 
   const suppliersById = {};
-  (suppliersRes.data || []).forEach((s) => { suppliersById[s.id] = s; });
+  (suppliersRes.data || []).forEach((s) => {
+    // Default true bila kolom belum ada / belum diisi — pertahankan perilaku lama
+    // (bonus otomatis berlaku) sampai admin menonaktifkannya secara eksplisit.
+    suppliersById[s.id] = { ...s, gives_roti_tawar_bonus: s.gives_roti_tawar_bonus !== false };
+  });
 
   const outletsById = {};
   (outletsRes.data || []).forEach((o) => { outletsById[o.id] = o; });
