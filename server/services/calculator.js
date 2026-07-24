@@ -16,40 +16,62 @@ function isRotiTawar(name) {
   return String(name || '').toLowerCase().includes('roti tawar');
 }
 
-function calculatePOs(requestItems, materials) {
-  const totalByMaterial = {};
-  requestItems.forEach((item) => {
-    if (item.qty > 0) {
-      totalByMaterial[item.material_id] =
-        (totalByMaterial[item.material_id] || 0) + Number(item.qty);
-    }
-  });
+// routing: { supplierOverrides, suppliersById, outletsById } — hasil dari
+// server/services/supplierRouting.js. supplierOverrides memetakan
+// "outlet_id:material_id" -> supplier_id, dipakai untuk mengalihkan sebagian
+// qty sebuah bahan ke supplier lain tergantung outlet pemesan (mis. cabang
+// yang lebih dekat ke supplier tertentu). Tanpa mapping, tetap pakai
+// supplier default bahan seperti sebelumnya.
+function calculatePOs(requestItems, materials, routing = {}) {
+  const { supplierOverrides = {}, suppliersById = {}, outletsById = {} } = routing;
 
   const materialMap = {};
   materials.forEach((m) => {
     materialMap[m.id] = m;
   });
 
-  const supplierGroups = {};
-  Object.entries(totalByMaterial).forEach(([materialId, totalQty]) => {
-    const material = materialMap[materialId];
-    if (!material || !material.supplier_id) return;
+  // Kelompokkan qty per (supplier efektif, bahan) — bukan per bahan saja,
+  // karena outlet berbeda bisa dialihkan ke supplier berbeda untuk bahan yang sama.
+  const totals = {};
+  requestItems.forEach((item) => {
+    if (!(Number(item.qty) > 0)) return;
+    const material = materialMap[item.material_id];
+    if (!material) return;
 
-    let qtyOrdered = Math.ceil(totalQty);
+    const overrideSupplierId = supplierOverrides[`${item.outlet_id}:${item.material_id}`];
+    const supplierId = overrideSupplierId || material.supplier_id;
+    if (!supplierId) return;
+
+    const key = `${supplierId}::${item.material_id}`;
+    if (!totals[key]) {
+      totals[key] = {
+        supplierId,
+        materialId: item.material_id,
+        qty: 0,
+        overrideOutletIds: new Set(),
+      };
+    }
+    totals[key].qty += Number(item.qty);
+    if (overrideSupplierId) totals[key].overrideOutletIds.add(item.outlet_id);
+  });
+
+  const supplierGroups = {};
+  Object.values(totals).forEach(({ supplierId, materialId, qty, overrideOutletIds }) => {
+    const material = materialMap[materialId];
+
+    let qtyOrdered = Math.ceil(qty);
     let rotiTawarBonus = null;
 
     if (isRotiTawar(material.name)) {
-      const { order, bonus, fulfilled } = calcRotiTawarSupplierOrder(Math.ceil(totalQty));
-      rotiTawarBonus = { total_needed: Math.ceil(totalQty), bonus, fulfilled };
+      const { order, bonus, fulfilled } = calcRotiTawarSupplierOrder(Math.ceil(qty));
+      rotiTawarBonus = { total_needed: Math.ceil(qty), bonus, fulfilled };
       qtyOrdered = order;
     }
-
-    const supplierId = material.supplier_id;
 
     if (!supplierGroups[supplierId]) {
       supplierGroups[supplierId] = {
         supplier_id: supplierId,
-        supplier: material.supplier,
+        supplier: suppliersById[supplierId] || material.supplier || null,
         items: [],
         total_estimated: 0,
       };
@@ -69,6 +91,11 @@ function calculatePOs(requestItems, materials) {
       subtotal_estimated: subtotal,
     };
     if (rotiTawarBonus) itemEntry.roti_tawar_bonus = rotiTawarBonus;
+    if (overrideOutletIds.size > 0) {
+      itemEntry.mapped_outlets = [...overrideOutletIds].map(
+        (oid) => outletsById[oid]?.name || oid
+      );
+    }
     supplierGroups[supplierId].items.push(itemEntry);
     supplierGroups[supplierId].total_estimated += subtotal;
   });

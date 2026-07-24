@@ -59,6 +59,14 @@ function POCard({ po }) {
                       <span>Total diterima: <strong>{item.roti_tawar_bonus.fulfilled}</strong></span>
                     </div>
                   )}
+                  {item.mapped_outlets && item.mapped_outlets.length > 0 && (
+                    <div
+                      className="mt-1 text-xs bg-blue-50 border border-blue-200 rounded px-2 py-1 inline-flex items-center gap-1 text-blue-700"
+                      title="Bahan ini dialihkan ke supplier ini khusus untuk outlet berikut (Master Data → Mapping Supplier)"
+                    >
+                      <span>🔀 Mapping khusus outlet: <strong>{item.mapped_outlets.join(', ')}</strong></span>
+                    </div>
+                  )}
                 </td>
                 <td className="text-gray-600 text-sm">
                   {item.material_brand || <span className="text-gray-300">-</span>}

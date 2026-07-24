@@ -1032,11 +1032,223 @@ function OutletsTab() {
   );
 }
 
+// ─── Mapping Supplier per Outlet Tab ────────────────────────────────────────────
+// Override supplier default sebuah bahan untuk outlet tertentu — dipakai saat
+// hitung PO (Review Order) agar bahan yang sama bisa dipesan dari supplier
+// berbeda tergantung cabang (mis. cabang lebih dekat ke supplier lain).
+function SupplierMappingTab() {
+  const [mappings, setMappings] = useState([]);
+  const [outlets, setOutlets] = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState(null);
+  const emptyForm = { outlet_id: '', material_id: '', supplier_id: '' };
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => { loadAll(); }, []);
+
+  async function loadAll() {
+    setLoading(true);
+    try {
+      const [mapRes, outletRes, matRes, supRes] = await Promise.all([
+        api.get('/api/outlet-material-suppliers'),
+        api.get('/api/outlets'),
+        api.get('/api/materials'),
+        api.get('/api/suppliers'),
+      ]);
+      setMappings(mapRes.data || []);
+      setOutlets((outletRes.data || []).filter((o) => o.is_active));
+      setMaterials((matRes.data || []).filter((m) => m.is_active));
+      setSuppliers((supRes.data || []).filter((s) => s.is_active));
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function reloadMappings() {
+    const res = await api.get('/api/outlet-material-suppliers');
+    setMappings(res.data || []);
+  }
+
+  const startAdd = () => { setEditingId('new'); setForm(emptyForm); setError(''); };
+  const startEdit = (m) => {
+    setEditingId(m.id);
+    setForm({ outlet_id: m.outlet_id, material_id: m.material_id, supplier_id: m.supplier_id });
+    setError('');
+  };
+  const cancelEdit = () => { setEditingId(null); setError(''); };
+
+  const handleSave = async () => {
+    if (!form.outlet_id || !form.material_id || !form.supplier_id) {
+      setError('Outlet, bahan, dan supplier wajib dipilih');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      if (editingId === 'new') {
+        await api.post('/api/outlet-material-suppliers', form);
+      } else {
+        await api.put(`/api/outlet-material-suppliers/${editingId}`, { supplier_id: form.supplier_id });
+      }
+      setEditingId(null);
+      await reloadMappings();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggleActive = async (m) => {
+    await api.put(`/api/outlet-material-suppliers/${m.id}`, { is_active: !m.is_active });
+    await reloadMappings();
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await api.delete(`/api/outlet-material-suppliers/${confirmDelete.id}`);
+      setConfirmDelete(null);
+      await reloadMappings();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+      setConfirmDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  if (loading) return <div className="py-10 text-center text-gray-400">Memuat...</div>;
+
+  const formRow = (
+    <tr className="bg-yellow-50">
+      <td className="px-3 py-2">
+        <select className="input text-sm" value={form.outlet_id} onChange={(e) => setForm((f) => ({ ...f, outlet_id: e.target.value }))} disabled={editingId !== 'new'}>
+          <option value="">-- Outlet --</option>
+          {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+      </td>
+      <td className="px-3 py-2">
+        <select className="input text-sm" value={form.material_id} onChange={(e) => setForm((f) => ({ ...f, material_id: e.target.value }))} disabled={editingId !== 'new'}>
+          <option value="">-- Bahan --</option>
+          {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+      </td>
+      <td className="px-3 py-2">
+        <select className="input text-sm" value={form.supplier_id} onChange={(e) => setForm((f) => ({ ...f, supplier_id: e.target.value }))}>
+          <option value="">-- Supplier --</option>
+          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+      </td>
+      <td />
+      <td className="px-3 py-2 text-center">
+        <div className="flex gap-2 justify-center">
+          <button onClick={handleSave} disabled={saving} className="btn-primary text-xs px-3 py-1">{saving ? '...' : 'Simpan'}</button>
+          <button onClick={cancelEdit} className="btn-outline text-xs px-3 py-1">Batal</button>
+        </div>
+      </td>
+    </tr>
+  );
+
+  return (
+    <div>
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Hapus Mapping?"
+          confirmLabel="Ya, Hapus"
+          danger
+          loading={deleting}
+          loadingLabel="Menghapus..."
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(null)}
+        >
+          <p>
+            Mapping <strong>{confirmDelete.material?.name}</strong> untuk outlet{' '}
+            <strong>{confirmDelete.outlet?.name}</strong> akan dihapus. Bahan ini akan kembali
+            memakai supplier default.
+          </p>
+        </ConfirmDialog>
+      )}
+
+      <div className="mb-4 p-3.5 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-800 leading-relaxed">
+        Atur supplier khusus untuk kombinasi outlet + bahan tertentu — misalnya karena supplier
+        lain lebih dekat/murah untuk cabang itu. Kombinasi yang tidak dimapping di sini tetap
+        memakai supplier default bahan (di tab Bahan Baku).
+      </div>
+
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-500">{mappings.length} mapping terdaftar</p>
+        <button onClick={startAdd} disabled={editingId !== null || materials.length === 0 || outlets.length === 0} className="btn-primary text-sm">
+          + Tambah Mapping
+        </button>
+      </div>
+      {error && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
+
+      <div className="card overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-100">
+              <th className="px-3 py-3 text-left font-medium text-gray-600">Outlet</th>
+              <th className="px-3 py-3 text-left font-medium text-gray-600">Bahan</th>
+              <th className="px-3 py-3 text-left font-medium text-gray-600">Supplier Khusus</th>
+              <th className="px-3 py-3 text-center font-medium text-gray-600">Aktif</th>
+              <th className="px-3 py-3 text-center font-medium text-gray-600">Aksi</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {editingId === 'new' && formRow}
+            {mappings.length === 0 && editingId !== 'new' ? (
+              <tr>
+                <td colSpan={5} className="text-center py-10 text-gray-400">
+                  <p className="text-3xl mb-2">🔀</p>
+                  <p className="font-medium">Belum ada mapping supplier khusus</p>
+                  <p className="text-sm mt-1">Klik "+ Tambah Mapping" untuk mengatur supplier per outlet</p>
+                </td>
+              </tr>
+            ) : (
+              mappings.map((m) =>
+                editingId === m.id ? formRow : (
+                  <tr key={m.id} className={`hover:bg-gray-50 ${!m.is_active ? 'opacity-50' : ''}`}>
+                    <td className="px-3 py-3 font-medium text-gray-800">{m.outlet?.name || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-3 text-gray-700">{m.material?.name || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-3 text-gray-600">{m.supplier?.name || <span className="text-gray-300">—</span>}</td>
+                    <td className="px-3 py-3 text-center">
+                      <button onClick={() => toggleActive(m)} className={`w-10 h-5 rounded-full transition-colors ${m.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
+                        <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${m.is_active ? 'translate-x-5' : ''}`} />
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      <div className="flex gap-2 justify-center">
+                        <button onClick={() => startEdit(m)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
+                        <button onClick={() => setConfirmDelete(m)} className="text-red-500 text-xs font-medium hover:underline">Hapus</button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              )
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'suppliers', label: 'Supplier' },
   { id: 'materials', label: 'Bahan Baku' },
   { id: 'outlets', label: 'Outlet' },
+  { id: 'supplier-mapping', label: 'Mapping Supplier' },
 ];
 
 export default function MasterData() {
@@ -1066,6 +1278,7 @@ export default function MasterData() {
       {activeTab === 'suppliers' && <SuppliersTab />}
       {activeTab === 'materials' && <MaterialsTab />}
       {activeTab === 'outlets' && <OutletsTab />}
+      {activeTab === 'supplier-mapping' && <SupplierMappingTab />}
     </div>
   );
 }

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
 const { calculatePOs } = require('../services/calculator');
+const { loadSupplierRouting } = require('../services/supplierRouting');
 
 // POST /api/orders/session/:id/send-wa
 // Nama endpoint dipertahankan untuk kompatibilitas frontend lama.
@@ -38,8 +39,15 @@ router.post('/session/:id/send-wa', async (req, res) => {
 
   if (matError) return res.status(500).json({ error: matError.message });
 
+  let routing;
+  try {
+    routing = await loadSupplierRouting();
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
   // 3. Hitung PO per supplier
-  const pos = calculatePOs(items, materials || []);
+  const pos = calculatePOs(items, materials || [], routing);
   if (pos.length === 0) {
     return res.status(400).json({ error: 'Tidak ada PO yang dapat dibuat. Periksa data bahan baku.' });
   }

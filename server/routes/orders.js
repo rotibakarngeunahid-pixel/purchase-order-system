@@ -3,6 +3,7 @@ const router = express.Router();
 const supabase = require('../services/supabase');
 const { calculatePOs } = require('../services/calculator');
 const { getWitaDate } = require('../services/reportingDate');
+const { loadSupplierRouting } = require('../services/supplierRouting');
 
 // Buat sesi order baru atau ambil existing untuk tanggal tertentu
 router.post('/session', async (req, res) => {
@@ -137,7 +138,14 @@ router.post('/session/:id/calculate', async (req, res) => {
 
   if (matError) return res.status(500).json({ error: matError.message });
 
-  const pos = calculatePOs(items || [], materials || []);
+  let routing;
+  try {
+    routing = await loadSupplierRouting();
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const pos = calculatePOs(items || [], materials || [], routing);
   res.json({ pos, item_count: items?.length || 0 });
 });
 
