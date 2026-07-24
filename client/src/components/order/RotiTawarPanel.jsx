@@ -46,11 +46,60 @@ function SummaryCard({ label, value, emphasis = false, tone = 'gray' }) {
   );
 }
 
+// Satu blok ringkasan + tombol salin pesan untuk 1 supplier roti tawar.
+// Dipisah per supplier karena outlet berbeda bisa dipetakan ke supplier
+// berbeda (Master Data > Mapping Supplier), dan tidak semua supplier
+// memberi bonus kelipatan 20 (Master Data > Supplier).
+function SupplierOrderBlock({ group, copiedId, onCopy }) {
+  const copied = copiedId === group.supplierId;
+
+  return (
+    <div className="mt-2 border border-orange-200 rounded-lg p-2.5 bg-orange-50/40">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-xs font-semibold text-gray-800 truncate">{group.supplierName}</p>
+        {!group.givesBonus && (
+          <span className="flex-shrink-0 text-[10px] text-gray-500 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
+            Tanpa bonus
+          </span>
+        )}
+      </div>
+      {group.outletNames.length > 0 && (
+        <p className="text-[10px] text-gray-400 mb-2 truncate" title={group.outletNames.join(', ')}>
+          Cabang: {group.outletNames.join(', ')}
+        </p>
+      )}
+      <div className="grid grid-cols-3 gap-1.5">
+        <SummaryCard label="Order" value={formatQty(group.order)} emphasis tone="orange" />
+        <SummaryCard label="Bonus" value={group.givesBonus ? `+${formatQty(group.bonus)}` : '—'} />
+        <SummaryCard label="Terpenuhi" value={formatQty(group.fulfilled)} tone="green" />
+      </div>
+      <button
+        type="button"
+        onClick={() => onCopy(group)}
+        className="w-full mt-2 inline-flex items-center justify-center gap-2 border border-gray-300 text-gray-600 bg-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-gray-50 transition-colors"
+      >
+        {copied ? (
+          <>
+            <Check className="w-3.5 h-3.5 text-green-600" />
+            Tersalin!
+          </>
+        ) : (
+          <>
+            <Copy className="w-3.5 h-3.5" />
+            Salin Pesan ke {group.supplierName}
+          </>
+        )}
+      </button>
+    </div>
+  );
+}
+
 export default function RotiTawarPanel({
   rotiLoading,
   rotiError,
   rotiDetail,
   rotiLiveSummary,
+  rotiSupplierGroups,
   onRotiAutoFill,
   onRotiDist,
   onDismissDetail,
@@ -62,16 +111,16 @@ export default function RotiTawarPanel({
   const hasLiveSummary = live.hasRotiMaterial;
   const hasRecommendation = !!rotiDetail;
   const branchRows = Array.isArray(live.branches) ? live.branches : [];
-  const [copied, setCopied] = useState(false);
+  const supplierGroups = Array.isArray(rotiSupplierGroups) ? rotiSupplierGroups : [];
+  const [copiedId, setCopiedId] = useState(null);
 
-  const handleCopySupplierMessage = async () => {
-    const qty = formatQty(live.supplierOrder);
-    const unit = live.unit ? ` ${live.unit}` : '';
-    const message = `Halo Kak, saya ingin pesan roti: ${qty}${unit}`;
+  const handleCopySupplierMessage = async (group) => {
+    const unit = group.unit ? ` ${group.unit}` : '';
+    const message = `Halo Kak, saya ingin pesan roti: ${formatQty(group.order)}${unit}`;
     try {
       await navigator.clipboard.writeText(message);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      setCopiedId(group.supplierId);
+      setTimeout(() => setCopiedId(null), 2000);
     } catch {
       // Clipboard API tidak tersedia (mis. koneksi non-HTTPS); biarkan tanpa feedback.
     }
@@ -188,18 +237,6 @@ export default function RotiTawarPanel({
               emphasis
               tone="red"
             />
-            <SummaryCard
-              label="Order Supplier Saat Ini"
-              value={formatQty(live.supplierOrder)}
-              emphasis
-              tone="orange"
-            />
-            <SummaryCard label="Bonus Supplier" value={`+${formatQty(live.bonus)}`} />
-            <SummaryCard
-              label="Terpenuhi Saat Ini"
-              value={formatQty(live.fulfilled)}
-              tone="green"
-            />
             {hasRecommendation && (
               <SummaryCard
                 label="Selisih Input"
@@ -216,23 +253,22 @@ export default function RotiTawarPanel({
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={handleCopySupplierMessage}
-            className="w-full mt-2 inline-flex items-center justify-center gap-2 border border-gray-300 text-gray-600 bg-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-gray-50 transition-colors"
-          >
-            {copied ? (
-              <>
-                <Check className="w-4 h-4 text-green-600" />
-                Tersalin!
-              </>
-            ) : (
-              <>
-                <Copy className="w-4 h-4" />
-                Salin Pesan ke Supplier
-              </>
-            )}
-          </button>
+          {supplierGroups.length > 0 ? (
+            supplierGroups.map((group) => (
+              <SupplierOrderBlock
+                key={group.supplierId}
+                group={group}
+                copiedId={copiedId}
+                onCopy={handleCopySupplierMessage}
+              />
+            ))
+          ) : (
+            live.currentTotal > 0 && (
+              <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">
+                Bahan Roti Tawar belum punya supplier. Atur di Master Data → Bahan Baku.
+              </div>
+            )
+          )}
 
           {!hasRecommendation && (
             <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-700">

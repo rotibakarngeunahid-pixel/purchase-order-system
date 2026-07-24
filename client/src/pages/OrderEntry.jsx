@@ -8,7 +8,12 @@ import api, {
 } from '../lib/api';
 import { previewRotiOrder } from '../services/rotiTawarService';
 import { checkHolidaysBulk, saveHolidayMetadataBulk } from '../services/holidayService';
-import { buildRotiTawarLiveSummary, getMatrixKey, calculateOrderEstimate } from '../lib/orderHelpers';
+import {
+  buildRotiTawarLiveSummary,
+  buildRotiTawarSupplierGroups,
+  getMatrixKey,
+  calculateOrderEstimate,
+} from '../lib/orderHelpers';
 import OrderEntryHeader from '../components/order/OrderEntryHeader';
 import OrderSummaryBar from '../components/order/OrderSummaryBar';
 import OutletControlsPanel from '../components/order/OutletControlsPanel';
@@ -39,6 +44,10 @@ export default function OrderEntry() {
   const [session, setSession] = useState(null);
   const [materials, setMaterials] = useState([]);
   const [outlets, setOutlets] = useState([]);
+  // Mapping supplier khusus per outlet+bahan (Master Data > Mapping Supplier),
+  // dipakai untuk memecah pesan "Salin Pesan ke Supplier" roti tawar per supplier.
+  const [supplierOverrides, setSupplierOverrides] = useState({});
+  const [suppliersById, setSuppliersById] = useState({});
   const [matrix, setMatrix] = useState({});
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
@@ -202,13 +211,26 @@ export default function OrderEntry() {
   // --- Data loaders ---
   async function loadMasterData() {
     try {
-      const [matRes, outRes] = await Promise.all([
+      const [matRes, outRes, supRes, mapRes] = await Promise.all([
         api.get('/api/materials'),
         api.get('/api/outlets'),
+        api.get('/api/suppliers').catch(() => ({ data: [] })),
+        api.get('/api/outlet-material-suppliers').catch(() => ({ data: [] })),
       ]);
       setMaterials(matRes.data.filter((m) => m.is_active));
       const activeOutlets = outRes.data.filter((o) => o.is_active);
       setOutlets(activeOutlets);
+
+      const supMap = {};
+      (supRes.data || []).forEach((s) => { supMap[s.id] = s; });
+      setSuppliersById(supMap);
+
+      const overrideMap = {};
+      (mapRes.data || []).forEach((m) => {
+        if (!m.is_active) return;
+        overrideMap[`${m.outlet_id}:${m.material_id}`] = m.supplier_id;
+      });
+      setSupplierOverrides(overrideMap);
       const openMap = {};
       const daysMap = {};
       activeOutlets.forEach((o) => {
@@ -648,6 +670,10 @@ export default function OrderEntry() {
     () => buildRotiTawarLiveSummary({ materials, outlets, matrix, rotiDetail }),
     [materials, outlets, matrix, rotiDetail]
   );
+  const rotiSupplierGroups = useMemo(
+    () => buildRotiTawarSupplierGroups({ materials, outlets, matrix, supplierOverrides, suppliersById }),
+    [materials, outlets, matrix, supplierOverrides, suppliersById]
+  );
   const orderEstimate = useMemo(
     () => calculateOrderEstimate(matrix, materials, outlets),
     [matrix, materials, outlets]
@@ -699,6 +725,7 @@ export default function OrderEntry() {
     rotiError,
     rotiDetail,
     rotiLiveSummary,
+    rotiSupplierGroups,
     onRotiAutoFill: handleRotiAutoFill,
     onRotiDist: isReadOnly ? undefined : handleRotiDistribute,
     onDismissDetail: () => setRotiDetail(null),

@@ -95,6 +95,58 @@ export const buildRotiTawarLiveSummary = ({
   };
 };
 
+// Pecah kebutuhan roti tawar per supplier efektif (default bahan, atau override
+// per outlet dari Master Data > Mapping Supplier). Tiap grup dihitung optimal
+// order + bonus-nya sendiri, karena bonus kelipatan 20 hanya berlaku untuk
+// supplier yang memberi bonus itu (lihat suppliersById[x].gives_roti_tawar_bonus).
+export const buildRotiTawarSupplierGroups = ({
+  materials = [],
+  outlets = [],
+  matrix = {},
+  supplierOverrides = {},
+  suppliersById = {},
+} = {}) => {
+  const rotiMaterial = materials.find(isRotiTawar);
+  if (!rotiMaterial) return [];
+
+  const totals = new Map(); // supplierId -> { qty, outletNames: [] }
+
+  outlets.forEach((outlet) => {
+    const qty = toNonNegativeNumber(matrix[getMatrixKey(outlet.id, rotiMaterial.id)]);
+    if (qty <= 0) return;
+
+    const overrideSupplierId = supplierOverrides[`${outlet.id}:${rotiMaterial.id}`];
+    const supplierId = overrideSupplierId || rotiMaterial.supplier_id;
+    if (!supplierId) return;
+
+    if (!totals.has(supplierId)) totals.set(supplierId, { qty: 0, outletNames: [] });
+    const entry = totals.get(supplierId);
+    entry.qty += qty;
+    entry.outletNames.push(outlet.name);
+  });
+
+  return [...totals.entries()].map(([supplierId, { qty, outletNames }]) => {
+    const supplier = suppliersById[supplierId] || rotiMaterial.supplier || { id: supplierId, name: 'Supplier' };
+    const givesBonus = supplier.gives_roti_tawar_bonus !== false;
+    const calc = givesBonus
+      ? calcRotiTawarSupplierOrder(qty)
+      : { order: Math.ceil(toNonNegativeNumber(qty)), bonus: 0, fulfilled: Math.ceil(toNonNegativeNumber(qty)) };
+
+    return {
+      supplierId,
+      supplierName: supplier.name || 'Supplier',
+      waNumber: supplier.wa_number || null,
+      givesBonus,
+      needed: Math.ceil(toNonNegativeNumber(qty)),
+      order: calc.order,
+      bonus: calc.bonus,
+      fulfilled: calc.fulfilled,
+      outletNames,
+      unit: rotiMaterial.purchase_unit,
+    };
+  });
+};
+
 export const calcTotalPerOutlet = (outlet, materials, matrix) =>
   materials.reduce((sum, mat) => sum + (Number(matrix[getMatrixKey(outlet.id, mat.id)]) || 0), 0);
 
