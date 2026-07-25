@@ -201,9 +201,25 @@ export default function OrderEntry() {
   useEffect(() => {
     if (initialSessionId) {
       loadSession(initialSessionId);
-    } else {
-      setLoading(false);
+      return;
     }
+    // Tidak ada sessionId di URL (mis. masuk lewat menu "Input Order" di
+    // sidebar yang linknya polos ke /order, atau refresh saat URL belum
+    // sempat ter-update) — cari dulu draft yang sudah ada untuk tanggal order
+    // saat ini (backend mengembalikan sesi existing bila sudah ada, bukan
+    // duplikat baru), lalu sinkronkan ke URL. Efek ini akan retrigger dengan
+    // initialSessionId terisi dan lanjut ke loadSession di atas, sehingga
+    // qty yang sudah diisi sebelumnya ikut termuat — bukan form kosong yang
+    // terlihat seperti order baru.
+    (async () => {
+      try {
+        const sess = await getOrCreateSession(orderDateRef.current);
+        navigate(`/order?sessionId=${sess.id}`, { replace: true });
+      } catch (err) {
+        console.error('init session error:', err);
+        setLoading(false);
+      }
+    })();
   }, [initialSessionId]);
 
   // --- Helpers ---
