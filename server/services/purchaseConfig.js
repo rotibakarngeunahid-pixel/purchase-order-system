@@ -104,6 +104,14 @@ function resolvePurchaseConfig(material, mapping = null) {
     toNonNegativeNumber(master.price_per_purchase_unit) ??
     0;
 
+  // Merk yang dijual supplier ini untuk kombinasi outlet+bahan ini — bisa beda
+  // dari supplier lain walau bahan masternya sama (mis. Supplier A jual merk
+  // Wisman, Supplier B jual Blue Band, keduanya sama-sama "Mentega").
+  const brand =
+    (override && toCleanString(override.brand)) ??
+    toCleanString(master.brand) ??
+    null;
+
   // Minimum, kelipatan, dan basis input hanya ada di level mapping outlet.
   // Tanpa mapping → 1 / 1 / purchase_unit = persis perilaku sebelum fitur ini.
   const minOrderQty = (override && toPositiveNumber(override.min_order_qty)) ?? 1;
@@ -121,6 +129,7 @@ function resolvePurchaseConfig(material, mapping = null) {
     package_qty: packageQty,
     package_unit: packageUnit,
     price_per_purchase_unit: price,
+    brand,
     min_order_qty: minOrderQty,
     order_multiple: orderMultiple,
     request_basis: requestBasis,
@@ -174,8 +183,9 @@ function toBaseQty(purchaseQty, config) {
 
 /**
  * Tanda tangan konfigurasi — dipakai calculator untuk mengelompokkan.
- * Dua outlet dengan supplier sama TAPI kemasan/harga berbeda tidak boleh
- * digabung jadi satu baris PO karena qty-nya tidak sebanding.
+ * Dua outlet dengan supplier sama TAPI kemasan/harga/merk berbeda tidak boleh
+ * digabung jadi satu baris PO — qty-nya tidak sebanding (kemasan/harga) atau
+ * barangnya memang beda (merk), walau sama-sama supplier & bahan master yang sama.
  */
 function purchaseConfigSignature(config) {
   return [
@@ -183,6 +193,7 @@ function purchaseConfigSignature(config) {
     config.package_qty,
     config.package_unit,
     config.price_per_purchase_unit,
+    config.brand,
     config.min_order_qty,
     config.order_multiple,
     config.request_basis,

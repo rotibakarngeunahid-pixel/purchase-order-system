@@ -247,6 +247,55 @@ test('Item tanpa supplier (tidak ada mapping & tidak ada default) diabaikan, tid
   assert.equal(pos.length, 0);
 });
 
+test('Skenario merk: bahan sama, supplier beda, merk beda -> baris PO terpisah dengan merk masing-masing', () => {
+  const items = [
+    { outlet_id: outletA.id, material_id: mentega.id, qty: 2 },
+    { outlet_id: outletB.id, material_id: mentega.id, qty: 3 },
+  ];
+  const purchaseConfigs = {
+    [`${outletA.id}:${mentega.id}`]: {
+      outlet_id: outletA.id, material_id: mentega.id, supplier_id: supplierA.id, is_active: true,
+      brand: 'Wisman', min_order_qty: 1, order_multiple: 1, request_basis: REQUEST_BASIS.PURCHASE_UNIT,
+    },
+    [`${outletB.id}:${mentega.id}`]: {
+      outlet_id: outletB.id, material_id: mentega.id, supplier_id: supplierB.id, is_active: true,
+      brand: 'Blue Band', min_order_qty: 1, order_multiple: 1, request_basis: REQUEST_BASIS.PURCHASE_UNIT,
+    },
+  };
+  const pos = calculatePOs(items, [mentega], baseRouting({ purchaseConfigs }));
+  const poA = pos.find((p) => p.supplier_id === supplierA.id);
+  const poB = pos.find((p) => p.supplier_id === supplierB.id);
+  assert.equal(poA.items[0].material_brand, 'Wisman');
+  assert.equal(poB.items[0].material_brand, 'Blue Band');
+});
+
+test('Skenario merk: supplier sama, outlet beda, merk beda -> tidak digabung walau harga/satuan sama', () => {
+  const items = [
+    { outlet_id: outletA.id, material_id: mentega.id, qty: 2 },
+    { outlet_id: outletB.id, material_id: mentega.id, qty: 3 },
+  ];
+  const purchaseConfigs = {
+    [`${outletA.id}:${mentega.id}`]: {
+      outlet_id: outletA.id, material_id: mentega.id, supplier_id: supplierA.id, is_active: true,
+      brand: 'Wisman', min_order_qty: 1, order_multiple: 1, request_basis: REQUEST_BASIS.PURCHASE_UNIT,
+    },
+    [`${outletB.id}:${mentega.id}`]: {
+      outlet_id: outletB.id, material_id: mentega.id, supplier_id: supplierA.id, is_active: true,
+      brand: 'Merk Lain', min_order_qty: 1, order_multiple: 1, request_basis: REQUEST_BASIS.PURCHASE_UNIT,
+    },
+  };
+  const pos = calculatePOs(items, [mentega], baseRouting({ purchaseConfigs }));
+  assert.equal(pos.length, 1, 'supplier sama -> satu PO');
+  assert.equal(pos[0].items.length, 2, 'merk beda -> dua baris terpisah walau supplier/harga sama');
+});
+
+test('Tanpa merk di mapping, item PO pakai merk default bahan (backward compatible)', () => {
+  const mentegaWithBrand = { ...mentega, brand: 'Merk Default' };
+  const items = [{ outlet_id: outletA.id, material_id: mentegaWithBrand.id, qty: 2 }];
+  const pos = calculatePOs(items, [mentegaWithBrand], baseRouting());
+  assert.equal(pos[0].items[0].material_brand, 'Merk Default');
+});
+
 test('Mapping is_active=false pada purchaseConfigs (baris tidak difilter oleh caller) tetap fallback ke default', () => {
   const items = [{ outlet_id: outletA.id, material_id: mentega.id, qty: 3 }];
   const purchaseConfigs = {

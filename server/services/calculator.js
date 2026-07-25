@@ -139,7 +139,10 @@ function calculatePOs(requestItems, materials, routing = {}) {
       material_id: materialId,
       material_name: material.name,
       material_code: material.code,
-      material_brand: material.brand || null,
+      // Merk ikut konfigurasi outlet+supplier (config.brand) — supplier
+      // berbeda bisa jual merk berbeda walau bahan masternya sama. Fallback
+      // ke material.brand sudah ditangani resolvePurchaseConfig.
+      material_brand: config.brand,
       qty_ordered: qtyOrdered,
       purchase_unit: config.purchase_unit,
       package_qty: config.package_qty,

@@ -214,6 +214,40 @@ test('Tanpa mapping sama sekali (bahan lain / instalasi lama): hasil identik Mat
   assert.equal(suggestion.purchase_qty, Math.ceil(4.2));
 });
 
+test('Skenario: merk ikut mapping outlet, beda dari merk default bahan', () => {
+  const configDefault = resolvePurchaseConfig(mentega, null);
+  assert.equal(configDefault.brand, null, 'bahan tanpa brand master -> null');
+
+  const configWithMasterBrand = resolvePurchaseConfig({ ...mentega, brand: 'Merk Umum' }, null);
+  assert.equal(configWithMasterBrand.brand, 'Merk Umum');
+
+  const configA = resolvePurchaseConfig({ ...mentega, brand: 'Merk Umum' }, {
+    is_active: true,
+    supplier_id: 'sup-A',
+    brand: 'Wisman',
+  });
+  const configB = resolvePurchaseConfig({ ...mentega, brand: 'Merk Umum' }, {
+    is_active: true,
+    supplier_id: 'sup-B',
+    brand: 'Blue Band',
+  });
+  assert.equal(configA.brand, 'Wisman');
+  assert.equal(configB.brand, 'Blue Band');
+  assert.notEqual(
+    purchaseConfigSignature(configA),
+    purchaseConfigSignature(configB),
+    'merk beda -> signature beda, tidak boleh digabung jadi 1 baris PO'
+  );
+});
+
+test('Mapping tanpa brand sendiri jatuh ke merk default bahan (bukan null)', () => {
+  const config = resolvePurchaseConfig({ ...mentega, brand: 'Merk Umum' }, {
+    is_active: true,
+    supplier_id: 'sup-A',
+  });
+  assert.equal(config.brand, 'Merk Umum');
+});
+
 test('Floating point noise tidak memicu pembulatan berlebih (1000/500 harus tetap 2, bukan 3)', () => {
   const config = resolvePurchaseConfig(mentega, {
     is_active: true,

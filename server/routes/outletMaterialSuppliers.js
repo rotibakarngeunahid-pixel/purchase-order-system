@@ -10,7 +10,7 @@ const {
 const SELECT_WITH_JOINS = `
   *,
   outlet:outlets(id, name),
-  material:materials(id, code, name, purchase_unit, package_qty, package_unit, price_per_purchase_unit),
+  material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit),
   supplier:suppliers(id, name, wa_number)
 `;
 
@@ -19,6 +19,23 @@ const CONFIG_FIELDS = [
   'package_qty',
   'package_unit',
   'price_per_purchase_unit',
+  'brand',
+  'min_order_qty',
+  'order_multiple',
+  'request_basis',
+  'notes',
+];
+
+// Kolom yang ikut disalin oleh endpoint bulk-copy (di luar outlet_id/is_active
+// yang selalu di-set eksplisit oleh endpoint tersebut).
+const COPY_FIELDS = [
+  'material_id',
+  'supplier_id',
+  'purchase_unit',
+  'package_qty',
+  'package_unit',
+  'price_per_purchase_unit',
+  'brand',
   'min_order_qty',
   'order_multiple',
   'request_basis',
@@ -53,6 +70,11 @@ function validateConfigPayload(body) {
   if (body.package_unit !== undefined) {
     const value = String(body.package_unit || '').trim();
     payload.package_unit = value === '' ? null : value;
+  }
+
+  if (body.brand !== undefined) {
+    const value = String(body.brand || '').trim();
+    payload.brand = value === '' ? null : value;
   }
 
   if (body.price_per_purchase_unit !== undefined) {
@@ -215,6 +237,96 @@ router.get('/preview', async (req, res) => {
   const config = resolvePurchaseConfig(material, mapping);
   const suggestion = calculatePurchaseSuggestion(Number(qty) || 0, config);
   res.json({ config, suggestion });
+});
+
+// POST salin semua konfigurasi aktif dari satu outlet sumber ke satu/banyak
+// outlet tujuan — dipakai saat beberapa cabang punya aturan pembelian yang
+// identik (mis. cabang baru yang setup-nya sama seperti cabang lama), supaya
+// admin tidak perlu input ulang satu-satu per bahan.
+//
+// Default: bahan yang SUDAH punya konfigurasi di outlet tujuan dilewati
+// (tidak ditimpa) — kirim overwrite:true untuk menimpa konfigurasi yang ada.
+router.post('/copy', async (req, res) => {
+  const { source_outlet_id, target_outlet_ids, overwrite } = req.body;
+  if (!source_outlet_id) {
+    return res.status(400).json({ error: 'source_outlet_id wajib diisi' });
+  }
+  if (!Array.isArray(target_outlet_ids) || target_outlet_ids.length === 0) {
+    return res.status(400).json({ error: 'target_outlet_ids wajib berupa array dan tidak boleh kosong' });
+  }
+  const targets = [...new Set(target_outlet_ids)].filter((id) => id && id !== source_outlet_id);
+  if (targets.length === 0) {
+    return res.status(400).json({ error: 'Outlet tujuan tidak valid atau sama dengan outlet sumber' });
+  }
+
+  const { data: sourceRows, error: sourceError } = await supabase
+    .from('outlet_material_suppliers')
+    .select('*')
+    .eq('outlet_id', source_outlet_id)
+    .eq('is_active', true);
+  if (sourceError) return res.status(500).json({ error: sourceError.message });
+  if (!sourceRows || sourceRows.length === 0) {
+    return res.status(400).json({ error: 'Outlet sumber belum punya konfigurasi aktif untuk disalin' });
+  }
+
+  const results = [];
+  for (const targetOutletId of targets) {
+    const { data: existingRows, error: existingError } = await supabase
+      .from('outlet_material_suppliers')
+      .select('id, material_id')
+      .eq('outlet_id', targetOutletId);
+
+    if (existingError) {
+      results.push({ outlet_id: targetOutletId, error: existingError.message });
+      continue;
+    }
+    const existingIdByMaterial = new Map((existingRows || []).map((r) => [r.material_id, r.id]));
+
+    const toInsert = [];
+    const toUpdate = [];
+    for (const row of sourceRows) {
+      const existingId = existingIdByMaterial.get(row.material_id);
+      if (existingId) {
+        if (overwrite) toUpdate.push({ id: existingId, sourceRow: row });
+      } else {
+        const payload = { outlet_id: targetOutletId, is_active: true };
+        COPY_FIELDS.forEach((f) => { payload[f] = row[f] ?? null; });
+        toInsert.push(payload);
+      }
+    }
+    const skipped = sourceRows.length - toInsert.length - toUpdate.length;
+
+    let created = 0;
+    let updated = 0;
+    let stepError = null;
+
+    if (toInsert.length > 0) {
+      const { error: insertError } = await supabase.from('outlet_material_suppliers').insert(toInsert);
+      if (insertError) stepError = insertError.message;
+      else created = toInsert.length;
+    }
+
+    if (!stepError) {
+      for (const { id, sourceRow } of toUpdate) {
+        const payload = { is_active: true };
+        COPY_FIELDS.forEach((f) => { payload[f] = sourceRow[f] ?? null; });
+        const { error: updateError } = await supabase
+          .from('outlet_material_suppliers')
+          .update(payload)
+          .eq('id', id);
+        if (updateError) { stepError = updateError.message; break; }
+        updated += 1;
+      }
+    }
+
+    results.push(
+      stepError
+        ? { outlet_id: targetOutletId, error: stepError }
+        : { outlet_id: targetOutletId, created, updated, skipped }
+    );
+  }
+
+  res.json({ results });
 });
 
 module.exports = router;

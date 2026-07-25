@@ -1069,6 +1069,7 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
     package_qty: mapping?.package_qty ?? '',
     package_unit: mapping?.package_unit || '',
     price_per_purchase_unit: mapping?.price_per_purchase_unit ?? '',
+    brand: mapping?.brand || '',
     min_order_qty: mapping?.min_order_qty ?? 1,
     order_multiple: mapping?.order_multiple ?? 1,
     request_basis: mapping?.request_basis || REQUEST_BASIS.PURCHASE_UNIT,
@@ -1088,6 +1089,7 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
         package_qty: form.package_qty,
         package_unit: form.package_unit,
         price_per_purchase_unit: form.price_per_purchase_unit,
+        brand: form.brand,
         min_order_qty: form.min_order_qty,
         order_multiple: form.order_multiple,
         request_basis: form.request_basis,
@@ -1124,6 +1126,7 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
       package_qty: form.package_qty === '' ? null : Number(form.package_qty),
       package_unit: form.package_unit || null,
       price_per_purchase_unit: form.price_per_purchase_unit === '' ? null : Number(form.price_per_purchase_unit),
+      brand: form.brand || null,
       min_order_qty: Number(form.min_order_qty) || 1,
       order_multiple: Number(form.order_multiple) || 1,
       request_basis: form.request_basis,
@@ -1190,7 +1193,9 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
           {selectedMaterial && (
             <p className="text-xs text-gray-400 -mt-2">
               Master bahan: {selectedMaterial.purchase_unit}, isi {selectedMaterial.package_qty} {selectedMaterial.package_unit},
-              harga {formatRupiah(selectedMaterial.price_per_purchase_unit)}. Kosongkan field di bawah untuk ikut nilai ini.
+              harga {formatRupiah(selectedMaterial.price_per_purchase_unit)}
+              {selectedMaterial.brand ? `, merk default ${selectedMaterial.brand}` : ''}.
+              Kosongkan field di bawah untuk ikut nilai ini.
             </p>
           )}
 
@@ -1212,6 +1217,20 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
             </div>
             <p className="text-xs text-gray-400 mt-1.5">
               Contoh: Supplier A jual per Pack, isi 500 Gram — berarti 1 Pack = 500 Gram inventory.
+            </p>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Merk (opsional)</p>
+            <input
+              className="input text-sm"
+              placeholder={selectedMaterial?.brand || 'Mis. Wisman, Blue Band, dll'}
+              value={form.brand}
+              onChange={(e) => set('brand', e.target.value)}
+            />
+            <p className="text-xs text-gray-400 mt-1.5">
+              Isi kalau supplier ini menjual merk tertentu untuk bahan ini — supplier lain untuk outlet
+              lain bisa punya merk berbeda walau bahan masternya sama.
             </p>
           </div>
 
@@ -1284,6 +1303,125 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
   );
 }
 
+// ─── Copy Konfigurasi Antar Outlet Modal ────────────────────────────────────
+// Salin semua konfigurasi aktif dari satu outlet sumber ke satu/banyak outlet
+// tujuan — dipakai kalau beberapa cabang punya aturan pembelian yang identik
+// (mis. outlet baru disetup persis seperti outlet yang sudah ada), supaya
+// admin tidak perlu mengetik ulang satu-satu per bahan.
+function CopyConfigModal({ outlets, onClose, onCopied }) {
+  const [sourceOutletId, setSourceOutletId] = useState('');
+  const [targetOutletIds, setTargetOutletIds] = useState([]);
+  const [overwrite, setOverwrite] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  useModalDismiss(onClose);
+
+  const toggleTarget = (id) => {
+    setTargetOutletIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const handleCopy = async () => {
+    if (!sourceOutletId) { setError('Pilih outlet sumber'); return; }
+    if (targetOutletIds.length === 0) { setError('Pilih minimal satu outlet tujuan'); return; }
+    setSaving(true);
+    setError('');
+    setResult(null);
+    try {
+      const res = await api.post('/api/outlet-material-suppliers/copy', {
+        source_outlet_id: sourceOutletId,
+        target_outlet_ids: targetOutletIds,
+        overwrite,
+      });
+      setResult(res.data.results || []);
+      await onCopied();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="bg-brand-red px-6 py-4 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
+          <div>
+            <h3 className="text-white font-semibold text-base">Copy Konfigurasi Antar Outlet</h3>
+            <p className="text-red-200 text-xs mt-0.5">Salin semua konfigurasi aktif dari satu outlet ke outlet lain</p>
+          </div>
+          <button onClick={onClose} className="text-white hover:text-red-200 text-2xl leading-none">×</button>
+        </div>
+
+        <div className="p-6 space-y-4 overflow-y-auto">
+          {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Outlet Sumber</label>
+            <select
+              className="input text-sm"
+              value={sourceOutletId}
+              onChange={(e) => { setSourceOutletId(e.target.value); setTargetOutletIds([]); setResult(null); }}
+            >
+              <option value="">-- Pilih outlet sumber --</option>
+              {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-2">Outlet Tujuan (bisa pilih lebih dari satu)</label>
+            <div className="space-y-1 max-h-48 overflow-y-auto border border-gray-100 rounded-lg p-2">
+              {outlets.filter((o) => o.id !== sourceOutletId).length === 0 ? (
+                <p className="text-xs text-gray-400 px-2 py-1.5">Pilih outlet sumber dulu</p>
+              ) : (
+                outlets.filter((o) => o.id !== sourceOutletId).map((o) => (
+                  <label key={o.id} className="flex items-center gap-2 text-sm px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer">
+                    <input type="checkbox" checked={targetOutletIds.includes(o.id)} onChange={() => toggleTarget(o.id)} />
+                    {o.name}
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2 text-xs text-gray-600">
+            <input type="checkbox" className="mt-0.5" checked={overwrite} onChange={(e) => setOverwrite(e.target.checked)} />
+            <span>
+              Timpa konfigurasi yang sudah ada di outlet tujuan. Kalau tidak dicentang, bahan yang
+              outlet tujuannya sudah punya konfigurasi sendiri akan dilewati (tidak diubah).
+            </span>
+          </label>
+
+          {result && (
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-xs text-purple-800 space-y-1">
+              {result.map((r) => (
+                <p key={r.outlet_id}>
+                  <strong>{outlets.find((o) => o.id === r.outlet_id)?.name || r.outlet_id}</strong>:{' '}
+                  {r.error ? (
+                    <span className="text-red-600">{r.error}</span>
+                  ) : (
+                    `${r.created} baru dibuat, ${r.updated} ditimpa, ${r.skipped} dilewati`
+                  )}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
+          <button onClick={onClose} className="btn-outline text-sm">Tutup</button>
+          <button onClick={handleCopy} disabled={saving} className="btn-primary text-sm">
+            {saving ? 'Menyalin...' : 'Copy Konfigurasi'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Mapping Supplier per Outlet Tab ────────────────────────────────────────────
 // Konfigurasi pembelian per outlet + bahan: supplier, satuan beli, faktor
 // konversi ke satuan inventory, harga, minimum, dan kelipatan pembelian —
@@ -1297,6 +1435,7 @@ function SupplierMappingTab() {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalState, setModalState] = useState(null); // null | 'new' | mapping object
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -1363,6 +1502,14 @@ function SupplierMappingTab() {
         />
       )}
 
+      {copyModalOpen && (
+        <CopyConfigModal
+          outlets={outlets}
+          onClose={() => setCopyModalOpen(false)}
+          onCopied={reloadMappings}
+        />
+      )}
+
       {confirmDelete && (
         <ConfirmDialog
           title="Hapus Konfigurasi?"
@@ -1390,9 +1537,14 @@ function SupplierMappingTab() {
 
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-gray-500">{mappings.length} konfigurasi terdaftar</p>
-        <button onClick={() => setModalState('new')} disabled={materials.length === 0 || outlets.length === 0} className="btn-primary text-sm">
-          + Tambah Konfigurasi
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setCopyModalOpen(true)} disabled={outlets.length < 2} className="btn-outline text-sm">
+            📋 Copy Antar Outlet
+          </button>
+          <button onClick={() => setModalState('new')} disabled={materials.length === 0 || outlets.length === 0} className="btn-primary text-sm">
+            + Tambah Konfigurasi
+          </button>
+        </div>
       </div>
       {error && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
 
@@ -1404,6 +1556,7 @@ function SupplierMappingTab() {
                 <th className="px-3 py-3 text-left font-medium text-gray-600">Outlet</th>
                 <th className="px-3 py-3 text-left font-medium text-gray-600">Bahan</th>
                 <th className="px-3 py-3 text-left font-medium text-gray-600">Supplier</th>
+                <th className="px-3 py-3 text-left font-medium text-gray-600">Merk</th>
                 <th className="px-3 py-3 text-left font-medium text-gray-600">Satuan Beli</th>
                 <th className="px-3 py-3 text-left font-medium text-gray-600">Konversi</th>
                 <th className="px-3 py-3 text-right font-medium text-gray-600">Harga</th>
@@ -1415,7 +1568,7 @@ function SupplierMappingTab() {
             <tbody className="divide-y divide-gray-50">
               {mappings.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center py-10 text-gray-400">
+                  <td colSpan={10} className="text-center py-10 text-gray-400">
                     <p className="text-3xl mb-2">🔀</p>
                     <p className="font-medium">Belum ada konfigurasi pembelian khusus</p>
                     <p className="text-sm mt-1">Klik "+ Tambah Konfigurasi" untuk mengatur per outlet</p>
@@ -1430,6 +1583,10 @@ function SupplierMappingTab() {
                       <td className="px-3 py-3 font-medium text-gray-800">{m.outlet?.name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-3 text-gray-700">{m.material?.name || <span className="text-gray-300">—</span>}</td>
                       <td className="px-3 py-3 text-gray-600">{m.supplier?.name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-3 text-gray-600">
+                        {config.brand || <span className="text-gray-300">—</span>}
+                        {config.brand && !isCustom('brand') && <span className="text-gray-300 text-xs ml-1">(default)</span>}
+                      </td>
                       <td className="px-3 py-3 text-gray-600">
                         {config.purchase_unit}
                         {!isCustom('purchase_unit') && <span className="text-gray-300 text-xs ml-1">(default)</span>}

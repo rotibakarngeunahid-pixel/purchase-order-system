@@ -56,6 +56,13 @@ export function resolvePurchaseConfig(material, mapping = null) {
     toNonNegativeNumber(master.price_per_purchase_unit) ??
     0;
 
+  // Merk supplier ini untuk kombinasi outlet+bahan ini — bisa beda dari
+  // supplier lain walau bahan masternya sama.
+  const brand =
+    (override && toCleanString(override.brand)) ??
+    toCleanString(master.brand) ??
+    null;
+
   const minOrderQty = (override && toPositiveNumber(override.min_order_qty)) ?? 1;
   const orderMultiple = (override && toPositiveNumber(override.order_multiple)) ?? 1;
   const requestBasis =
@@ -69,6 +76,7 @@ export function resolvePurchaseConfig(material, mapping = null) {
     package_qty: packageQty,
     package_unit: packageUnit,
     price_per_purchase_unit: price,
+    brand,
     min_order_qty: minOrderQty,
     order_multiple: orderMultiple,
     request_basis: requestBasis,
