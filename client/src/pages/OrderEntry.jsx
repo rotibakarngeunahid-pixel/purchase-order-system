@@ -14,6 +14,7 @@ import {
   getMatrixKey,
   calculateOrderEstimate,
 } from '../lib/orderHelpers';
+import { buildConfigKey } from '../lib/purchaseConfig';
 import OrderEntryHeader from '../components/order/OrderEntryHeader';
 import OrderSummaryBar from '../components/order/OrderSummaryBar';
 import OutletControlsPanel from '../components/order/OutletControlsPanel';
@@ -48,6 +49,10 @@ export default function OrderEntry() {
   // dipakai untuk memecah pesan "Salin Pesan ke Supplier" roti tawar per supplier.
   const [supplierOverrides, setSupplierOverrides] = useState({});
   const [suppliersById, setSuppliersById] = useState({});
+  // Konfigurasi pembelian penuh per outlet+bahan (satuan beli, faktor konversi,
+  // minimum, kelipatan) — dipakai untuk menampilkan satuan input yang benar per
+  // outlet saat mapping-nya memakai basis kebutuhan bahan baku (base_unit).
+  const [purchaseConfigsByKey, setPurchaseConfigsByKey] = useState({});
   const [matrix, setMatrix] = useState({});
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState('idle'); // 'idle' | 'saving' | 'saved' | 'error'
@@ -226,11 +231,14 @@ export default function OrderEntry() {
       setSuppliersById(supMap);
 
       const overrideMap = {};
+      const configMap = {};
       (mapRes.data || []).forEach((m) => {
         if (!m.is_active) return;
         overrideMap[`${m.outlet_id}:${m.material_id}`] = m.supplier_id;
+        configMap[buildConfigKey(m.outlet_id, m.material_id)] = m;
       });
       setSupplierOverrides(overrideMap);
+      setPurchaseConfigsByKey(configMap);
       const openMap = {};
       const daysMap = {};
       activeOutlets.forEach((o) => {
@@ -702,6 +710,7 @@ export default function OrderEntry() {
     outletOpen,
     isReadOnly,
     rotiStockMap,
+    purchaseConfigsByKey,
   };
 
   // Shared props for sidebar panels

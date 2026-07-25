@@ -2,6 +2,12 @@ import { useEffect, useState } from 'react';
 import api, { formatRupiah } from '../lib/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import useModalDismiss from '../components/ui/useModalDismiss';
+import {
+  REQUEST_BASIS,
+  calculatePurchaseSuggestion,
+  getRequestUnit,
+  resolvePurchaseConfig,
+} from '../lib/purchaseConfig';
 
 // ─── Variants Modal ───────────────────────────────────────────────────────────
 function VariantsModal({ material, suppliers, onClose }) {
@@ -1048,20 +1054,249 @@ function OutletsTab() {
   );
 }
 
+// ─── Konfigurasi Pembelian Modal ────────────────────────────────────────────
+// Form lengkap: Outlet → Bahan → Supplier → Satuan Beli / Min Order → Harga.
+// Kolom satuan/harga/minimum kosong berarti "ikut master bahan" — hanya
+// supplier yang wajib diisi kalau admin cuma mau mengalihkan supplier tanpa
+// mengubah aturan pembelian (perilaku lama tetap didukung penuh).
+function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, onSaved }) {
+  const isNew = !mapping;
+  const [form, setForm] = useState(() => ({
+    outlet_id: mapping?.outlet_id || '',
+    material_id: mapping?.material_id || '',
+    supplier_id: mapping?.supplier_id || '',
+    purchase_unit: mapping?.purchase_unit || '',
+    package_qty: mapping?.package_qty ?? '',
+    package_unit: mapping?.package_unit || '',
+    price_per_purchase_unit: mapping?.price_per_purchase_unit ?? '',
+    min_order_qty: mapping?.min_order_qty ?? 1,
+    order_multiple: mapping?.order_multiple ?? 1,
+    request_basis: mapping?.request_basis || REQUEST_BASIS.PURCHASE_UNIT,
+    notes: mapping?.notes || '',
+  }));
+  const [previewQty, setPreviewQty] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  useModalDismiss(onClose);
+
+  const selectedMaterial = materials.find((m) => m.id === form.material_id) || null;
+
+  const effectiveConfig = selectedMaterial
+    ? resolvePurchaseConfig(selectedMaterial, {
+        is_active: true,
+        purchase_unit: form.purchase_unit,
+        package_qty: form.package_qty,
+        package_unit: form.package_unit,
+        price_per_purchase_unit: form.price_per_purchase_unit,
+        min_order_qty: form.min_order_qty,
+        order_multiple: form.order_multiple,
+        request_basis: form.request_basis,
+      })
+    : null;
+
+  const preview = effectiveConfig && Number(previewQty) > 0
+    ? calculatePurchaseSuggestion(previewQty, effectiveConfig)
+    : null;
+
+  const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
+
+  const handleSave = async () => {
+    if (!form.outlet_id || !form.material_id || !form.supplier_id) {
+      setError('Outlet, bahan, dan supplier wajib dipilih');
+      return;
+    }
+    if (form.package_qty !== '' && !(Number(form.package_qty) > 0)) {
+      setError('Isi kemasan harus lebih dari 0');
+      return;
+    }
+    if (!(Number(form.min_order_qty) > 0) || !(Number(form.order_multiple) > 0)) {
+      setError('Minimum dan kelipatan pembelian harus lebih dari 0');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    const payload = {
+      outlet_id: form.outlet_id,
+      material_id: form.material_id,
+      supplier_id: form.supplier_id,
+      purchase_unit: form.purchase_unit || null,
+      package_qty: form.package_qty === '' ? null : Number(form.package_qty),
+      package_unit: form.package_unit || null,
+      price_per_purchase_unit: form.price_per_purchase_unit === '' ? null : Number(form.price_per_purchase_unit),
+      min_order_qty: Number(form.min_order_qty) || 1,
+      order_multiple: Number(form.order_multiple) || 1,
+      request_basis: form.request_basis,
+      notes: form.notes || null,
+    };
+    try {
+      if (isNew) {
+        await api.post('/api/outlet-material-suppliers', payload);
+      } else {
+        await api.put(`/api/outlet-material-suppliers/${mapping.id}`, payload);
+      }
+      await onSaved();
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="bg-brand-red px-6 py-4 flex items-center justify-between flex-shrink-0 rounded-t-2xl">
+          <div>
+            <h3 className="text-white font-semibold text-base">
+              {isNew ? 'Tambah Konfigurasi Pembelian' : 'Edit Konfigurasi Pembelian'}
+            </h3>
+            <p className="text-red-200 text-xs mt-0.5">Outlet → Bahan → Supplier → Satuan / Harga</p>
+          </div>
+          <button onClick={onClose} className="text-white hover:text-red-200 text-2xl leading-none">×</button>
+        </div>
+
+        <div className="p-6 space-y-5 overflow-y-auto">
+          {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
+
+          {/* Outlet / Bahan / Supplier */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Outlet *</label>
+              <select className="input text-sm" value={form.outlet_id} onChange={(e) => set('outlet_id', e.target.value)} disabled={!isNew}>
+                <option value="">-- Pilih --</option>
+                {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Bahan *</label>
+              <select className="input text-sm" value={form.material_id} onChange={(e) => set('material_id', e.target.value)} disabled={!isNew}>
+                <option value="">-- Pilih --</option>
+                {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Supplier *</label>
+              <select className="input text-sm" value={form.supplier_id} onChange={(e) => set('supplier_id', e.target.value)}>
+                <option value="">-- Pilih --</option>
+                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {selectedMaterial && (
+            <p className="text-xs text-gray-400 -mt-2">
+              Master bahan: {selectedMaterial.purchase_unit}, isi {selectedMaterial.package_qty} {selectedMaterial.package_unit},
+              harga {formatRupiah(selectedMaterial.price_per_purchase_unit)}. Kosongkan field di bawah untuk ikut nilai ini.
+            </p>
+          )}
+
+          <div className="border-t border-gray-100 pt-4">
+            <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Satuan &amp; Konversi (opsional)</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Satuan Beli</label>
+                <input className="input text-sm" placeholder={selectedMaterial?.purchase_unit || 'Pack'} value={form.purchase_unit} onChange={(e) => set('purchase_unit', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Isi per Satuan Beli</label>
+                <input type="number" min="0" step="any" className="input text-sm" placeholder={String(selectedMaterial?.package_qty ?? 1)} value={form.package_qty} onChange={(e) => set('package_qty', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Satuan Isi (Inventory)</label>
+                <input className="input text-sm" placeholder={selectedMaterial?.package_unit || 'Gram'} value={form.package_unit} onChange={(e) => set('package_unit', e.target.value)} />
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              Contoh: Supplier A jual per Pack, isi 500 Gram — berarti 1 Pack = 500 Gram inventory.
+            </p>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Harga &amp; Aturan Pembelian</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Harga per Satuan Beli</label>
+                <input type="number" min="0" className="input text-sm" placeholder={String(selectedMaterial?.price_per_purchase_unit ?? 0)} value={form.price_per_purchase_unit} onChange={(e) => set('price_per_purchase_unit', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Minimum Pembelian</label>
+                <input type="number" min="0" step="any" className="input text-sm" value={form.min_order_qty} onChange={(e) => set('min_order_qty', e.target.value)} />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Kelipatan Pembelian</label>
+                <input type="number" min="0" step="any" className="input text-sm" value={form.order_multiple} onChange={(e) => set('order_multiple', e.target.value)} />
+              </div>
+            </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              Dalam satuan beli. Mis. minimum 1, kelipatan 1 = boleh beli 1, 2, 3, ... Pack.
+            </p>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Basis Input Order Entry</label>
+            <select className="input text-sm" value={form.request_basis} onChange={(e) => set('request_basis', e.target.value)}>
+              <option value={REQUEST_BASIS.PURCHASE_UNIT}>Satuan Beli langsung (default) — staff input jumlah {form.purchase_unit || selectedMaterial?.purchase_unit || 'satuan beli'}</option>
+              <option value={REQUEST_BASIS.BASE_UNIT}>Kebutuhan Bahan Baku — staff input jumlah {form.package_unit || selectedMaterial?.package_unit || 'satuan inventory'}, sistem konversi otomatis</option>
+            </select>
+          </div>
+
+          {/* Live preview */}
+          {effectiveConfig && (
+            <div className="border-t border-gray-100 pt-4">
+              <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Pratinjau Perhitungan</p>
+              <div className="flex items-center gap-2 mb-3">
+                <input
+                  type="number"
+                  min="0"
+                  className="input text-sm w-40"
+                  placeholder={`Kebutuhan (${getRequestUnit(effectiveConfig)})`}
+                  value={previewQty}
+                  onChange={(e) => setPreviewQty(e.target.value)}
+                />
+                <span className="text-xs text-gray-400">{getRequestUnit(effectiveConfig)}</span>
+              </div>
+              {preview && (
+                <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-xs text-purple-800 space-y-1">
+                  <p>Beli: <strong>{preview.purchase_qty} {effectiveConfig.purchase_unit}</strong> {preview.rounded_up && <span className="text-purple-500">(dibulatkan dari {preview.raw_purchase_qty})</span>}</p>
+                  <p>Masuk inventory: <strong>{preview.base_qty_ordered} {effectiveConfig.package_unit}</strong> {preview.surplus_base_qty > 0 && <span className="text-purple-500">(surplus +{preview.surplus_base_qty})</span>}</p>
+                  <p>Estimasi biaya: <strong>{formatRupiah(preview.subtotal)}</strong></p>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Catatan (opsional)</label>
+            <textarea className="input text-sm" rows={2} value={form.notes} onChange={(e) => set('notes', e.target.value)} />
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3 flex-shrink-0">
+          <button onClick={onClose} className="btn-outline text-sm">Batal</button>
+          <button onClick={handleSave} disabled={saving} className="btn-primary text-sm">{saving ? 'Menyimpan...' : 'Simpan'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Mapping Supplier per Outlet Tab ────────────────────────────────────────────
-// Override supplier default sebuah bahan untuk outlet tertentu — dipakai saat
-// hitung PO (Review Order) agar bahan yang sama bisa dipesan dari supplier
-// berbeda tergantung cabang (mis. cabang lebih dekat ke supplier lain).
+// Konfigurasi pembelian per outlet + bahan: supplier, satuan beli, faktor
+// konversi ke satuan inventory, harga, minimum, dan kelipatan pembelian —
+// dipakai saat hitung PO (Review Order) agar bahan yang sama bisa dipesan
+// dengan aturan berbeda tergantung cabang (mis. supplier lain lebih
+// dekat/murah, atau menjual kemasan berbeda).
 function SupplierMappingTab() {
   const [mappings, setMappings] = useState([]);
   const [outlets, setOutlets] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState(null);
-  const emptyForm = { outlet_id: '', material_id: '', supplier_id: '' };
-  const [form, setForm] = useState(emptyForm);
-  const [saving, setSaving] = useState(false);
+  const [modalState, setModalState] = useState(null); // null | 'new' | mapping object
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
@@ -1093,36 +1328,6 @@ function SupplierMappingTab() {
     setMappings(res.data || []);
   }
 
-  const startAdd = () => { setEditingId('new'); setForm(emptyForm); setError(''); };
-  const startEdit = (m) => {
-    setEditingId(m.id);
-    setForm({ outlet_id: m.outlet_id, material_id: m.material_id, supplier_id: m.supplier_id });
-    setError('');
-  };
-  const cancelEdit = () => { setEditingId(null); setError(''); };
-
-  const handleSave = async () => {
-    if (!form.outlet_id || !form.material_id || !form.supplier_id) {
-      setError('Outlet, bahan, dan supplier wajib dipilih');
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      if (editingId === 'new') {
-        await api.post('/api/outlet-material-suppliers', form);
-      } else {
-        await api.put(`/api/outlet-material-suppliers/${editingId}`, { supplier_id: form.supplier_id });
-      }
-      setEditingId(null);
-      await reloadMappings();
-    } catch (err) {
-      setError(err.response?.data?.error || err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const toggleActive = async (m) => {
     await api.put(`/api/outlet-material-suppliers/${m.id}`, { is_active: !m.is_active });
     await reloadMappings();
@@ -1145,41 +1350,22 @@ function SupplierMappingTab() {
 
   if (loading) return <div className="py-10 text-center text-gray-400">Memuat...</div>;
 
-  const formRow = (
-    <tr className="bg-yellow-50">
-      <td className="px-3 py-2">
-        <select className="input text-sm" value={form.outlet_id} onChange={(e) => setForm((f) => ({ ...f, outlet_id: e.target.value }))} disabled={editingId !== 'new'}>
-          <option value="">-- Outlet --</option>
-          {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-        </select>
-      </td>
-      <td className="px-3 py-2">
-        <select className="input text-sm" value={form.material_id} onChange={(e) => setForm((f) => ({ ...f, material_id: e.target.value }))} disabled={editingId !== 'new'}>
-          <option value="">-- Bahan --</option>
-          {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
-      </td>
-      <td className="px-3 py-2">
-        <select className="input text-sm" value={form.supplier_id} onChange={(e) => setForm((f) => ({ ...f, supplier_id: e.target.value }))}>
-          <option value="">-- Supplier --</option>
-          {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-      </td>
-      <td />
-      <td className="px-3 py-2 text-center">
-        <div className="flex gap-2 justify-center">
-          <button onClick={handleSave} disabled={saving} className="btn-primary text-xs px-3 py-1">{saving ? '...' : 'Simpan'}</button>
-          <button onClick={cancelEdit} className="btn-outline text-xs px-3 py-1">Batal</button>
-        </div>
-      </td>
-    </tr>
-  );
-
   return (
     <div>
+      {modalState && (
+        <PurchaseConfigModal
+          mapping={modalState === 'new' ? null : modalState}
+          outlets={outlets}
+          materials={materials}
+          suppliers={suppliers}
+          onClose={() => setModalState(null)}
+          onSaved={reloadMappings}
+        />
+      )}
+
       {confirmDelete && (
         <ConfirmDialog
-          title="Hapus Mapping?"
+          title="Hapus Konfigurasi?"
           confirmLabel="Ya, Hapus"
           danger
           loading={deleting}
@@ -1188,72 +1374,94 @@ function SupplierMappingTab() {
           onCancel={() => setConfirmDelete(null)}
         >
           <p>
-            Mapping <strong>{confirmDelete.material?.name}</strong> untuk outlet{' '}
+            Konfigurasi <strong>{confirmDelete.material?.name}</strong> untuk outlet{' '}
             <strong>{confirmDelete.outlet?.name}</strong> akan dihapus. Bahan ini akan kembali
-            memakai supplier default.
+            memakai supplier dan aturan pembelian default bahan.
           </p>
         </ConfirmDialog>
       )}
 
       <div className="mb-4 p-3.5 bg-orange-50 border border-orange-200 rounded-xl text-xs text-orange-800 leading-relaxed">
-        Atur supplier khusus untuk kombinasi outlet + bahan tertentu — misalnya karena supplier
-        lain lebih dekat/murah untuk cabang itu. Kombinasi yang tidak dimapping di sini tetap
-        memakai supplier default bahan (di tab Bahan Baku).
+        Atur supplier, satuan beli, faktor konversi, harga, dan minimum pembelian khusus untuk
+        kombinasi outlet + bahan tertentu — misalnya karena supplier lain lebih dekat/murah untuk
+        cabang itu, atau menjual kemasan berbeda. Kombinasi yang tidak dikonfigurasi di sini tetap
+        memakai aturan default bahan (di tab Bahan Baku).
       </div>
 
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-500">{mappings.length} mapping terdaftar</p>
-        <button onClick={startAdd} disabled={editingId !== null || materials.length === 0 || outlets.length === 0} className="btn-primary text-sm">
-          + Tambah Mapping
+        <p className="text-sm text-gray-500">{mappings.length} konfigurasi terdaftar</p>
+        <button onClick={() => setModalState('new')} disabled={materials.length === 0 || outlets.length === 0} className="btn-primary text-sm">
+          + Tambah Konfigurasi
         </button>
       </div>
       {error && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
 
       <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
-              <th className="px-3 py-3 text-left font-medium text-gray-600">Outlet</th>
-              <th className="px-3 py-3 text-left font-medium text-gray-600">Bahan</th>
-              <th className="px-3 py-3 text-left font-medium text-gray-600">Supplier Khusus</th>
-              <th className="px-3 py-3 text-center font-medium text-gray-600">Aktif</th>
-              <th className="px-3 py-3 text-center font-medium text-gray-600">Aksi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {editingId === 'new' && formRow}
-            {mappings.length === 0 && editingId !== 'new' ? (
-              <tr>
-                <td colSpan={5} className="text-center py-10 text-gray-400">
-                  <p className="text-3xl mb-2">🔀</p>
-                  <p className="font-medium">Belum ada mapping supplier khusus</p>
-                  <p className="text-sm mt-1">Klik "+ Tambah Mapping" untuk mengatur supplier per outlet</p>
-                </td>
+        <div className="table-wrap">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                <th className="px-3 py-3 text-left font-medium text-gray-600">Outlet</th>
+                <th className="px-3 py-3 text-left font-medium text-gray-600">Bahan</th>
+                <th className="px-3 py-3 text-left font-medium text-gray-600">Supplier</th>
+                <th className="px-3 py-3 text-left font-medium text-gray-600">Satuan Beli</th>
+                <th className="px-3 py-3 text-left font-medium text-gray-600">Konversi</th>
+                <th className="px-3 py-3 text-right font-medium text-gray-600">Harga</th>
+                <th className="px-3 py-3 text-center font-medium text-gray-600">Min/Kelipatan</th>
+                <th className="px-3 py-3 text-center font-medium text-gray-600">Aktif</th>
+                <th className="px-3 py-3 text-center font-medium text-gray-600">Aksi</th>
               </tr>
-            ) : (
-              mappings.map((m) =>
-                editingId === m.id ? formRow : (
-                  <tr key={m.id} className={`hover:bg-gray-50 ${!m.is_active ? 'opacity-50' : ''}`}>
-                    <td className="px-3 py-3 font-medium text-gray-800">{m.outlet?.name || <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-3 text-gray-700">{m.material?.name || <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-3 text-gray-600">{m.supplier?.name || <span className="text-gray-300">—</span>}</td>
-                    <td className="px-3 py-3 text-center">
-                      <button onClick={() => toggleActive(m)} className={`w-10 h-5 rounded-full transition-colors ${m.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
-                        <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${m.is_active ? 'translate-x-5' : ''}`} />
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 text-center">
-                      <div className="flex gap-2 justify-center">
-                        <button onClick={() => startEdit(m)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
-                        <button onClick={() => setConfirmDelete(m)} className="text-red-500 text-xs font-medium hover:underline">Hapus</button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              )
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {mappings.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="text-center py-10 text-gray-400">
+                    <p className="text-3xl mb-2">🔀</p>
+                    <p className="font-medium">Belum ada konfigurasi pembelian khusus</p>
+                    <p className="text-sm mt-1">Klik "+ Tambah Konfigurasi" untuk mengatur per outlet</p>
+                  </td>
+                </tr>
+              ) : (
+                mappings.map((m) => {
+                  const config = resolvePurchaseConfig(m.material || {}, m);
+                  const isCustom = (field) => m[field] !== null && m[field] !== undefined;
+                  return (
+                    <tr key={m.id} className={`hover:bg-gray-50 ${!m.is_active ? 'opacity-50' : ''}`}>
+                      <td className="px-3 py-3 font-medium text-gray-800">{m.outlet?.name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-3 text-gray-700">{m.material?.name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-3 text-gray-600">{m.supplier?.name || <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-3 text-gray-600">
+                        {config.purchase_unit}
+                        {!isCustom('purchase_unit') && <span className="text-gray-300 text-xs ml-1">(default)</span>}
+                      </td>
+                      <td className="px-3 py-3 text-gray-500 text-xs">
+                        1 {config.purchase_unit} = {config.package_qty} {config.package_unit}
+                      </td>
+                      <td className="px-3 py-3 text-right text-gray-600">
+                        {formatRupiah(config.price_per_purchase_unit)}
+                        {!isCustom('price_per_purchase_unit') && <span className="text-gray-300 text-xs block">(default)</span>}
+                      </td>
+                      <td className="px-3 py-3 text-center text-gray-500 text-xs">
+                        min {config.min_order_qty} / x{config.order_multiple}
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <button onClick={() => toggleActive(m)} className={`w-10 h-5 rounded-full transition-colors ${m.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
+                          <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${m.is_active ? 'translate-x-5' : ''}`} />
+                        </button>
+                      </td>
+                      <td className="px-3 py-3 text-center">
+                        <div className="flex gap-2 justify-center">
+                          <button onClick={() => setModalState(m)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
+                          <button onClick={() => setConfirmDelete(m)} className="text-red-500 text-xs font-medium hover:underline">Hapus</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

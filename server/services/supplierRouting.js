@@ -1,35 +1,87 @@
 const supabase = require('./supabase');
+const { buildConfigKey } = require('./purchaseConfig');
 
-// Mapping supplier per (outlet, bahan) — dipakai calculator.calculatePOs untuk
-// mengalihkan sebagian/semua qty sebuah bahan ke supplier lain tergantung outlet
-// pemesan (mis. cabang yang lebih dekat ke supplier tertentu). Tabel mungkin
-// belum ada jika migration belum dijalankan — pada kasus itu jatuh ke perilaku
-// lama (supplier default per bahan).
-async function loadSupplierRouting() {
-  const empty = { supplierOverrides: {}, suppliersById: {}, outletsById: {} };
+// Konfigurasi pembelian per (outlet, bahan) — dipakai calculator.calculatePOs
+// untuk menentukan supplier, satuan beli, faktor konversi, harga, minimum, dan
+// kelipatan pembelian sesuai outlet pemesan (mis. cabang yang lebih dekat ke
+// supplier tertentu, atau supplier yang menjual kemasan berbeda).
+//
+// Tabel/kolom mungkin belum ada jika migration belum dijalankan — pada kasus
+// itu jatuh ke perilaku lama (semua aturan pembelian dari master bahan).
+const CONFIG_COLUMNS =
+  'id, outlet_id, material_id, supplier_id, is_active, purchase_unit, package_qty, ' +
+  'package_unit, price_per_purchase_unit, min_order_qty, order_multiple, request_basis';
+const LEGACY_COLUMNS = 'id, outlet_id, material_id, supplier_id, is_active';
 
-  const [overridesRes, suppliersRes, outletsRes] = await Promise.all([
-    supabase
+const CONFIG_ONLY_COLUMNS = [
+  'purchase_unit',
+  'package_qty',
+  'package_unit',
+  'price_per_purchase_unit',
+  'min_order_qty',
+  'order_multiple',
+  'request_basis',
+];
+
+function isMissingRelationError(error, relation) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes(relation.toLowerCase()) &&
+    (message.includes('relation') ||
+      message.includes('schema cache') ||
+      message.includes('could not find'))
+  );
+}
+
+function isMissingColumnError(error, columns) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    columns.some((column) => message.includes(column.toLowerCase())) &&
+    (message.includes('column') ||
+      message.includes('schema cache') ||
+      message.includes('could not find'))
+  );
+}
+
+// Ambil baris mapping, turun bertahap agar tetap jalan di instalasi yang
+// migration-nya belum lengkap: kolom konfigurasi → kolom lama → tabel belum ada.
+async function fetchMappingRows() {
+  let result = await supabase
+    .from('outlet_material_suppliers')
+    .select(CONFIG_COLUMNS)
+    .eq('is_active', true);
+
+  if (!result.error) return result.data || [];
+
+  if (isMissingColumnError(result.error, CONFIG_ONLY_COLUMNS)) {
+    console.warn(
+      'Kolom konfigurasi pembelian belum ada di outlet_material_suppliers. ' +
+        'Jalankan supabase/migration_outlet_material_purchase_config.sql agar ' +
+        'satuan/harga/minimum per outlet aktif. Sementara ini hanya supplier yang dialihkan.'
+    );
+    result = await supabase
       .from('outlet_material_suppliers')
-      .select('outlet_id, material_id, supplier_id')
-      .eq('is_active', true),
+      .select(LEGACY_COLUMNS)
+      .eq('is_active', true);
+    if (!result.error) return result.data || [];
+  }
+
+  if (isMissingRelationError(result.error, 'outlet_material_suppliers')) return [];
+
+  throw result.error;
+}
+
+async function loadSupplierRouting() {
+  const [mappingRows, suppliersRes, outletsRes] = await Promise.all([
+    fetchMappingRows(),
     supabase.from('suppliers').select('id, name, wa_number, gives_roti_tawar_bonus'),
     supabase.from('outlets').select('id, name'),
   ]);
 
-  if (overridesRes.error) {
-    const message = String(overridesRes.error.message || '').toLowerCase();
-    const missingTable = message.includes('outlet_material_suppliers') && (
-      message.includes('relation') || message.includes('schema cache') || message.includes('could not find')
-    );
-    if (!missingTable) throw overridesRes.error;
-  }
   if (suppliersRes.error) {
-    const message = String(suppliersRes.error.message || '').toLowerCase();
-    const missingBonusColumn = message.includes('gives_roti_tawar_bonus') && (
-      message.includes('column') || message.includes('schema cache') || message.includes('could not find')
-    );
-    if (!missingBonusColumn) throw suppliersRes.error;
+    if (!isMissingColumnError(suppliersRes.error, ['gives_roti_tawar_bonus'])) {
+      throw suppliersRes.error;
+    }
 
     // Migration kolom bonus belum dijalankan — ambil tanpa kolom itu, default ke true di bawah
     const retry = await supabase.from('suppliers').select('id, name, wa_number');
@@ -38,9 +90,14 @@ async function loadSupplierRouting() {
   }
   if (outletsRes.error) throw outletsRes.error;
 
+  // purchaseConfigs = baris mapping mentah; supplierOverrides dipertahankan
+  // agar pemanggil lama (yang hanya butuh routing supplier) tetap bekerja.
+  const purchaseConfigs = {};
   const supplierOverrides = {};
-  (overridesRes.data || []).forEach((row) => {
-    supplierOverrides[`${row.outlet_id}:${row.material_id}`] = row.supplier_id;
+  mappingRows.forEach((row) => {
+    const key = buildConfigKey(row.outlet_id, row.material_id);
+    purchaseConfigs[key] = row;
+    if (row.supplier_id) supplierOverrides[key] = row.supplier_id;
   });
 
   const suppliersById = {};
@@ -53,7 +110,7 @@ async function loadSupplierRouting() {
   const outletsById = {};
   (outletsRes.data || []).forEach((o) => { outletsById[o.id] = o; });
 
-  return { ...empty, supplierOverrides, suppliersById, outletsById };
+  return { supplierOverrides, purchaseConfigs, suppliersById, outletsById };
 }
 
 module.exports = { loadSupplierRouting };

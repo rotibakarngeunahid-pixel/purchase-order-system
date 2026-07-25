@@ -81,18 +81,37 @@ router.post('/session/:id/send-wa', async (req, res) => {
 
     if (poError) return res.status(500).json({ error: poError.message });
 
-    // Insert purchase_order_items
-    const poItems = po.items.map((item) => ({
+    // Insert purchase_order_items — snapshot satuan beli, faktor konversi, dan
+    // harga estimasi yang dipakai saat PO dibuat. Konfigurasi outlet_material_suppliers
+    // bisa berubah/dihapus setelahnya; PO yang sudah dibuat harus tetap konsisten
+    // dengan angka yang disepakati saat pemesanan.
+    let poItems = po.items.map((item) => ({
       po_id: poRecord.id,
       material_id: item.material_id,
       qty_ordered: item.qty_ordered,
+      purchase_unit: item.purchase_unit,
+      package_qty: item.package_qty,
+      package_unit: item.package_unit,
+      price_estimated: item.price_per_purchase_unit,
     }));
 
-    const { error: itemsInsertError } = await supabase
-      .from('purchase_order_items')
-      .insert(poItems);
+    let itemsInsertResult = await supabase.from('purchase_order_items').insert(poItems);
 
-    if (itemsInsertError) return res.status(500).json({ error: itemsInsertError.message });
+    if (itemsInsertResult.error) {
+      const message = String(itemsInsertResult.error.message || '').toLowerCase();
+      const missingSnapshotColumns = ['purchase_unit', 'package_qty', 'package_unit', 'price_estimated'].some(
+        (c) => message.includes(c.toLowerCase())
+      ) && (
+        message.includes('column') || message.includes('schema cache') || message.includes('could not find')
+      );
+      if (!missingSnapshotColumns) {
+        return res.status(500).json({ error: itemsInsertResult.error.message });
+      }
+      // Migration snapshot belum dijalankan — insert tanpa kolom snapshot (perilaku lama)
+      poItems = poItems.map(({ po_id, material_id, qty_ordered }) => ({ po_id, material_id, qty_ordered }));
+      itemsInsertResult = await supabase.from('purchase_order_items').insert(poItems);
+      if (itemsInsertResult.error) return res.status(500).json({ error: itemsInsertResult.error.message });
+    }
 
     posWithRecords.push({ ...po, po_id: poRecord.id });
   }

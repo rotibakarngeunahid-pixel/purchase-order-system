@@ -3,6 +3,12 @@ import { ChevronLeft, ChevronRight, AlertTriangle, Check, Store } from 'lucide-r
 import { getMatrixKey, isRotiTawar, calcTotalPerOutlet } from '../../lib/orderHelpers';
 import { DAY_NAMES } from '../../services/holidayService';
 import { getMaterialIcon, getMaterialHue } from '../../lib/materialIcons';
+import {
+  REQUEST_BASIS,
+  buildConfigKey,
+  getRequestUnit,
+  resolvePurchaseConfig,
+} from '../../lib/purchaseConfig';
 import StepperInput from './StepperInput';
 
 function fmtDateShort(dateStr) {
@@ -41,6 +47,11 @@ export default function OutletOrderInput({
   onSelectOutletIdx,
   // { [outlet_id]: Set(material_id) } — rekomendasi staff pending dari Inventori
   recommendedByOutlet = {},
+  // { "outlet_id:material_id": outlet_material_suppliers row } — konfigurasi
+  // pembelian per outlet (Master Data > Mapping Supplier). Dipakai untuk
+  // menampilkan satuan input yang benar bila outlet ini memakai basis
+  // kebutuhan bahan baku (base_unit) alih-alih satuan beli langsung.
+  purchaseConfigsByKey = {},
 }) {
   const [localIdx, setLocalIdx] = useState(0);
   // Gunakan controlled state jika disediakan parent, otherwise local
@@ -395,6 +406,10 @@ export default function OutletOrderInput({
               const icon = getMaterialIcon(mat.name);
               const hue = getMaterialHue(mat.name);
               const isRecommended = !!(recommendedSet && recommendedSet.has(mat.id));
+              const mapping = purchaseConfigsByKey[buildConfigKey(selectedOutlet.id, mat.id)] || null;
+              const config = resolvePurchaseConfig(mat, mapping);
+              const requestUnit = getRequestUnit(config);
+              const isBaseUnitBasis = config.request_basis === REQUEST_BASIS.BASE_UNIT;
 
               return (
                 <div
@@ -427,7 +442,15 @@ export default function OutletOrderInput({
                   <div className="mb-2.5">
                     <div className="text-sm font-bold text-gray-800 leading-tight">{mat.name}</div>
                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                      <span className="text-xs text-brand-orange font-medium">{mat.purchase_unit}</span>
+                      <span className="text-xs text-brand-orange font-medium">{requestUnit}</span>
+                      {isBaseUnitBasis && (
+                        <span
+                          title={`Input dalam kebutuhan bahan (${config.package_unit}). Sistem otomatis menghitung jumlah ${config.purchase_unit} yang dibeli (isi ${config.package_qty} ${config.package_unit}/${config.purchase_unit}).`}
+                          className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full font-medium"
+                        >
+                          🔄 Auto-convert
+                        </span>
+                      )}
                       {isRoti && (
                         <span className="text-xs bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded-full">
                           Roti Tawar

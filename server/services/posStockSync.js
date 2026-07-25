@@ -37,16 +37,40 @@ async function fetchPODataForSync(poId) {
 
   if (poErr || !po) throw new Error(`Gagal ambil data PO ${poId}: ${poErr?.message}`);
 
-  // Fetch PO items + material info
-  const { data: items, error: itemsErr } = await supabase
+  // Fetch PO items + material info. purchase_unit/package_qty/package_unit di
+  // item adalah SNAPSHOT konfigurasi outlet_material_suppliers saat PO dibuat
+  // (lihat routes/notifications.js) — dipakai lebih dulu daripada master bahan
+  // supaya faktor konversi tetap konsisten walau konfigurasi supplier berubah
+  // setelahnya. NULL pada item (PO lama / migration belum jalan) → fallback ke master.
+  let items;
+  let itemsErr;
+  ({ data: items, error: itemsErr } = await supabase
     .from('purchase_order_items')
     .select(`
       id, material_id, qty_ordered, qty_received, source,
+      purchase_unit, package_qty, package_unit,
       materials(id, name, purchase_unit, package_qty, package_unit)
     `)
-    .eq('po_id', poId);
+    .eq('po_id', poId));
 
-  if (itemsErr) throw new Error(`Gagal ambil items PO ${poId}: ${itemsErr?.message}`);
+  if (itemsErr) {
+    const message = String(itemsErr.message || '').toLowerCase();
+    const missingSnapshotColumns = ['purchase_unit', 'package_qty', 'package_unit'].some(
+      (c) => message.includes(c)
+    ) && (
+      message.includes('column') || message.includes('schema cache') || message.includes('could not find')
+    );
+    if (!missingSnapshotColumns) throw new Error(`Gagal ambil items PO ${poId}: ${itemsErr?.message}`);
+
+    ({ data: items, error: itemsErr } = await supabase
+      .from('purchase_order_items')
+      .select(`
+        id, material_id, qty_ordered, qty_received, source,
+        materials(id, name, purchase_unit, package_qty, package_unit)
+      `)
+      .eq('po_id', poId));
+    if (itemsErr) throw new Error(`Gagal ambil items PO ${poId}: ${itemsErr?.message}`);
+  }
 
   // Fetch distribusi per item (jika ada)
   const itemIds = (items || []).map((i) => i.id).filter(Boolean);
@@ -71,7 +95,8 @@ async function fetchPODataForSync(poId) {
     });
   }
 
-  // Bangun array items untuk payload sync
+  // Bangun array items untuk payload sync. Snapshot di item (bila ada) menang
+  // atas master bahan — lihat komentar di query di atas.
   const syncItems = (items || [])
     .filter((item) => item.material_id) // abaikan item tanpa material
     .map((item) => ({
@@ -80,9 +105,9 @@ async function fetchPODataForSync(poId) {
       po_material_name:     item.materials?.name || item.material_id,
       po_item_source:       item.source || 'ordered',
       qty_received:         Number(item.qty_received ?? 0),
-      po_purchase_unit:     item.materials?.purchase_unit || null,
-      po_package_qty:       Math.max(1, Number(item.materials?.package_qty ?? 1) || 1),
-      po_package_unit:      item.materials?.package_unit || null,
+      po_purchase_unit:     item.purchase_unit || item.materials?.purchase_unit || null,
+      po_package_qty:       Math.max(1, Number(item.package_qty ?? item.materials?.package_qty ?? 1) || 1),
+      po_package_unit:      item.package_unit || item.materials?.package_unit || null,
       outlet_id:            '',
       outlet_name:          '',
       branch_distributions: distByItem[item.id] || [],

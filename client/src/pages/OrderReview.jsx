@@ -48,6 +48,39 @@ function POCard({ po }) {
               <tr key={i}>
                 <td>
                   <div className="font-medium text-gray-800">{item.material_name}</div>
+                  {item.purchase_conversion?.converted && (
+                    <div
+                      className="mt-1 text-xs bg-purple-50 border border-purple-200 rounded px-2 py-1 inline-flex items-center gap-2 text-purple-700"
+                      title="Bahan ini dikonfigurasi dengan basis kebutuhan bahan baku (Master Data → Mapping Supplier)"
+                    >
+                      <span>
+                        Kebutuhan: <strong>{item.purchase_conversion.base_qty_needed} {item.purchase_conversion.base_unit}</strong>
+                      </span>
+                      <span className="text-purple-300">|</span>
+                      <span>
+                        Dibeli: <strong>{item.purchase_conversion.base_qty_ordered} {item.purchase_conversion.base_unit}</strong>
+                      </span>
+                      {item.purchase_conversion.surplus_base_qty > 0 && (
+                        <>
+                          <span className="text-purple-300">|</span>
+                          <span>Surplus: <strong>+{item.purchase_conversion.surplus_base_qty} {item.purchase_conversion.base_unit}</strong></span>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {!item.purchase_conversion?.converted && item.purchase_conversion?.rounded_up && (
+                    <div
+                      className="mt-1 text-xs bg-purple-50 border border-purple-200 rounded px-2 py-1 inline-flex items-center gap-2 text-purple-700"
+                      title="Dibulatkan ke minimum/kelipatan pembelian supplier ini (Master Data → Mapping Supplier)"
+                    >
+                      <span>Diminta: <strong>{item.purchase_conversion.raw_purchase_qty} {item.purchase_unit}</strong></span>
+                      <span className="text-purple-300">|</span>
+                      <span>Dibulatkan ke: <strong>{item.qty_ordered} {item.purchase_unit}</strong></span>
+                      <span className="text-purple-300">
+                        (min {item.purchase_conversion.min_order_qty}, kelipatan {item.purchase_conversion.order_multiple})
+                      </span>
+                    </div>
+                  )}
                   {item.roti_tawar_bonus && (
                     <div className="mt-1 text-xs bg-orange-50 border border-orange-200 rounded px-2 py-1 inline-flex items-center gap-2 text-orange-700">
                       <span>Dibutuhkan: <strong>{item.roti_tawar_bonus.total_needed}</strong></span>
