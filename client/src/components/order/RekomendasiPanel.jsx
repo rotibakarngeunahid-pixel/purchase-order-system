@@ -19,9 +19,13 @@ function daysBetween(fromStr, toStr) {
   return Math.round((b - a) / 86400000);
 }
 
-// Hanya H-1 (default) dan H-2. Rekomendasi lebih lama dianggap kedaluwarsa
-// karena staff melapor ulang tiap malam (permintaan admin, Jul 2026).
+// H0 (hari ini), H-1 (default), dan H-2. Rekomendasi lebih lama dianggap
+// kedaluwarsa karena staff melapor ulang tiap malam (permintaan admin, Jul 2026).
+// Default tetap "Kemarin" — laporan malam terakhir staff biasanya sudah utuh
+// saat admin menyusun order pagi harinya; "Hari Ini" berguna untuk cek cepat
+// laporan yang baru masuk tanpa perlu ganti-ganti tanggal order.
 const DATE_FILTERS = [
+  { id: 'today', label: 'Hari Ini' },
   { id: 'yesterday', label: 'Kemarin' },
   { id: '2days', label: '2 Hari Lalu' },
 ];
@@ -311,6 +315,10 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
         const d2 = shiftDate(getLocalOperationalDate(), -2);
         params.set('date_from', d2);
         params.set('date_to', d2);
+      } else if (dateFilter === 'today') {
+        const today = getLocalOperationalDate();
+        params.set('date_from', today);
+        params.set('date_to', today);
       } else {
         // default: kemarin (H-1) — laporan malam terakhir dari staff
         const y = getLocalOperationalYesterday();
@@ -443,7 +451,7 @@ export default function RekomendasiPanel({ materials, onAddToOrder, addedIds, cu
   const totalPending = pendingItems.length;
   const thisOutletPending = thisOutletItems.filter((i) => i.status !== 'processed').length;
 
-  const filterLabel = dateFilter === '2days' ? '2 hari lalu' : 'kemarin';
+  const filterLabel = dateFilter === '2days' ? '2 hari lalu' : dateFilter === 'today' ? 'hari ini' : 'kemarin';
 
   return (
     <div className="bg-orange-50 border border-orange-200 rounded-xl overflow-hidden">
