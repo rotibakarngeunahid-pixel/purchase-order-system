@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api, { formatRupiah } from '../lib/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import useModalDismiss from '../components/ui/useModalDismiss';
@@ -1059,7 +1059,7 @@ function OutletsTab() {
 // Kolom satuan/harga/minimum kosong berarti "ikut master bahan" — hanya
 // supplier yang wajib diisi kalau admin cuma mau mengalihkan supplier tanpa
 // mengubah aturan pembelian (perilaku lama tetap didukung penuh).
-function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, onSaved }) {
+function PurchaseConfigModal({ mapping, outlets, materials, suppliers, allMappings, onClose, onSaved }) {
   const isNew = !mapping;
   const [form, setForm] = useState(() => ({
     outlet_id: mapping?.outlet_id || '',
@@ -1078,9 +1078,50 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
   const [previewQty, setPreviewQty] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [variantBrands, setVariantBrands] = useState([]);
+  // 'select' = pilih dari daftar merk yang sudah ada, 'custom' = ketik manual
+  // (dipakai kalau bahan belum punya merk terdaftar sama sekali).
+  const [brandMode, setBrandMode] = useState('select');
   useModalDismiss(onClose);
 
   const selectedMaterial = materials.find((m) => m.id === form.material_id) || null;
+
+  // Ambil merk yang sudah pernah didaftarkan untuk bahan ini lewat tab Bahan
+  // Baku (material_variants) — supaya admin tinggal pilih, tidak ketik ulang.
+  useEffect(() => {
+    if (!form.material_id) { setVariantBrands([]); return; }
+    let cancelled = false;
+    api.get(`/api/materials/${form.material_id}/variants`)
+      .then((res) => {
+        if (cancelled) return;
+        setVariantBrands((res.data || []).map((v) => v.brand).filter(Boolean));
+      })
+      .catch(() => { if (!cancelled) setVariantBrands([]); });
+    return () => { cancelled = true; };
+  }, [form.material_id]);
+
+  // Gabungkan semua sumber merk yang sudah ada untuk bahan ini: merk default
+  // bahan (tab Bahan Baku), varian merk bahan tsb, dan merk yang sudah dipakai
+  // di mapping outlet lain untuk bahan yang sama — supaya konsisten, bukan
+  // hasil ketik ulang yang berbeda-beda (mis. "Wisman" vs "wisman").
+  const brandOptions = useMemo(() => {
+    if (!form.material_id) return [];
+    const set = new Set();
+    if (selectedMaterial?.brand) set.add(selectedMaterial.brand);
+    variantBrands.forEach((b) => b && set.add(b));
+    (allMappings || []).forEach((m) => {
+      if (m.material_id === form.material_id && m.brand) set.add(m.brand);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [form.material_id, selectedMaterial, variantBrands, allMappings]);
+
+  // Sertakan nilai form.brand saat ini (mis. saat edit konfigurasi lama) agar
+  // tidak hilang dari daftar walau belum termasuk brandOptions di atas.
+  const brandSelectOptions = useMemo(() => {
+    const set = new Set(brandOptions);
+    if (form.brand) set.add(form.brand);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [brandOptions, form.brand]);
 
   const effectiveConfig = selectedMaterial
     ? resolvePurchaseConfig(selectedMaterial, {
@@ -1222,15 +1263,41 @@ function PurchaseConfigModal({ mapping, outlets, materials, suppliers, onClose, 
 
           <div className="border-t border-gray-100 pt-4">
             <p className="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wide">Merk (opsional)</p>
-            <input
-              className="input text-sm"
-              placeholder={selectedMaterial?.brand || 'Mis. Wisman, Blue Band, dll'}
-              value={form.brand}
-              onChange={(e) => set('brand', e.target.value)}
-            />
+            {brandMode === 'select' ? (
+              <div className="flex gap-2">
+                <select
+                  className="input text-sm flex-1"
+                  value={brandSelectOptions.includes(form.brand) ? form.brand : ''}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') { setBrandMode('custom'); set('brand', ''); }
+                    else set('brand', e.target.value);
+                  }}
+                >
+                  <option value="">-- Ikut merk default bahan --</option>
+                  {brandSelectOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+                  <option value="__new__">+ Merk baru...</option>
+                </select>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  autoFocus
+                  className="input text-sm flex-1"
+                  placeholder={selectedMaterial?.brand || 'Mis. Wisman, Blue Band, dll'}
+                  value={form.brand}
+                  onChange={(e) => set('brand', e.target.value)}
+                />
+                {brandSelectOptions.length > 0 && (
+                  <button type="button" onClick={() => setBrandMode('select')} className="btn-outline text-xs px-3 flex-shrink-0">
+                    Pilih dari daftar
+                  </button>
+                )}
+              </div>
+            )}
             <p className="text-xs text-gray-400 mt-1.5">
-              Isi kalau supplier ini menjual merk tertentu untuk bahan ini — supplier lain untuk outlet
-              lain bisa punya merk berbeda walau bahan masternya sama.
+              Pilih merk yang sudah pernah dipakai untuk bahan ini (dari tab Bahan Baku atau mapping
+              outlet lain), atau ketik merk baru. Supplier berbeda bisa punya merk berbeda walau bahan
+              masternya sama.
             </p>
           </div>
 
@@ -1497,6 +1564,7 @@ function SupplierMappingTab() {
           outlets={outlets}
           materials={materials}
           suppliers={suppliers}
+          allMappings={mappings}
           onClose={() => setModalState(null)}
           onSaved={reloadMappings}
         />
