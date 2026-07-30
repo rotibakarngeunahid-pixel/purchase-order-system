@@ -11,6 +11,9 @@ const { buildConfigKey } = require('./purchaseConfig');
 const CONFIG_COLUMNS =
   'id, outlet_id, material_id, supplier_id, is_active, purchase_unit, package_qty, ' +
   'package_unit, price_per_purchase_unit, min_order_qty, order_multiple, request_basis';
+// brand dipisah dari CONFIG_COLUMNS karena migration-nya (migration_outlet_material_supplier_brand.sql)
+// ditambahkan belakangan — instalasi yang belum menjalankannya harus tetap bisa fallback tanpa kolom ini.
+const FULL_COLUMNS = `${CONFIG_COLUMNS}, brand`;
 const LEGACY_COLUMNS = 'id, outlet_id, material_id, supplier_id, is_active';
 
 const CONFIG_ONLY_COLUMNS = [
@@ -22,6 +25,7 @@ const CONFIG_ONLY_COLUMNS = [
   'order_multiple',
   'request_basis',
 ];
+const BRAND_ONLY_COLUMNS = ['brand'];
 
 function isMissingRelationError(error, relation) {
   const message = String(error?.message || '').toLowerCase();
@@ -44,14 +48,27 @@ function isMissingColumnError(error, columns) {
 }
 
 // Ambil baris mapping, turun bertahap agar tetap jalan di instalasi yang
-// migration-nya belum lengkap: kolom konfigurasi → kolom lama → tabel belum ada.
+// migration-nya belum lengkap: kolom brand → kolom konfigurasi → kolom lama → tabel belum ada.
 async function fetchMappingRows() {
   let result = await supabase
     .from('outlet_material_suppliers')
-    .select(CONFIG_COLUMNS)
+    .select(FULL_COLUMNS)
     .eq('is_active', true);
 
   if (!result.error) return result.data || [];
+
+  if (isMissingColumnError(result.error, BRAND_ONLY_COLUMNS)) {
+    console.warn(
+      'Kolom brand belum ada di outlet_material_suppliers. Jalankan ' +
+        'supabase/migration_outlet_material_supplier_brand.sql agar merk per outlet+supplier aktif. ' +
+        'Sementara ini merk mengikuti default bahan.'
+    );
+    result = await supabase
+      .from('outlet_material_suppliers')
+      .select(CONFIG_COLUMNS)
+      .eq('is_active', true);
+    if (!result.error) return result.data || [];
+  }
 
   if (isMissingColumnError(result.error, CONFIG_ONLY_COLUMNS)) {
     console.warn(
