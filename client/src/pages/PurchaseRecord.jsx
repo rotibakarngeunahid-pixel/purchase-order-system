@@ -928,6 +928,9 @@ function ReceiveModal({ po, onClose, onSaved }) {
   };
 
   const doSave = async () => {
+    // Guard terhadap submit ganda (double-click sebelum tombol sempat disabled
+    // oleh re-render React) — mencegah request /receive terkirim dua kali.
+    if (saving) return;
     setSaving(true);
     setError('');
     try {

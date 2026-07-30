@@ -85,11 +85,12 @@ router.post('/', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Fire-and-forget: sync ke stok POS
+  // Ditunggu (bukan fire-and-forget) agar sinkronisasi tidak terpotong saat
+  // instance serverless dibekukan setelah response dikirim — pola sama dengan
+  // routes/purchase.js (lihat komentar di services/posStockSync.js).
   const outletName = (data && data[0]?.outlet?.name) || '';
-  syncPurchaseReportToInventory(data, outlet_id, outletName)
-    .then((r) => { if (!r.ok) console.error('[POS Sync] Purchase report sync gagal:', r.error); })
-    .catch((err) => console.error('[POS Sync] Purchase report sync error:', err?.message));
+  const posSync = await syncPurchaseReportToInventory(data, outlet_id, outletName);
+  if (!posSync.ok) console.error('[POS Sync] Purchase report sync gagal:', posSync.error);
 
   res.status(201).json(data);
 });
@@ -128,11 +129,10 @@ router.put('/:id', async (req, res) => {
 
   if (error) return res.status(500).json({ error: error.message });
 
-  // Fire-and-forget: re-sync ke POS dengan qty terbaru
+  // Ditunggu (bukan fire-and-forget) — lihat catatan di route POST di atas.
   const outletName = data.outlet?.name || '';
-  syncPurchaseReportToInventory([data], data.outlet_id, outletName)
-    .then((r) => { if (!r.ok) console.error('[POS Sync] Edit sync gagal:', r.error); })
-    .catch((err) => console.error('[POS Sync] Edit sync error:', err?.message));
+  const posSync = await syncPurchaseReportToInventory([data], data.outlet_id, outletName);
+  if (!posSync.ok) console.error('[POS Sync] Edit sync gagal:', posSync.error);
 
   res.json(data);
 });
