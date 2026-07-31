@@ -2,6 +2,33 @@ const supabase = require('./supabase');
 
 const RETENTION_DAYS = 7;
 
+/** Ekstrak path storage dari URL publik Supabase. Format: .../object/public/distribusi/<path> */
+function extractDistribusiPath(url) {
+  try {
+    const parsed = new URL(url);
+    const match = parsed.pathname.match(/\/object\/public\/distribusi\/(.+)/);
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Hapus batch file dari bucket 'distribusi' (maks 100 per panggilan). Mengembalikan jumlah file terhapus. */
+async function removeDistribusiFiles(filePaths) {
+  let filesDeleted = 0;
+  const BATCH = 100;
+  for (let i = 0; i < filePaths.length; i += BATCH) {
+    const batch = filePaths.slice(i, i + BATCH);
+    const { error: storageErr } = await supabase.storage.from('distribusi').remove(batch);
+    if (storageErr) {
+      console.error('[PhotoCleanup] Storage delete error:', storageErr.message);
+    } else {
+      filesDeleted += batch.length;
+    }
+  }
+  return filesDeleted;
+}
+
 /**
  * Hapus foto distribusi yang sudah lebih dari RETENTION_DAYS hari.
  * Menghapus file dari Supabase Storage DAN record di tabel distribution_photos.
@@ -23,32 +50,11 @@ async function cleanupOldDistributionPhotos() {
     return { deleted: 0, files: 0 };
   }
 
-  // Ekstrak path storage dari URL publik Supabase
-  // Format URL: .../storage/v1/object/public/distribusi/<path>
   const filePaths = oldRecords.flatMap((record) =>
-    (record.photos || []).map((p) => {
-      try {
-        const url = new URL(p.url);
-        const match = url.pathname.match(/\/object\/public\/distribusi\/(.+)/);
-        return match ? decodeURIComponent(match[1]) : null;
-      } catch {
-        return null;
-      }
-    }).filter(Boolean)
+    (record.photos || []).map((p) => extractDistribusiPath(p.url)).filter(Boolean)
   );
 
-  // Hapus dari Supabase Storage (batch, maks 1000 per panggilan)
-  let filesDeleted = 0;
-  const BATCH = 100;
-  for (let i = 0; i < filePaths.length; i += BATCH) {
-    const batch = filePaths.slice(i, i + BATCH);
-    const { error: storageErr } = await supabase.storage.from('distribusi').remove(batch);
-    if (storageErr) {
-      console.error('[PhotoCleanup] Storage delete error:', storageErr.message);
-    } else {
-      filesDeleted += batch.length;
-    }
-  }
+  const filesDeleted = await removeDistribusiFiles(filePaths);
 
   // Hapus record DB
   const ids = oldRecords.map((r) => r.id);
@@ -66,4 +72,4 @@ async function cleanupOldDistributionPhotos() {
   return { deleted: oldRecords.length, files: filesDeleted };
 }
 
-module.exports = { cleanupOldDistributionPhotos, RETENTION_DAYS };
+module.exports = { cleanupOldDistributionPhotos, RETENTION_DAYS, extractDistribusiPath, removeDistribusiFiles };
