@@ -204,6 +204,18 @@ export default function DataDeletion() {
     if (stage !== 'idle') backToFilters();
   }
 
+  function selectAllDataTypes() {
+    setSelectedDataTypes(dataTypeOptions.map((t) => t.key));
+    setError('');
+    if (stage !== 'idle') backToFilters();
+  }
+
+  function clearAllDataTypes() {
+    setSelectedDataTypes([]);
+    setError('');
+    if (stage !== 'idle') backToFilters();
+  }
+
   // ── Validasi input ─────────────────────────────────────────────────────────
   function validateFilters() {
     if (!scopeAllBranches && selectedOutletIds.length === 0) {
@@ -398,8 +410,27 @@ export default function DataDeletion() {
               Pilih Jenis Data
             </h2>
             <p className="text-sm text-gray-500 mb-3">
-              Pilih satu atau beberapa jenis data yang ingin dihapus.
+              Pilih satu atau beberapa jenis data yang ingin dihapus, atau pilih semua untuk menghapus seluruh histori.
             </p>
+
+            <div className="flex flex-wrap gap-2 mb-3">
+              <button
+                type="button"
+                disabled={isDeleting || dataTypeOptions.length === 0}
+                onClick={selectAllDataTypes}
+                className="rounded-full px-4 py-1.5 text-sm font-medium border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Pilih Semua Jenis Data
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting || selectedDataTypes.length === 0}
+                onClick={clearAllDataTypes}
+                className="rounded-full px-4 py-1.5 text-sm font-medium border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Kosongkan Pilihan
+              </button>
+            </div>
 
             <div className="space-y-2">
               {dataTypeOptions.length === 0 && <p className="text-sm text-gray-400">Memuat jenis data...</p>}
