@@ -237,3 +237,67 @@ test('GET /:po_id — mapping ambigu antar outlet (beda konfigurasi) -> live_map
     restoreSupabase();
   }
 });
+
+test('GET /:po_id — PO lama tanpa snapshot outlet_requests: rekonstruksi hanya sertakan outlet yang mapping-nya cocok dengan supplier PO ini', async () => {
+  // Skenario nyata yang dilaporkan: PO supplier "Milo Bakeshop" (hanya dipetakan
+  // ke outlet Pemogan) tapi Distribusi Bahan ke Cabang ikut menampilkan outlet
+  // lain (Bunderan Dalung, Dalung Permai) yang bahannya sama tapi sebenarnya
+  // dipetakan ke supplier LAIN — karena PO ini dibuat sebelum snapshot
+  // outlet_requests ada, jadi item.outlet_requests di DB masih null.
+  const OUTLET_BUNDERAN_DALUNG = 'outlet-bunderan-dalung';
+  const OUTLET_DALUNG_PERMAI = 'outlet-dalung-permai';
+  const SUPPLIER_LAIN = 'sup-priangan-lain';
+
+  installFakeSupabase({
+    po: makePO({ priceActual: null, itemSupplierId: SUPPLIER_MAPPING_ID }), // po.supplier_id juga SUPPLIER_MAPPING_ID ("Milo Bakeshop")
+    requestRows: [
+      { outlet_id: OUTLET_ID, material_id: MATERIAL_ID, qty: 20 }, // Pemogan -> Milo Bakeshop
+      { outlet_id: OUTLET_BUNDERAN_DALUNG, material_id: MATERIAL_ID, qty: 8 }, // -> supplier lain
+      { outlet_id: OUTLET_DALUNG_PERMAI, material_id: MATERIAL_ID, qty: 10 }, // -> supplier lain
+    ],
+    mappingRows: [
+      {
+        outlet_id: OUTLET_ID,
+        material_id: MATERIAL_ID,
+        supplier_id: SUPPLIER_MAPPING_ID,
+        price_per_purchase_unit: 14000,
+        brand: 'Wincheez Reguler',
+        is_active: true,
+      },
+      {
+        outlet_id: OUTLET_BUNDERAN_DALUNG,
+        material_id: MATERIAL_ID,
+        supplier_id: SUPPLIER_LAIN,
+        price_per_purchase_unit: 4500,
+        brand: 'Priangan',
+        is_active: true,
+      },
+      {
+        outlet_id: OUTLET_DALUNG_PERMAI,
+        material_id: MATERIAL_ID,
+        supplier_id: SUPPLIER_LAIN,
+        price_per_purchase_unit: 4500,
+        brand: 'Priangan',
+        is_active: true,
+      },
+    ],
+  });
+
+  try {
+    const router = require(purchasePath);
+    const handler = getHandler(router, 'get', '/:po_id');
+    const res = fakeRes();
+    await handler({ params: { po_id: 'po-1' } }, res);
+
+    assert.equal(res.statusCode, 200);
+    const outletRequests = res.body.items[0].outlet_requests;
+    assert.ok(Array.isArray(outletRequests), 'harus direkonstruksi jadi array, bukan null/undefined');
+    assert.deepEqual(
+      outletRequests.map((r) => r.outlet_id),
+      [OUTLET_ID],
+      'hanya outlet Pemogan (mapping-nya cocok dengan supplier PO ini) yang boleh ikut — bukan Bunderan Dalung/Dalung Permai yang bahannya masuk PO/supplier lain'
+    );
+  } finally {
+    restoreSupabase();
+  }
+});
