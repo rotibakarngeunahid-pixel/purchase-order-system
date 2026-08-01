@@ -7,15 +7,25 @@ import useModalDismiss from '../components/ui/useModalDismiss';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Prioritas: nilai yang sudah tersimpan eksplisit di item (hasil edit/penerimaan
+// sebelumnya) > snapshot supplier dari PO (di-resolve dari mapping outlet_material_suppliers
+// saat PO dibuat — lihat notifications.js & calculator.js) > pilihan varian merk manual >
+// default master bahan (fallback PALING akhir, hanya dipakai kalau tidak ada mapping sama sekali).
 function resolveItemSupplierId(item, defaultSupplierId = '') {
   return (
     item.supplier_id ||
     item.item_supplier?.id ||
+    defaultSupplierId ||
     item.variant?.supplier_id ||
     item.material?.supplier_id ||
-    defaultSupplierId ||
     ''
   );
+}
+
+// Merk yang ditampilkan sebagai pilihan default (belum pilih varian manual):
+// snapshot mapping (item.brand) dulu, baru fallback ke default master bahan.
+function resolveItemBrandLabel(item) {
+  return item.brand || item.material?.brand || null;
 }
 
 function buildInitialOrderedItems(poItems, defaultSupplierId = '') {
@@ -26,6 +36,7 @@ function buildInitialOrderedItems(poItems, defaultSupplierId = '') {
       qty_received: item.qty_received ?? item.qty_ordered,
       price_actual:
         item.price_actual ??
+        item.price_estimated ??
         item.variant?.price_per_purchase_unit ??
         item.material?.price_per_purchase_unit ??
         0,
@@ -615,11 +626,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
         supplier_id:
           chosen?.supplier_id ||
           item.supplier_id ||
-          item.material?.supplier_id ||
-          defaultSupplierId,
+          defaultSupplierId ||
+          item.material?.supplier_id,
         price_actual: chosen
           ? chosen.price_per_purchase_unit
-          : item.material?.price_per_purchase_unit ?? 0,
+          : item.price_estimated ?? item.material?.price_per_purchase_unit ?? 0,
       };
       return next;
     });
@@ -703,7 +714,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
     }
     const material = materials.find((m) => m.id === materialId);
     const currentItem = adjustmentItems.find((item) => item._tempId === tempId);
-    const nextSupplierId = material?.supplier_id || currentItem?.supplier_id || defaultSupplierId;
+    const nextSupplierId = currentItem?.supplier_id || defaultSupplierId || material?.supplier_id;
     setAdjustmentItems((prev) =>
       prev.map((item) =>
         item._tempId === tempId
@@ -736,7 +747,7 @@ function ReceiveModal({ po, onClose, onSaved }) {
         materialId,
         materialName: material?.name || '',
         rowTempId: tempId,
-        defaultSupplierId: row?.supplier_id || material?.supplier_id || defaultSupplierId,
+        defaultSupplierId: row?.supplier_id || defaultSupplierId || material?.supplier_id,
       });
       return;
     }
@@ -752,8 +763,8 @@ function ReceiveModal({ po, onClose, onSaved }) {
               supplier_id:
                 chosen?.supplier_id ||
                 item.supplier_id ||
-                material?.supplier_id ||
-                defaultSupplierId,
+                defaultSupplierId ||
+                material?.supplier_id,
               price_actual: chosen
                 ? chosen.price_per_purchase_unit
                 : material?.price_per_purchase_unit ?? '',
@@ -1155,11 +1166,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
                             <select
                               value={item.variant_id || ''}
                               onChange={(e) => handleSelectOrderedVariant(idx, e.target.value)}
-                              title={item.material?.brand || 'Default'}
+                              title={resolveItemBrandLabel(item) || 'Default'}
                               className="border border-gray-300 rounded-md pl-2 pr-8 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-red w-full min-w-[200px] max-w-[240px]"
                             >
                               <option value="">
-                                {item.material?.brand || 'Default'}
+                                {resolveItemBrandLabel(item) || 'Default'}
                               </option>
                               {variants.map((v) => (
                                 <option key={v.id} value={v.id}>{v.brand}</option>
@@ -1168,9 +1179,9 @@ function ReceiveModal({ po, onClose, onSaved }) {
                           ) : (
                             <span
                               className="inline-block max-w-[220px] text-xs text-gray-500 leading-snug"
-                              title={item.material?.brand || '-'}
+                              title={resolveItemBrandLabel(item) || '-'}
                             >
-                              {item.material?.brand || '-'}
+                              {resolveItemBrandLabel(item) || '-'}
                             </span>
                           )}
                         </td>

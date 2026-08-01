@@ -38,6 +38,9 @@ export default function PurchaseReport() {
   const [date, setDate] = useState(toInputDate());
   const [rows, setRows] = useState([newRow()]);
   const [submitting, setSubmitting] = useState(false);
+  // Mapping aktif outlet+bahan (outlet_material_suppliers) untuk outlet yang dipilih —
+  // dipakai sebagai default harga/supplier saat pilih bahan, prioritas di atas master bahan.
+  const [outletMappingByMaterial, setOutletMappingByMaterial] = useState({});
 
   // History
   const [records, setRecords] = useState([]);
@@ -65,6 +68,31 @@ export default function PurchaseReport() {
   useEffect(() => {
     loadMasterData();
   }, []);
+
+  // Muat ulang mapping outlet+bahan setiap kali outlet berubah, supaya default
+  // harga/supplier saat pilih bahan mengikuti mapping cabang ini — bukan
+  // default master bahan yang bisa berbeda per outlet (lihat resolvePurchaseConfig).
+  useEffect(() => {
+    if (!outletId) {
+      setOutletMappingByMaterial({});
+      return;
+    }
+    let cancelled = false;
+    api
+      .get('/api/outlet-material-suppliers', { params: { outlet_id: outletId } })
+      .then((res) => {
+        if (cancelled) return;
+        const map = {};
+        (res.data || []).forEach((row) => {
+          if (row.is_active !== false) map[row.material_id] = row;
+        });
+        setOutletMappingByMaterial(map);
+      })
+      .catch(() => {
+        if (!cancelled) setOutletMappingByMaterial({});
+      });
+    return () => { cancelled = true; };
+  }, [outletId]);
 
   // Auto-apply filter histori: reload otomatis saat filter berubah (debounce 400ms)
   useEffect(() => {
@@ -109,6 +137,9 @@ export default function PurchaseReport() {
 
   async function onSelectMaterial(idx, materialId) {
     const mat = materials.find((m) => m.id === materialId) || null;
+    // Mapping aktif outlet+bahan ini (kalau ada) jadi source of truth harga/supplier —
+    // hanya fallback ke master bahan kalau outlet belum punya mapping untuk bahan ini.
+    const mapping = outletMappingByMaterial[materialId] || null;
 
     // Fetch variants for this material on-demand
     let variants = [];
@@ -124,19 +155,22 @@ export default function PurchaseReport() {
       material: mat,
       variant_id: '',
       variants,
-      unit: mat ? mat.purchase_unit : '',
-      price_per_unit: mat ? String(mat.price_per_purchase_unit || '') : '',
-      supplier_id: mat?.supplier_id || '',
+      unit: (mapping?.purchase_unit || mat?.purchase_unit) ?? '',
+      price_per_unit: String(mapping?.price_per_purchase_unit ?? mat?.price_per_purchase_unit ?? ''),
+      supplier_id: mapping?.supplier_id || mat?.supplier_id || '',
     });
   }
 
   function onSelectVariant(idx, variantId) {
     const row = rows[idx];
     if (!variantId) {
+      const mapping = outletMappingByMaterial[row.material_id] || null;
       updateRow(idx, {
         variant_id: '',
-        price_per_unit: row.material ? String(row.material.price_per_purchase_unit || '') : '',
-        supplier_id: row.material?.supplier_id || '',
+        price_per_unit: String(
+          mapping?.price_per_purchase_unit ?? row.material?.price_per_purchase_unit ?? ''
+        ),
+        supplier_id: mapping?.supplier_id || row.material?.supplier_id || '',
       });
       return;
     }

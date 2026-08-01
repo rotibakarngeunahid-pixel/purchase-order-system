@@ -640,7 +640,7 @@ router.get('/analytics/trends', async (req, res) => {
         supabase
           .from('purchase_order_items')
           .select(`
-            id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual,
+            id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, price_estimated,
             material:materials(id, price_per_purchase_unit),
             po:purchase_orders(
               id,
@@ -671,8 +671,12 @@ router.get('/analytics/trends', async (req, res) => {
         const month = getMonthKey(po?.session?.order_date);
         if (!po || !month) continue;
 
+        // price_estimated adalah snapshot harga hasil mapping outlet_material_suppliers
+        // pada saat PO dibuat (lihat notifications.js) — dipakai sebagai bobot proporsi
+        // ketimbang harga master bahan, yang bisa berbeda dari harga yang benar-benar
+        // dipesan untuk outlet ini.
         const rawEstimates = rows.map((row) => (
-          Number(row.qty_ordered || 0) * Number(row.material?.price_per_purchase_unit || 0)
+          Number(row.qty_ordered || 0) * Number(row.price_estimated ?? row.material?.price_per_purchase_unit ?? 0)
         ));
         const rawEstimateTotal = rawEstimates.reduce((sum, amount) => sum + amount, 0);
         const trend = ensureTrendMonth(map, month);

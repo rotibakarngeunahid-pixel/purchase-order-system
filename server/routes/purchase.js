@@ -33,6 +33,7 @@ function normalizePOItem(item) {
     variant: item.variant ?? null,
     supplier_id: item.supplier_id ?? item.item_supplier?.id ?? null,
     item_supplier: item.item_supplier ?? null,
+    brand: item.brand ?? null,
     source: item.source || 'ordered',
     adjustment_note: item.adjustment_note ?? null,
     created_at: item.created_at ?? null,
@@ -52,7 +53,14 @@ function normalizeAndSortPOItems(po) {
   return po;
 }
 
-async function fetchPODetail(poId) {
+// includeBrand mengontrol apakah kolom snapshot purchase_order_items.brand
+// (mapping outlet_material_suppliers.brand pada saat PO dibuat — lihat
+// migration_purchase_item_brand_snapshot.sql) ikut diminta. Dipisah dari
+// fetchPODetail supaya instalasi yang belum menjalankan migration itu tetap
+// bisa fallback ke cascade yang sama persis tanpa kolom tersebut.
+async function fetchPODetailCascade(poId, includeBrand) {
+  const brandCol = includeBrand ? ', brand' : '';
+
   // Coba dengan semua kolom + distribusi cabang
   let result = await supabase
     .from('purchase_orders')
@@ -62,7 +70,7 @@ async function fetchPODetail(poId) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, supplier_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at,
+        source, adjustment_note, created_at${brandCol},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
         item_supplier:suppliers(id, name),
@@ -89,7 +97,7 @@ async function fetchPODetail(poId) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at,
+        source, adjustment_note, created_at${brandCol},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
         branch_distributions:purchase_item_branch_distribution(outlet_id, qty)
@@ -115,7 +123,7 @@ async function fetchPODetail(poId) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, supplier_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at,
+        source, adjustment_note, created_at${brandCol},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
         item_supplier:suppliers(id, name)
@@ -141,7 +149,7 @@ async function fetchPODetail(poId) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at,
+        source, adjustment_note, created_at${brandCol},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit)
       )
@@ -165,7 +173,7 @@ async function fetchPODetail(poId) {
       supplier:suppliers(id, name, wa_number),
       session:order_sessions(id, order_date),
       items:purchase_order_items(
-        id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual,
+        id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual${brandCol},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id)
       )
     `)
@@ -174,6 +182,17 @@ async function fetchPODetail(poId) {
 
   if (result.error) return result;
   return { data: normalizeAndSortPOItems(result.data), error: null };
+}
+
+async function fetchPODetail(poId) {
+  const result = await fetchPODetailCascade(poId, true);
+  if (!result.error || !isMissingColumnError(result.error, ['brand'])) {
+    return result;
+  }
+
+  // Migration brand snapshot belum dijalankan — fallback ke cascade lama
+  // tanpa kolom brand (item.brand akan null, caller/UI fallback ke material.brand).
+  return fetchPODetailCascade(poId, false);
 }
 
 async function updateOrderedPOItem(poId, item) {
