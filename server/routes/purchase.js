@@ -4,6 +4,7 @@ const supabase = require('../services/supabase');
 const posStockSync = require('../services/posStockSync');
 const priceSync = require('../services/priceSync');
 const { fetchAllRows } = require('../services/fetchAll');
+const { resolvePurchaseConfig } = require('../services/purchaseConfig');
 
 const OPTIONAL_PO_ITEM_COLUMNS = [
   'variant_id',
@@ -195,6 +196,87 @@ async function fetchPODetail(poId) {
   return fetchPODetailCascade(poId, false);
 }
 
+// Item PO menyimpan snapshot supplier/merk/harga sesuai mapping yang berlaku
+// SAAT PO dibuat (lihat notifications.js). Tapi kalau mapping outlet_material_suppliers
+// diubah SETELAH PO dibuat dan itemnya belum benar-benar diterima (price_actual
+// masih kosong), Catat Penerimaan harus tetap mengikuti mapping TERKINI, bukan
+// snapshot yang sudah basi — itu sebabnya di sini kita resolve ulang mapping
+// per outlet yang memesan bahan ini di sesi yang sama, dan lampirkan sebagai
+// item.live_mapping. Begitu item pernah disimpan (price_actual terisi), nilai
+// yang tersimpan adalah transaksi aktual dan TIDAK boleh berubah sendiri lagi
+// hanya karena mapping diubah — live_mapping hanya dipakai sebagai DEFAULT,
+// prioritasnya di frontend selalu di bawah nilai yang sudah pernah disimpan.
+//
+// Kalau beberapa outlet berbeda menyumbang qty ke item PO yang sama (digabung
+// karena konfigurasinya identik saat PO dibuat) dan sekarang mapping mereka
+// sudah tidak sama lagi, hasilnya ambigu — live_mapping dibiarkan null supaya
+// fallback ke snapshot lama, bukan menebak salah satu outlet secara sepihak.
+async function attachLiveMapping(po) {
+  if (!po || !po.session_id || !Array.isArray(po.items)) return po;
+  const orderedItems = po.items.filter((item) => (item.source || 'ordered') === 'ordered');
+  const materialIds = [...new Set(orderedItems.map((item) => item.material_id).filter(Boolean))];
+  if (materialIds.length === 0) return po;
+
+  const { data: requestRows, error: requestError } = await supabase
+    .from('order_request_items')
+    .select('outlet_id, material_id')
+    .eq('session_id', po.session_id)
+    .in('material_id', materialIds);
+  if (requestError || !requestRows || requestRows.length === 0) return po;
+
+  const outletIdsByMaterial = {};
+  requestRows.forEach((row) => {
+    if (!row.outlet_id || !row.material_id) return;
+    if (!outletIdsByMaterial[row.material_id]) outletIdsByMaterial[row.material_id] = new Set();
+    outletIdsByMaterial[row.material_id].add(row.outlet_id);
+  });
+
+  const { data: mappingRows, error: mappingError } = await supabase
+    .from('outlet_material_suppliers')
+    .select('outlet_id, material_id, supplier_id, purchase_unit, package_qty, package_unit, price_per_purchase_unit, brand, is_active')
+    .in('material_id', materialIds)
+    .eq('is_active', true);
+  if (mappingError) return po; // Non-fatal — biarkan live_mapping kosong, tetap fallback ke snapshot.
+
+  const mappingByKey = {};
+  (mappingRows || []).forEach((row) => {
+    mappingByKey[`${row.outlet_id}:${row.material_id}`] = row;
+  });
+
+  const sameConfig = (a, b) =>
+    a.supplier_id === b.supplier_id &&
+    a.brand === b.brand &&
+    a.price_per_purchase_unit === b.price_per_purchase_unit;
+
+  po.items = po.items.map((item) => {
+    if ((item.source || 'ordered') !== 'ordered') return item;
+
+    const outletIds = [...(outletIdsByMaterial[item.material_id] || [])];
+    const mappingsFound = outletIds
+      .map((outletId) => mappingByKey[`${outletId}:${item.material_id}`])
+      .filter(Boolean);
+    if (mappingsFound.length === 0) return { ...item, live_mapping: null };
+
+    const configs = outletIds.map((outletId) =>
+      resolvePurchaseConfig(item.material, mappingByKey[`${outletId}:${item.material_id}`] || null)
+    );
+    const [first, ...rest] = configs;
+    const ambiguous = rest.some((c) => !sameConfig(c, first));
+    if (ambiguous) return { ...item, live_mapping: null };
+
+    return {
+      ...item,
+      live_mapping: {
+        supplier_id: first.supplier_id,
+        brand: first.brand,
+        price_per_purchase_unit: first.price_per_purchase_unit,
+      },
+    };
+  });
+
+  return po;
+}
+
 async function updateOrderedPOItem(poId, item) {
   const updatePayload = {
     qty_received: item.qty_received,
@@ -314,7 +396,7 @@ router.get('/:po_id', async (req, res) => {
     const status = error.code === 'PGRST116' ? 404 : 500;
     return res.status(status).json({ error: status === 404 ? 'PO tidak ditemukan' : error.message });
   }
-  res.json(po);
+  res.json(await attachLiveMapping(po));
 });
 
 // GET list PO (dengan filter status)

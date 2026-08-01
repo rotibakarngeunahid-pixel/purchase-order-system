@@ -31,18 +31,30 @@ function resolveItemBrandLabel(item) {
 function buildInitialOrderedItems(poItems, defaultSupplierId = '') {
   return (poItems || [])
     .filter((item) => (item.source || 'ordered') === 'ordered')
-    .map((item) => ({
-      ...item,
-      qty_received: item.qty_received ?? item.qty_ordered,
-      price_actual:
-        item.price_actual ??
-        item.price_estimated ??
-        item.variant?.price_per_purchase_unit ??
-        item.material?.price_per_purchase_unit ??
-        0,
-      variant_id: item.variant_id ?? null,
-      supplier_id: resolveItemSupplierId(item, defaultSupplierId),
-    }));
+    .map((item) => {
+      // Item yang belum pernah benar-benar diterima (price_actual masih kosong di
+      // server) harus ikut mapping outlet_material_suppliers yang AKTIF SEKARANG
+      // (item.live_mapping, di-resolve ulang server-side tiap PO dibuka — lihat
+      // attachLiveMapping di purchase.js), bukan snapshot yang dikunci saat PO
+      // dibuat. Begitu item pernah disimpan, snapshot/nilai lama adalah transaksi
+      // aktual dan tidak boleh berubah sendiri lagi hanya karena mapping diubah.
+      const live = item.price_actual == null ? item.live_mapping : null;
+
+      return {
+        ...item,
+        qty_received: item.qty_received ?? item.qty_ordered,
+        price_actual:
+          item.price_actual ??
+          live?.price_per_purchase_unit ??
+          item.price_estimated ??
+          item.variant?.price_per_purchase_unit ??
+          item.material?.price_per_purchase_unit ??
+          0,
+        brand: live?.brand || item.brand,
+        variant_id: item.variant_id ?? null,
+        supplier_id: live?.supplier_id || resolveItemSupplierId(item, defaultSupplierId),
+      };
+    });
 }
 
 function buildInitialAdjustmentItems(poItems, defaultSupplierId = '') {
