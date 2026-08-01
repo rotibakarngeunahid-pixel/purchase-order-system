@@ -82,12 +82,16 @@ router.post('/session/:id/send-wa', async (req, res) => {
     if (poError) return res.status(500).json({ error: poError.message });
 
     // Insert purchase_order_items — snapshot satuan beli, faktor konversi,
-    // harga estimasi, merk, dan supplier yang dipakai saat PO dibuat (hasil
-    // resolvePurchaseConfig, sudah memprioritaskan mapping outlet_material_suppliers
-    // di atas default master bahan — lihat calculator.js). Konfigurasi
-    // outlet_material_suppliers bisa berubah/dihapus setelahnya; PO yang sudah
-    // dibuat harus tetap konsisten dengan apa yang disepakati saat pemesanan,
-    // dan Catat Penerimaan harus membaca snapshot ini, bukan master bahan.
+    // harga estimasi, merk, supplier, dan permintaan per outlet yang dipakai
+    // saat PO dibuat (hasil resolvePurchaseConfig, sudah memprioritaskan
+    // mapping outlet_material_suppliers di atas default master bahan — lihat
+    // calculator.js). Konfigurasi outlet_material_suppliers bisa berubah/
+    // dihapus setelahnya; PO yang sudah dibuat harus tetap konsisten dengan
+    // apa yang disepakati saat pemesanan, dan Catat Penerimaan (termasuk
+    // auto-isi Distribusi Bahan ke Cabang) harus membaca snapshot ini —
+    // bukan master bahan atau data sesi mentah yang tidak tahu soal routing
+    // supplier per outlet (bahan yang sama bisa dipecah ke beberapa PO kalau
+    // outlet-nya dipetakan ke supplier berbeda).
     let poItems = po.items.map((item) => ({
       po_id: poRecord.id,
       material_id: item.material_id,
@@ -98,40 +102,40 @@ router.post('/session/:id/send-wa', async (req, res) => {
       price_estimated: item.price_per_purchase_unit,
       brand: item.material_brand,
       supplier_id: po.supplier_id,
+      outlet_requests: item.outlet_requests || null,
     }));
 
     let itemsInsertResult = await supabase.from('purchase_order_items').insert(poItems);
 
-    if (itemsInsertResult.error) {
+    // Kolom snapshot (brand/supplier_id/outlet_requests) ditambahkan lewat
+    // migration terpisah dan mungkin belum semuanya dijalankan di instalasi
+    // ini. Coba insert, dan kalau gagal karena satu kolom optional tidak ada,
+    // buang kolom itu saja lalu ulangi — sampai berhasil atau errornya bukan
+    // soal kolom optional lagi (baru itu dianggap gagal beneran).
+    const OPTIONAL_ITEM_SNAPSHOT_COLUMNS = [
+      'purchase_unit', 'package_qty', 'package_unit', 'price_estimated',
+      'brand', 'supplier_id', 'outlet_requests',
+    ];
+    let dropAttempts = 0;
+    while (itemsInsertResult.error && dropAttempts < OPTIONAL_ITEM_SNAPSHOT_COLUMNS.length) {
+      dropAttempts += 1;
       const message = String(itemsInsertResult.error.message || '').toLowerCase();
-      const missingSnapshotColumns = ['purchase_unit', 'package_qty', 'package_unit', 'price_estimated', 'brand', 'supplier_id'].some(
-        (c) => message.includes(c.toLowerCase())
-      ) && (
-        message.includes('column') || message.includes('schema cache') || message.includes('could not find')
-      );
-      if (!missingSnapshotColumns) {
-        return res.status(500).json({ error: itemsInsertResult.error.message });
-      }
-      // Migration brand/supplier belum dijalankan — coba tanpa kolom itu dulu
-      // (tetap simpan snapshot satuan/harga yang migration-nya sudah lama ada).
-      poItems = poItems.map(({ brand, supplier_id, ...rest }) => rest);
-      itemsInsertResult = await supabase.from('purchase_order_items').insert(poItems);
+      const isMissingColumnMessage =
+        message.includes('column') || message.includes('schema cache') || message.includes('could not find');
+      const culprit = isMissingColumnMessage
+        ? OPTIONAL_ITEM_SNAPSHOT_COLUMNS.find((c) => message.includes(c.toLowerCase()) && c in (poItems[0] || {}))
+        : null;
+      if (!culprit) break;
 
-      if (itemsInsertResult.error) {
-        const message2 = String(itemsInsertResult.error.message || '').toLowerCase();
-        const missingBaseSnapshotColumns = ['purchase_unit', 'package_qty', 'package_unit', 'price_estimated'].some(
-          (c) => message2.includes(c.toLowerCase())
-        ) && (
-          message2.includes('column') || message2.includes('schema cache') || message2.includes('could not find')
-        );
-        if (!missingBaseSnapshotColumns) {
-          return res.status(500).json({ error: itemsInsertResult.error.message });
-        }
-        // Migration snapshot dasar juga belum dijalankan — insert tanpa kolom snapshot (perilaku lama)
-        poItems = poItems.map(({ po_id, material_id, qty_ordered }) => ({ po_id, material_id, qty_ordered }));
-        itemsInsertResult = await supabase.from('purchase_order_items').insert(poItems);
-        if (itemsInsertResult.error) return res.status(500).json({ error: itemsInsertResult.error.message });
-      }
+      poItems = poItems.map((item) => {
+        const { [culprit]: _drop, ...rest } = item;
+        return rest;
+      });
+      itemsInsertResult = await supabase.from('purchase_order_items').insert(poItems);
+    }
+
+    if (itemsInsertResult.error) {
+      return res.status(500).json({ error: itemsInsertResult.error.message });
     }
 
     posWithRecords.push({ ...po, po_id: poRecord.id });

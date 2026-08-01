@@ -97,6 +97,11 @@ function calculatePOs(requestItems, materials, routing = {}) {
       outlet_id: item.outlet_id,
       outlet_name: outletsById[item.outlet_id]?.name || null,
       qty_requested: requestedQty,
+      // Qty yang sama, dikonversi ke satuan beli (satuan qty_ordered/qty_received) —
+      // dipakai untuk auto-isi distribusi cabang saat Catat Penerimaan, supaya
+      // satuannya sebanding (qty_requested mentah bisa dalam satuan base_unit
+      // kalau outlet ini pakai request_basis=base_unit).
+      qty_requested_purchase_unit: toRawPurchaseQty(requestedQty, config),
     });
   });
 

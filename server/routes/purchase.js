@@ -35,6 +35,7 @@ function normalizePOItem(item) {
     supplier_id: item.supplier_id ?? item.item_supplier?.id ?? null,
     item_supplier: item.item_supplier ?? null,
     brand: item.brand ?? null,
+    outlet_requests: item.outlet_requests ?? null,
     source: item.source || 'ordered',
     adjustment_note: item.adjustment_note ?? null,
     created_at: item.created_at ?? null,
@@ -54,13 +55,18 @@ function normalizeAndSortPOItems(po) {
   return po;
 }
 
-// includeBrand mengontrol apakah kolom snapshot purchase_order_items.brand
-// (mapping outlet_material_suppliers.brand pada saat PO dibuat — lihat
-// migration_purchase_item_brand_snapshot.sql) ikut diminta. Dipisah dari
-// fetchPODetail supaya instalasi yang belum menjalankan migration itu tetap
-// bisa fallback ke cascade yang sama persis tanpa kolom tersebut.
-async function fetchPODetailCascade(poId, includeBrand) {
-  const brandCol = includeBrand ? ', brand' : '';
+// includeBrand/includeOutletRequests mengontrol apakah kolom snapshot
+// purchase_order_items.brand / .outlet_requests (masing-masing dari migration
+// terpisah — migration_purchase_item_brand_snapshot.sql &
+// migration_purchase_item_outlet_requests_snapshot.sql) ikut diminta.
+// Dipisah dari fetchPODetail supaya instalasi yang belum menjalankan salah
+// satu/kedua migration itu tetap bisa fallback ke cascade yang sama persis
+// tanpa kolom yang belum ada.
+async function fetchPODetailCascade(poId, { includeBrand = false, includeOutletRequests = false } = {}) {
+  const extraCols = [includeBrand && 'brand', includeOutletRequests && 'outlet_requests']
+    .filter(Boolean)
+    .map((c) => `, ${c}`)
+    .join('');
 
   // Coba dengan semua kolom + distribusi cabang
   let result = await supabase
@@ -71,7 +77,7 @@ async function fetchPODetailCascade(poId, includeBrand) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, supplier_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at${brandCol},
+        source, adjustment_note, created_at${extraCols},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
         item_supplier:suppliers(id, name),
@@ -98,7 +104,7 @@ async function fetchPODetailCascade(poId, includeBrand) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at${brandCol},
+        source, adjustment_note, created_at${extraCols},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
         branch_distributions:purchase_item_branch_distribution(outlet_id, qty)
@@ -124,7 +130,7 @@ async function fetchPODetailCascade(poId, includeBrand) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, supplier_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at${brandCol},
+        source, adjustment_note, created_at${extraCols},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit),
         item_supplier:suppliers(id, name)
@@ -150,7 +156,7 @@ async function fetchPODetailCascade(poId, includeBrand) {
       session:order_sessions(id, order_date),
       items:purchase_order_items(
         id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual, variant_id,
-        source, adjustment_note, created_at${brandCol},
+        source, adjustment_note, created_at${extraCols},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id),
         variant:material_variants(id, brand, supplier_id, price_per_purchase_unit)
       )
@@ -174,7 +180,7 @@ async function fetchPODetailCascade(poId, includeBrand) {
       supplier:suppliers(id, name, wa_number),
       session:order_sessions(id, order_date),
       items:purchase_order_items(
-        id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual${brandCol},
+        id, material_id, qty_ordered, qty_received, price_actual, subtotal_actual${extraCols},
         material:materials(id, code, name, brand, purchase_unit, package_qty, package_unit, price_per_purchase_unit, supplier_id)
       )
     `)
@@ -186,14 +192,24 @@ async function fetchPODetailCascade(poId, includeBrand) {
 }
 
 async function fetchPODetail(poId) {
-  const result = await fetchPODetailCascade(poId, true);
-  if (!result.error || !isMissingColumnError(result.error, ['brand'])) {
-    return result;
+  let result = await fetchPODetailCascade(poId, { includeBrand: true, includeOutletRequests: true });
+  if (!result.error) return result;
+
+  if (isMissingColumnError(result.error, ['outlet_requests'])) {
+    // Migration outlet_requests belum dijalankan — coba lagi tanpa kolom itu
+    // (brand mungkin sudah ada, dipertahankan dulu).
+    result = await fetchPODetailCascade(poId, { includeBrand: true, includeOutletRequests: false });
+    if (!result.error) return result;
   }
 
-  // Migration brand snapshot belum dijalankan — fallback ke cascade lama
-  // tanpa kolom brand (item.brand akan null, caller/UI fallback ke material.brand).
-  return fetchPODetailCascade(poId, false);
+  if (isMissingColumnError(result.error, ['brand'])) {
+    // Migration brand (dan mungkin outlet_requests) belum dijalankan — fallback
+    // ke cascade lama tanpa keduanya (item.brand/outlet_requests akan null,
+    // caller/UI fallback ke material.brand / data sesi mentah).
+    return fetchPODetailCascade(poId, { includeBrand: false, includeOutletRequests: false });
+  }
+
+  return result;
 }
 
 // Item PO menyimpan snapshot supplier/merk/harga sesuai mapping yang berlaku

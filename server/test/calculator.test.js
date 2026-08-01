@@ -73,6 +73,15 @@ test('Skenario 1: bahan sama, outlet berbeda, supplier berbeda -> 2 baris PO ter
   // 700 gram / 1000 gram per pack = 0.7 -> dibulatkan ke 1 pack
   assert.equal(poB.items[0].qty_ordered, 1);
   assert.equal(poB.items[0].purchase_conversion.base_qty_ordered, 1000);
+
+  // Regresi: outlet_requests tiap baris PO hanya boleh berisi outlet yang
+  // BENAR-BENAR masuk baris/supplier itu — bukan semua outlet yang pernah
+  // memesan bahan ini di sesi (lintas supplier). Snapshot ini yang dipakai
+  // untuk auto-isi Distribusi Bahan ke Cabang di Catat Penerimaan; kalau
+  // outlet dari PO lain ikut kebawa, total terdistribusi jadi dobel hitung
+  // dan melebihi qty yang diterima (bug yang dilaporkan user).
+  assert.deepEqual(poA.items[0].outlet_requests.map((r) => r.outlet_id), [outletA.id]);
+  assert.deepEqual(poB.items[0].outlet_requests.map((r) => r.outlet_id), [outletB.id]);
 });
 
 test('Skenario 2: bahan sama, supplier sama, harga outlet berbeda -> tidak digabung, subtotal beda', () => {
@@ -160,6 +169,12 @@ test('Skenario 5a: konversi kg -> gram, supplier hanya jual per kg utuh (order_m
   assert.equal(pos[0].items[0].qty_ordered, 3);
   assert.equal(pos[0].items[0].purchase_conversion.base_qty_ordered, 3000);
   assert.equal(pos[0].items[0].subtotal_estimated, 3 * 40000);
+  // outlet_requests dipakai untuk auto-isi Distribusi Bahan ke Cabang saat Catat
+  // Penerimaan — qty_requested_purchase_unit HARUS dalam satuan beli (kg, sama
+  // seperti qty_ordered/qty_received), bukan qty_requested mentah (gram, satuan
+  // base_unit outlet ini) — kalau salah pakai, distribusi jadi salah skala.
+  assert.equal(pos[0].items[0].outlet_requests[0].qty_requested, 2500);
+  assert.equal(pos[0].items[0].outlet_requests[0].qty_requested_purchase_unit, 2.5);
 });
 
 test('Skenario 5b: konversi kg -> gram, supplier menjual pecahan kg (order_multiple 0.1)', () => {

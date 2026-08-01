@@ -198,6 +198,11 @@ test('generate PO (send-wa) menyimpan supplier_id & brand hasil mapping outlet, 
       14000,
       'price_estimated item harus mengikuti harga mapping (14000), bukan harga master bahan (13000)'
     );
+    assert.deepEqual(
+      item.outlet_requests,
+      [{ outlet_id: OUTLET_ID, outlet_name: 'Pemogan', qty_requested: 1, qty_requested_purchase_unit: 1 }],
+      'outlet_requests item harus tersimpan sebagai snapshot outlet mana saja yang masuk item PO ini (dasar auto-isi distribusi cabang)'
+    );
 
     // PO header pun harus dibuat dengan supplier hasil mapping.
     assert.equal(calls.insertedPOs[0].supplier_id, SUPPLIER_MAPPING_ID);
@@ -206,21 +211,31 @@ test('generate PO (send-wa) menyimpan supplier_id & brand hasil mapping outlet, 
   }
 });
 
-test('generate PO tetap jalan (fallback) bila kolom brand/supplier_id di purchase_order_items belum ada (migration belum dijalankan)', async () => {
+test('generate PO tetap jalan (fallback) bila kolom brand/supplier_id/outlet_requests di purchase_order_items belum ada satu-satu (migration belum lengkap)', async () => {
   const fixtures = baseFixtures();
   let attempt = 0;
+  // Simulasikan 3 kolom optional hilang satu-satu (urutan Postgres melaporkan
+  // tidak dijamin sama dengan urutan drop kita) — fallback harus membuang
+  // TEPAT satu kolom per percobaan, bukan langsung semuanya sekaligus.
   const calls = installFakeSupabase(fixtures, {
     poItemsInsertImpl: (payload) => {
       attempt += 1;
       if (attempt === 1) {
-        assert.ok('brand' in payload[0], 'percobaan pertama harus menyertakan kolom brand');
-        return {
-          error: { message: "Could not find the 'brand' column of 'purchase_order_items' in the schema cache" },
-        };
+        assert.ok('brand' in payload[0]);
+        return { error: { message: "Could not find the 'brand' column of 'purchase_order_items' in the schema cache" } };
       }
-      // Percobaan kedua: tanpa brand/supplier_id, tapi snapshot dasar (price_estimated dkk) tetap ada
-      assert.ok(!('brand' in payload[0]), 'percobaan kedua tidak boleh lagi menyertakan brand');
-      assert.ok(!('supplier_id' in payload[0]), 'percobaan kedua tidak boleh lagi menyertakan supplier_id');
+      if (attempt === 2) {
+        assert.ok(!('brand' in payload[0]), 'percobaan ke-2 tidak boleh lagi menyertakan brand');
+        assert.ok('supplier_id' in payload[0], 'kolom lain yang belum terbukti hilang harus tetap dikirim');
+        return { error: { message: "Could not find the 'supplier_id' column of 'purchase_order_items' in the schema cache" } };
+      }
+      if (attempt === 3) {
+        assert.ok(!('brand' in payload[0]) && !('supplier_id' in payload[0]));
+        assert.ok('outlet_requests' in payload[0]);
+        return { error: { message: "Could not find the 'outlet_requests' column of 'purchase_order_items' in the schema cache" } };
+      }
+      // Percobaan ke-4: ketiga kolom baru sudah dibuang, snapshot dasar (price_estimated dkk) tetap ada
+      assert.ok(!('brand' in payload[0]) && !('supplier_id' in payload[0]) && !('outlet_requests' in payload[0]));
       assert.equal(payload[0].price_estimated, 14000, 'snapshot harga dasar tetap terkirim di fallback');
       return { error: null };
     },
@@ -235,7 +250,7 @@ test('generate PO tetap jalan (fallback) bila kolom brand/supplier_id di purchas
     await handler(req, res);
 
     assert.equal(res.statusCode, 200, `handler harus tetap sukses via fallback, dapat: ${JSON.stringify(res.body)}`);
-    assert.equal(attempt, 2, 'harus mencoba insert dengan brand/supplier_id dulu, baru fallback tanpa keduanya');
+    assert.equal(attempt, 4, 'harus membuang kolom optional satu-satu (brand, supplier_id, outlet_requests) baru sukses');
   } finally {
     restoreSupabase();
   }

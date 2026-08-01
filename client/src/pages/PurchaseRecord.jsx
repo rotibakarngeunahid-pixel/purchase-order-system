@@ -84,6 +84,22 @@ function newAdjustmentRow(defaultSupplierId = '') {
   };
 }
 
+// Sumber auto-isi distribusi cabang untuk SATU item PO: outlet_requests
+// (snapshot khusus item ini, lihat calculator.js/notifications.js) diutamakan
+// di atas data sesi mentah (sessionOrders, per material_id — tidak tahu soal
+// bahan yang sama dipecah ke beberapa supplier lewat mapping, jadi kalau
+// dipakai langsung bisa dobel hitung outlet yang bahannya masuk PO lain).
+// sessionOrders hanya fallback untuk PO lama tanpa snapshot outlet_requests.
+function resolveAutoDistributionEntries(item, sessionOrders) {
+  if (Array.isArray(item.outlet_requests)) {
+    return item.outlet_requests
+      .filter((r) => r.outlet_id && Number(r.qty_requested_purchase_unit ?? r.qty_requested) > 0)
+      .map((r) => [r.outlet_id, r.qty_requested_purchase_unit ?? r.qty_requested]);
+  }
+  const orderMap = sessionOrders[item.material_id];
+  return orderMap ? Object.entries(orderMap) : [];
+}
+
 function reconcileDistributionForReceivedQty(distributionMap, itemKey, qtyReceived) {
   if (!itemKey || !distributionMap[itemKey]) return distributionMap;
 
@@ -546,10 +562,23 @@ function ReceiveModal({ po, onClose, onSaved }) {
       });
   }, [po.session?.id]);
 
-  // Auto-populate branchDistributions dari data order sesi untuk semua ordered items
-  // Hanya mengisi jika belum ada distribusi tersimpan sebelumnya
+  // Auto-populate branchDistributions untuk semua ordered items.
+  // Hanya mengisi jika belum ada distribusi tersimpan sebelumnya.
+  //
+  // Sumber utama: item.outlet_requests — snapshot outlet+qty yang di-generate
+  // KHUSUS untuk item PO ini (lihat calculator.js & notifications.js). Ini
+  // WAJIB dipakai duluan, bukan data sesi mentah (sessionOrders, per
+  // material_id saja) — karena satu bahan yang sama bisa dipesan banyak
+  // outlet ke SUPPLIER BERBEDA lewat mapping outlet_material_suppliers,
+  // sehingga dipecah calculatePOs jadi beberapa PO/baris terpisah. Data sesi
+  // mentah tidak tahu soal pemecahan itu; kalau dipakai langsung, permintaan
+  // outlet yang sebenarnya masuk PO/supplier LAIN ikut terjumlah di sini juga
+  // — total terdistribusi jadi jauh melebihi qty yang diterima.
+  //
+  // sessionOrders (data sesi mentah) hanya dipakai sebagai fallback untuk PO
+  // LAMA yang dibuat sebelum snapshot outlet_requests ada (item.outlet_requests
+  // null) — tetap berisiko dobel hitung untuk PO lama itu, tapi PO baru aman.
   useEffect(() => {
-    if (Object.keys(sessionOrders).length === 0) return;
     setBranchDistributions((prev) => {
       let changed = false;
       const next = { ...prev };
@@ -560,11 +589,11 @@ function ReceiveModal({ po, onClose, onSaved }) {
           const hasExisting =
             existingDist && Object.values(existingDist).some((v) => Number(v) > 0);
           if (hasExisting) return; // jangan timpa data yang sudah tersimpan
-          const orderMap = sessionOrders[item.material_id];
-          if (!orderMap || Object.keys(orderMap).length === 0) return;
-          next[item.id] = Object.fromEntries(
-            Object.entries(orderMap).map(([outletId, qty]) => [outletId, String(qty)])
-          );
+
+          const entries = resolveAutoDistributionEntries(item, sessionOrders);
+          if (entries.length === 0) return;
+
+          next[item.id] = Object.fromEntries(entries.map(([outletId, qty]) => [outletId, String(qty)]));
           changed = true;
         });
       return changed ? next : prev;
@@ -890,11 +919,9 @@ function ReceiveModal({ po, onClose, onSaved }) {
           const hasExisting = base[item.id] &&
             Object.values(base[item.id]).some((v) => Number(v) > 0);
           if (hasExisting) return;
-          const orderMap = sessionOrders[item.material_id];
-          if (!orderMap || Object.keys(orderMap).length === 0) return;
-          base[item.id] = Object.fromEntries(
-            Object.entries(orderMap).map(([outletId, qty]) => [outletId, String(qty)])
-          );
+          const entries = resolveAutoDistributionEntries(item, sessionOrders);
+          if (entries.length === 0) return;
+          base[item.id] = Object.fromEntries(entries.map(([outletId, qty]) => [outletId, String(qty)]));
         });
       return base;
     });
@@ -1271,11 +1298,12 @@ function ReceiveModal({ po, onClose, onSaved }) {
                     const remaining = received - totalDist;
                     const isBalanced = remaining === 0;
                     const isOver = remaining < 0;
-                    // Cek apakah distribusi ini auto-filled dari session order
-                    const sessionOrderMap = sessionOrders[item.material_id];
-                    const isAutoFilled = sessionOrderMap &&
-                      !item.branch_distributions?.length &&
-                      Object.keys(distMap).length > 0;
+                    // Auto-filled kalau item ini belum pernah punya distribusi tersimpan
+                    // (dari penerimaan sebelumnya) tapi sekarang sudah terisi — berarti
+                    // datang dari auto-populate (item.outlet_requests, atau fallback
+                    // sessionOrders untuk PO lama), bukan input manual.
+                    const isAutoFilled =
+                      !item.branch_distributions?.length && Object.keys(distMap).length > 0;
                     return (
                       <div key={item.id} className="border border-orange-200 rounded-xl p-4 bg-orange-50/50">
                         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
