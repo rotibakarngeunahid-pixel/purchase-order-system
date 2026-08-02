@@ -166,9 +166,15 @@ function IgnoreReasonModal({ item, onCancel, onConfirm }) {
 function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang }) {
   const [lightbox, setLightbox] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const hasNumber = item.tipe_stok !== 'foto' && item.stok_akhir !== null && item.stok_akhir !== undefined;
-  const photo = !hasNumber ? resolvePhoto(item.foto_url) : null;
-  const thumbUrl = photo?.thumb || null;
+  // "Stok + Foto" (tipe_stok === 'stok') dan "Foto saja" (tipe_stok === 'foto') sama-sama
+  // wajib menampilkan slot foto — hanya "Stok saja" (tipe_stok === 'stok_only') yang tidak.
+  // Sebelumnya foto dipaksa null setiap kali hasNumber true, sehingga item "Stok + Foto"
+  // (yang justru selalu punya angka) tidak pernah menampilkan thumbnail-nya.
+  const showPhotoSlot = item.tipe_stok === 'stok' || item.tipe_stok === 'foto';
+  const photo = showPhotoSlot ? resolvePhoto(item.foto_url) : null;
+  const thumbUrl = !imgFailed ? (photo?.thumb || null) : null;
   const fullUrl  = photo?.full || null;
   const unit = material?.package_unit || '';
 
@@ -195,19 +201,39 @@ function RekomendasiItem({ item, material, isAdded, onAdd, onIgnore, showCabang 
   return (
     <div className={`flex items-start gap-2.5 py-2.5 border-b border-orange-100 last:border-0 ${isProcessed && !isAdded ? 'opacity-60' : ''}`}>
       {lightbox && fullUrl && <PhotoLightbox url={fullUrl} onClose={() => setLightbox(false)} />}
-      {thumbUrl && (
-        <button
-          type="button"
-          onClick={() => setLightbox(true)}
-          className="flex-shrink-0 mt-0.5 rounded-lg overflow-hidden border border-orange-200 bg-orange-100 hover:opacity-80 transition-opacity"
-        >
-          <img
-            src={thumbUrl}
-            alt="stok"
-            className="w-11 h-11 object-cover"
-            onError={(e) => { e.target.parentElement.style.display = 'none'; }}
-          />
-        </button>
+      {showPhotoSlot && (
+        thumbUrl ? (
+          <button
+            type="button"
+            onClick={() => setLightbox(true)}
+            className="flex-shrink-0 mt-0.5 rounded-lg overflow-hidden border border-orange-200 bg-orange-100 hover:opacity-80 transition-opacity"
+          >
+            <img
+              src={thumbUrl}
+              alt="stok"
+              className="w-11 h-11 object-cover"
+              onError={() => setImgFailed(true)}
+            />
+          </button>
+        ) : (
+          <div
+            className="flex-shrink-0 mt-0.5 w-11 h-11 rounded-lg border border-orange-200 bg-orange-50 flex items-center justify-center"
+            title="Foto belum tersedia"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              className="w-5 h-5 text-orange-300"
+            >
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <circle cx="8.5" cy="10.5" r="1.5" />
+              <path d="M21 15l-5-5L5 19" />
+            </svg>
+          </div>
+        )
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-start justify-between gap-2">
