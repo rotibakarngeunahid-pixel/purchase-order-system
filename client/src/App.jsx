@@ -20,9 +20,19 @@ const FinancePortal = lazy(() => import('./pages/FinancePortal'));
 const DataDeletion = lazy(() => import('./pages/DataDeletion'));
 const DistributionPhotos = lazy(() => import('./pages/DistributionPhotos'));
 const PriceLogs = lazy(() => import('./pages/PriceLogs'));
+const MitraLogin = lazy(() => import('./pages/MitraLogin'));
+const MitraPurchase = lazy(() => import('./pages/MitraPurchase'));
+const MitraPurchaseReport = lazy(() => import('./pages/MitraPurchaseReport'));
 
 function isLoggedIn() {
   return !!localStorage.getItem('rbn_token');
+}
+
+// Sesi lama (dibuat sebelum fitur Mitra ada) tidak punya rbn_role sama sekali
+// — default ke 'admin' supaya sesi admin existing tidak pernah ter-redirect
+// tak sengaja ke area mitra.
+function getRole() {
+  return localStorage.getItem('rbn_role') === 'mitra' ? 'mitra' : 'admin';
 }
 
 function PageLoader() {
@@ -46,7 +56,16 @@ function Layout({ children }) {
 
 function ProtectedRoute({ loggedIn, children }) {
   if (!loggedIn) return <Navigate to="/login" replace />;
+  // Token mitra tidak pernah dianggap sesi admin (lihat dualActorAuth di
+  // server) — jaga konsistensi di client juga supaya mitra tidak nyasar
+  // ke layout admin yang datanya tidak akan bisa mereka akses.
+  if (getRole() === 'mitra') return <Navigate to="/mitra/pembelian" replace />;
   return <Layout>{children}</Layout>;
+}
+
+function MitraProtectedRoute({ loggedIn, children }) {
+  if (!loggedIn || getRole() !== 'mitra') return <Navigate to="/mitra/login" replace />;
+  return children;
 }
 
 export default function App() {
@@ -56,6 +75,8 @@ export default function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('rbn_token');
+    localStorage.removeItem('rbn_role');
+    localStorage.removeItem('rbn_mitra');
     setLoggedIn(false);
   };
 
@@ -78,6 +99,9 @@ export default function App() {
         <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/login" element={loggedIn ? <Navigate to="/" replace /> : <Login onLogin={handleLogin} />} />
+            <Route path="/mitra/login" element={loggedIn && getRole() === 'mitra' ? <Navigate to="/mitra/pembelian" replace /> : <MitraLogin onLogin={handleLogin} />} />
+            <Route path="/mitra/pembelian" element={<MitraProtectedRoute loggedIn={loggedIn}><MitraPurchase onLogout={handleLogout} /></MitraProtectedRoute>} />
+            <Route path="/mitra-purchases" element={<ProtectedRoute loggedIn={loggedIn}><MitraPurchaseReport /></ProtectedRoute>} />
             <Route path="/" element={<ProtectedRoute loggedIn={loggedIn}><Dashboard onLogout={handleLogout} /></ProtectedRoute>} />
             <Route path="/order" element={<ProtectedRoute loggedIn={loggedIn}><OrderEntry /></ProtectedRoute>} />
             <Route path="/order/:sessionId/review" element={<ProtectedRoute loggedIn={loggedIn}><OrderReview /></ProtectedRoute>} />

@@ -29,6 +29,10 @@ const inventoriBahanRouter = require('./routes/inventoriBahan');
 const priceLogsRouter = require('./routes/priceLogs');
 const auditIntegrationRouter = require('./routes/auditIntegration');
 const auditApiKeyMiddleware = require('./middleware/auditApiKey');
+const mitraAuthRouter = require('./routes/mitraAuth');
+const mitraAccountsRouter = require('./routes/mitraAccounts');
+const mitraPurchasesRouter = require('./routes/mitraPurchases');
+const dualActorAuth = require('./middleware/dualActorAuth');
 
 const app = express();
 
@@ -78,11 +82,19 @@ const notifLimiter = rateLimit({
   message: { error: 'Terlalu banyak request. Coba lagi dalam 1 menit.' },
 });
 
+// Rate limit login mitra — cegah brute-force username/password
+const mitraLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Terlalu banyak percobaan login. Coba lagi dalam beberapa menit.' },
+});
+
 // Health check & auth (no middleware)
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'Roti Bakar Ngeunah API', timestamp: new Date().toISOString() });
 });
 app.use('/api/auth', authRouter);
+app.use('/api/mitra-auth', mitraLoginLimiter, mitraAuthRouter);
 
 // Public routes (no auth required)
 app.use('/api/public', publicRouter);
@@ -107,6 +119,8 @@ app.use('/api/inventori/rekomendasi', authMiddleware, inventoriRekomendasiRouter
 app.use('/api/inventori/cabang', authMiddleware, inventoriCabangRouter);
 app.use('/api/inventori/bahan', authMiddleware, inventoriBahanRouter);
 app.use('/api/price-logs', authMiddleware, priceLogsRouter);
+app.use('/api/mitra-accounts', authMiddleware, mitraAccountsRouter);
+app.use('/api/mitra-purchases', dualActorAuth, mitraPurchasesRouter);
 
 // Integrasi Audit System (baca-saja, auth X-API-Key sendiri via AUDIT_API_KEY)
 app.use('/api/audit-integration', auditApiKeyMiddleware, auditIntegrationRouter);

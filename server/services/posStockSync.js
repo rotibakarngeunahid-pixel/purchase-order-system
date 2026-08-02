@@ -242,9 +242,96 @@ async function syncPurchaseReportToInventory(savedItems, outletId, outletName) {
   }
 }
 
+// ── Dipanggil setelah transaksi Pembelian Mitra disimpan/diedit/dibatalkan ──
+// po_id = `mitra_purchase:{purchaseId}` (stabil per transaksi, beda dari
+// 'purchase_report' yang fixed) + po_item_id = mitra_purchase_items.id →
+// RPC POS menghitung delta sama seperti purchase_report, jadi re-sync
+// (edit) atau zero-out (cancel) otomatis tidak double-count.
+// items: [{ id, material_id, material_name, qty, unit }]
+// triggerType: 'mitra_purchase' (create/edit) atau 'mitra_purchase_cancelled'
+// (cancel — RPC POS otomatis nge-nolkan qty & pakai note/actionType rollback,
+// sama seperti pola po_cancelled, termasuk cek stok cukup sebelum rollback).
+async function syncMitraPurchaseToInventory(purchaseId, items, outletId, outletName, actorName, triggerType = 'mitra_purchase') {
+  try {
+    if (!items || items.length === 0) {
+      return { ok: true, result: { status: 'skipped', summary: { success: 0, skipped: 0, errors: 0 } } };
+    }
+
+    const syncItems = items.map((item) => ({
+      po_item_id:           item.id,
+      po_material_id:       item.material_id,
+      po_material_name:     item.material_name || String(item.material_id),
+      po_item_source:       'ordered',
+      qty_received:         Number(item.qty) || 0,
+      po_purchase_unit:     item.unit || null,
+      po_package_qty:       1,
+      po_package_unit:      item.unit || null,
+      outlet_id:            '',
+      outlet_name:          '',
+      branch_distributions: [{
+        outlet_id:   outletId,
+        outlet_name: outletName || outletId,
+        qty:         Number(item.qty) || 0,
+      }],
+    }));
+
+    const payload = {
+      p_po_id:        `mitra_purchase:${purchaseId}`,
+      p_po_status:    'received',
+      p_trigger_type: triggerType,
+      p_items:        JSON.stringify(syncItems),
+      p_actor_name:   actorName || '',
+    };
+
+    const result = await callPosRpc('sync_purchase_order_to_inventory', payload);
+    console.log(`[POS Sync] Mitra purchase ${purchaseId} sync: status=${result?.status}, summary=`, result?.summary);
+    return { ok: true, result };
+  } catch (err) {
+    console.error(`[POS Sync] Gagal sync pembelian mitra ${purchaseId} ke stok POS:`, err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+// ── Status stok cabang saat ini di POS, untuk 1 outlet ───────────────────────
+async function getMitraBranchStock(outletId) {
+  try {
+    const result = await callPosRpc('mitra_get_branch_stock', { p_outlet_id: outletId });
+    return { ok: true, result };
+  } catch (err) {
+    console.error(`[POS Sync] Gagal ambil stok cabang untuk outlet ${outletId}:`, err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+// ── Helper generik: panggil RPC POS apapun dan kembalikan JSON-nya ──────────
+async function callPosRpc(rpcName, payload) {
+  if (!POS_API_URL || !POS_API_KEY) {
+    throw new Error('POS_API_URL atau POS_API_KEY belum dikonfigurasi di server');
+  }
+
+  const res = await fetch(`${POS_API_URL}/rpc/${rpcName}`, {
+    method:  'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key':    POS_API_KEY,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(`POS API error ${res.status}: ${json?.error?.message || JSON.stringify(json)}`);
+  }
+
+  return json;
+}
+
 module.exports = {
   syncPOReceiveToInventory,
   syncPOCancelToInventory,
   syncPOReviseToInventory,
   syncPurchaseReportToInventory,
+  syncMitraPurchaseToInventory,
+  getMitraBranchStock,
 };
