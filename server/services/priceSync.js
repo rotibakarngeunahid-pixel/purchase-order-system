@@ -37,13 +37,13 @@ function round2(value) {
   return Math.round(value * 100) / 100;
 }
 
-function buildChange({ material, variant, supplierId, supplierName, oldPrice, newPrice }) {
+function buildChange({ material, variant, brand, supplierId, supplierName, oldPrice, newPrice }) {
   const changeAmount = newPrice - oldPrice;
   return {
     material_id: material?.id || null,
     material_code: material?.code || null,
     material_name: material?.name || '—',
-    brand: variant?.brand || material?.brand || null,
+    brand: brand ?? variant?.brand ?? material?.brand ?? null,
     purchase_unit: material?.purchase_unit || '',
     variant_id: variant?.id || null,
     supplier_id: supplierId || null,
@@ -90,6 +90,30 @@ async function logPriceChange({ materialId, variantId, supplierId, brand, oldPri
   });
 }
 
+function resolveItemSupplierId(item) {
+  return item.supplier_id || item.variant?.supplier_id || item.material?.supplier_id || null;
+}
+
+// Bahan yang di-mapping ke supplier berbeda per outlet (Master Data > Mapping
+// Supplier) punya harga sendiri per outlet+bahan+supplier di
+// outlet_material_suppliers — INI sumber kebenaran harga untuk kombinasi
+// tersebut, bukan harga master bahan (materials.price_per_purchase_unit) yang
+// dipakai bersama oleh SEMUA supplier bahan itu. Tanpa fungsi ini, menerima PO
+// dari supplier A akan menimpa harga master yang lalu "bocor" jadi harga
+// default saat Catat Penerimaan supplier B dibuka (dan sebaliknya), padahal
+// keduanya seharusnya independen.
+async function findActiveOutletMappings(materialId, supplierId) {
+  if (!materialId || !supplierId) return [];
+  const { data, error } = await supabase
+    .from('outlet_material_suppliers')
+    .select('id, price_per_purchase_unit, brand')
+    .eq('material_id', materialId)
+    .eq('supplier_id', supplierId)
+    .eq('is_active', true);
+  if (error) return []; // installasi tanpa tabel/kolom mapping -> fallback ke harga master
+  return data || [];
+}
+
 async function fetchReceivedItems(poId) {
   let result = await supabase
     .from('purchase_order_items')
@@ -133,11 +157,16 @@ async function syncPricesFromReceive(poId) {
         Number(item.price_actual) > 0
     );
 
-    // Satu target harga (varian merk, atau material default) hanya di-update
-    // sekali per penerimaan — input terakhir yang menang.
+    // Satu target harga (varian merk, mapping outlet+supplier, atau material
+    // default) hanya di-update sekali per penerimaan — input terakhir yang
+    // menang. supplier_id ikut jadi kunci non-varian supaya dua item bahan
+    // yang sama dari SUPPLIER BERBEDA (mis. adjustment tambahan) tidak saling
+    // menimpa target harganya.
     const byTarget = new Map();
     for (const item of received) {
-      const key = item.variant_id ? `v:${item.variant_id}` : `m:${item.material_id}`;
+      const key = item.variant_id
+        ? `v:${item.variant_id}`
+        : `m:${item.material_id}:${resolveItemSupplierId(item) || ''}`;
       const existing = byTarget.get(key);
       if (!existing || new Date(item.created_at || 0) >= new Date(existing.created_at || 0)) {
         byTarget.set(key, item);
@@ -147,37 +176,104 @@ async function syncPricesFromReceive(poId) {
     const changes = [];
     for (const item of byTarget.values()) {
       const isVariant = Boolean(item.variant_id && item.variant);
-      const currentPrice = Number(
-        isVariant ? item.variant.price_per_purchase_unit : item.material?.price_per_purchase_unit
-      ) || 0;
       const newPrice = Number(item.price_actual);
+      const supplierId = resolveItemSupplierId(item);
+
+      if (isVariant) {
+        const currentPrice = Number(item.variant.price_per_purchase_unit) || 0;
+        if (currentPrice === newPrice) continue;
+
+        const updateResult = await supabase
+          .from('material_variants')
+          .update({ price_per_purchase_unit: newPrice })
+          .eq('id', item.variant_id);
+        if (updateResult.error) {
+          console.error('Auto-update harga varian gagal:', updateResult.error.message);
+          continue;
+        }
+
+        const logError = await insertPriceLog({
+          material_id: item.material_id,
+          variant_id: item.variant_id || null,
+          supplier_id: supplierId,
+          po_id: poId,
+          brand: item.variant?.brand || item.material?.brand || null,
+          old_price: currentPrice,
+          new_price: newPrice,
+          source: 'po_receive',
+          note: null,
+        });
+        if (logError) console.error('Log harga gagal disimpan:', logError.message);
+
+        changes.push(
+          buildChange({ material: item.material, variant: item.variant, supplierId, oldPrice: currentPrice, newPrice })
+        );
+        continue;
+      }
+
+      // Non-varian: cek dulu apakah bahan ini punya mapping outlet aktif untuk
+      // supplier ini (Master Data > Mapping Supplier). Kalau ada, mapping itu
+      // sumber harga yang benar untuk kombinasi bahan+supplier ini — update di
+      // sana, JANGAN sentuh harga master bahan supaya harga supplier lain
+      // untuk bahan yang sama tetap independen.
+      const mappings = await findActiveOutletMappings(item.material_id, supplierId);
+
+      if (mappings.length > 0) {
+        const stale = mappings.filter((m) => (Number(m.price_per_purchase_unit) || 0) !== newPrice);
+        if (stale.length === 0) continue;
+
+        const { error: updateError } = await supabase
+          .from('outlet_material_suppliers')
+          .update({ price_per_purchase_unit: newPrice })
+          .in('id', stale.map((m) => m.id));
+        if (updateError) {
+          console.error('Auto-update harga mapping supplier gagal:', updateError.message);
+          continue;
+        }
+
+        const oldPrice = Number(stale[0].price_per_purchase_unit) || 0;
+        const brand = stale[0].brand || item.material?.brand || null;
+
+        const logError = await insertPriceLog({
+          material_id: item.material_id,
+          variant_id: null,
+          supplier_id: supplierId,
+          po_id: poId,
+          brand,
+          old_price: oldPrice,
+          new_price: newPrice,
+          source: 'po_receive',
+          note: null,
+        });
+        if (logError) console.error('Log harga gagal disimpan:', logError.message);
+
+        changes.push(
+          buildChange({ material: item.material, brand, supplierId, oldPrice, newPrice })
+        );
+        continue;
+      }
+
+      // Tidak ada mapping outlet untuk supplier ini — bahan ini dibeli dari
+      // satu supplier saja, perilaku lama tetap berlaku: harga master aman
+      // untuk disinkronkan.
+      const currentPrice = Number(item.material?.price_per_purchase_unit) || 0;
       if (currentPrice === newPrice) continue;
 
-      // Update harga master
-      const updateResult = isVariant
-        ? await supabase
-            .from('material_variants')
-            .update({ price_per_purchase_unit: newPrice })
-            .eq('id', item.variant_id)
-        : await supabase
-            .from('materials')
-            .update({ price_per_purchase_unit: newPrice })
-            .eq('id', item.material_id);
-
+      const updateResult = await supabase
+        .from('materials')
+        .update({ price_per_purchase_unit: newPrice })
+        .eq('id', item.material_id);
       if (updateResult.error) {
         console.error('Auto-update harga gagal:', updateResult.error.message);
         continue;
       }
 
-      const supplierId =
-        item.supplier_id || item.variant?.supplier_id || item.material?.supplier_id || null;
-
       const logError = await insertPriceLog({
         material_id: item.material_id,
-        variant_id: item.variant_id || null,
+        variant_id: null,
         supplier_id: supplierId,
         po_id: poId,
-        brand: item.variant?.brand || item.material?.brand || null,
+        brand: item.material?.brand || null,
         old_price: currentPrice,
         new_price: newPrice,
         source: 'po_receive',
@@ -186,13 +282,7 @@ async function syncPricesFromReceive(poId) {
       if (logError) console.error('Log harga gagal disimpan:', logError.message);
 
       changes.push(
-        buildChange({
-          material: item.material,
-          variant: item.variant,
-          supplierId,
-          oldPrice: currentPrice,
-          newPrice,
-        })
+        buildChange({ material: item.material, supplierId, oldPrice: currentPrice, newPrice })
       );
     }
 
