@@ -10,6 +10,8 @@ import useModalDismiss from './useModalDismiss';
  * - danger        (true = tombol merah untuk aksi destruktif)
  * - loading       (true = tombol konfirmasi menampilkan teks proses & disabled)
  * - loadingLabel  (default "Memproses...")
+ * - disableConfirm (true = tombol konfirmasi nonaktif meski tidak loading —
+ *   dipakai untuk pola "ketik ulang nama" sebelum boleh konfirmasi)
  * - onConfirm, onCancel
  */
 export default function ConfirmDialog({
@@ -20,6 +22,7 @@ export default function ConfirmDialog({
   danger = false,
   loading = false,
   loadingLabel = 'Memproses...',
+  disableConfirm = false,
   onConfirm,
   onCancel,
 }) {
@@ -46,7 +49,7 @@ export default function ConfirmDialog({
           <button
             type="button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || disableConfirm}
             autoFocus
             className={`px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 ${
               danger ? 'bg-red-600 hover:bg-red-700' : 'bg-orange-500 hover:bg-orange-600'

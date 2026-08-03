@@ -911,6 +911,14 @@ function OutletsTab() {
   const [inventoriCabangList, setInventoriCabangList] = useState([]);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  // Eskalasi hapus paksa (cascade) — muncul kalau hapus biasa ditolak karena
+  // outlet masih terhubung data lain.
+  const [forceTarget, setForceTarget] = useState(null);
+  const [forcePreview, setForcePreview] = useState(null);
+  const [forceLoadingPreview, setForceLoadingPreview] = useState(false);
+  const [forceConfirmText, setForceConfirmText] = useState('');
+  const [forceDeleting, setForceDeleting] = useState(false);
+  const [forceError, setForceError] = useState('');
 
   useEffect(() => {
     loadOutlets();
@@ -959,10 +967,55 @@ function OutletsTab() {
       setConfirmDelete(null);
       await loadOutlets();
     } catch (err) {
-      setError(err.response?.data?.error || err.message);
+      // Ditolak (biasanya karena masih terhubung data lain) — tawarkan opsi
+      // hapus paksa (cascade) dengan preview + konfirmasi ketik ulang nama,
+      // bukan cuma berhenti di pesan error.
+      const outlet = confirmDelete;
       setConfirmDelete(null);
+      if (err.response?.status === 400) {
+        openForceDelete(outlet);
+      } else {
+        setError(err.response?.data?.error || err.message);
+      }
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const openForceDelete = async (outlet) => {
+    setForceTarget(outlet);
+    setForcePreview(null);
+    setForceConfirmText('');
+    setForceError('');
+    setForceLoadingPreview(true);
+    try {
+      const res = await api.get(`/api/outlets/${outlet.id}/delete-preview`);
+      setForcePreview(res.data);
+    } catch (err) {
+      setForceError(err.response?.data?.error || err.message);
+    } finally {
+      setForceLoadingPreview(false);
+    }
+  };
+
+  const closeForceDelete = () => {
+    setForceTarget(null);
+    setForcePreview(null);
+    setForceConfirmText('');
+    setForceError('');
+  };
+
+  const handleForceDelete = async () => {
+    setForceDeleting(true);
+    setForceError('');
+    try {
+      await api.delete(`/api/outlets/${forceTarget.id}/cascade`);
+      closeForceDelete();
+      await loadOutlets();
+    } catch (err) {
+      setForceError(err.response?.data?.error || err.message);
+    } finally {
+      setForceDeleting(false);
     }
   };
 
@@ -983,10 +1036,65 @@ function OutletsTab() {
           <p>
             Outlet <strong>{confirmDelete.name}</strong> akan dihapus permanen.
           </p>
-          <p className="text-red-600 mt-1">
-            Jika outlet masih terhubung dengan data order/mapping/laporan, penghapusan akan gagal
-            — nonaktifkan saja lewat toggle Status.
+          <p className="text-gray-500 mt-1">
+            Jika outlet masih terhubung dengan data order/mapping/laporan, Anda akan ditawarkan
+            opsi hapus paksa beserta seluruh data terkait.
           </p>
+        </ConfirmDialog>
+      )}
+
+      {forceTarget && (
+        <ConfirmDialog
+          title="Outlet Masih Terhubung Data Lain"
+          confirmLabel="Ya, Hapus Paksa Semuanya"
+          danger
+          loading={forceDeleting}
+          loadingLabel="Menghapus..."
+          disableConfirm={
+            forceLoadingPreview || !forcePreview || forceConfirmText.trim() !== forceTarget.name
+          }
+          onConfirm={handleForceDelete}
+          onCancel={forceDeleting ? undefined : closeForceDelete}
+        >
+          <p>
+            Outlet <strong>{forceTarget.name}</strong> tidak bisa dihapus biasa karena masih
+            terhubung dengan data lain. Hapus paksa akan menghapus outlet ini{' '}
+            <strong>beserta seluruh data di bawah, permanen, tidak bisa dibatalkan</strong>:
+          </p>
+          {forceLoadingPreview && (
+            <p className="mt-2 text-gray-400">Menghitung data terkait...</p>
+          )}
+          {forceError && <p className="mt-2 text-red-600">{forceError}</p>}
+          {forcePreview && (
+            <>
+              {forcePreview.total === 0 ? (
+                <p className="mt-2 text-gray-500">
+                  Tidak ada data lain yang terdeteksi terhubung — aman dihapus.
+                </p>
+              ) : (
+                <ul className="mt-2 list-disc list-inside space-y-0.5 text-red-600">
+                  {forcePreview.counts.map((c) => (
+                    <li key={c.key}>{c.label}: {c.count}</li>
+                  ))}
+                </ul>
+              )}
+              {forcePreview.counts.some((c) => c.key === 'mitra_accounts') && (
+                <p className="mt-2 text-red-600">
+                  Akun login mitra outlet ini juga akan ikut terhapus dan tidak bisa login lagi.
+                </p>
+              )}
+              <p className="mt-3 text-gray-600">
+                Ketik <strong>{forceTarget.name}</strong> untuk konfirmasi:
+              </p>
+              <input
+                autoFocus
+                className="input text-sm mt-1 w-full"
+                value={forceConfirmText}
+                onChange={(e) => setForceConfirmText(e.target.value)}
+                placeholder={forceTarget.name}
+              />
+            </>
+          )}
         </ConfirmDialog>
       )}
 
