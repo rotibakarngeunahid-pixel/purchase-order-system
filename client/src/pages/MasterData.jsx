@@ -1692,158 +1692,12 @@ function SupplierMappingTab() {
   );
 }
 
-// ─── Akun Mitra Tab ─────────────────────────────────────────────────────────
-// Login untuk mitra/franchise (satu akun = satu outlet) — dipakai fitur
-// "Pembelian Bahan Baku oleh Mitra" (client/src/pages/MitraPurchase.jsx).
-function MitraAccountsTab() {
-  const emptyForm = { outlet_id: '', username: '', full_name: '', password: '' };
-  const [accounts, setAccounts] = useState([]);
-  const [outlets, setOutlets] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState(emptyForm);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    loadAccounts();
-    api.get('/api/outlets').then((res) => setOutlets((res.data || []).filter((o) => o.is_active))).catch(() => {});
-  }, []);
-
-  async function loadAccounts() {
-    setLoading(true);
-    const res = await api.get('/api/mitra-accounts');
-    setAccounts(res.data);
-    setLoading(false);
-  }
-
-  const startAdd = () => { setEditingId('new'); setForm(emptyForm); setError(''); };
-  const startEdit = (a) => { setEditingId(a.id); setForm({ outlet_id: a.outlet_id, username: a.username, full_name: a.full_name, password: '' }); setError(''); };
-  const cancelEdit = () => { setEditingId(null); setError(''); };
-
-  const handleSave = async () => {
-    if (!form.outlet_id) { setError('Outlet wajib dipilih'); return; }
-    if (!form.full_name.trim()) { setError('Nama mitra wajib diisi'); return; }
-    if (editingId === 'new' && (!form.username.trim() || !form.password)) {
-      setError('Username dan password wajib diisi untuk akun baru');
-      return;
-    }
-    setSaving(true);
-    setError('');
-    try {
-      if (editingId === 'new') {
-        await api.post('/api/mitra-accounts', form);
-      } else {
-        const payload = { outlet_id: form.outlet_id, full_name: form.full_name };
-        if (form.password) payload.password = form.password;
-        await api.put(`/api/mitra-accounts/${editingId}`, payload);
-      }
-      setEditingId(null);
-      await loadAccounts();
-    } catch (err) {
-      setError(err.response?.data?.error || err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const toggleActive = async (a) => {
-    await api.put(`/api/mitra-accounts/${a.id}`, { is_active: !a.is_active });
-    await loadAccounts();
-  };
-
-  if (loading) return <div className="py-10 text-center text-gray-400">Memuat...</div>;
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-500">{accounts.length} akun mitra terdaftar</p>
-        <button onClick={startAdd} disabled={editingId !== null} className="btn-primary text-sm">+ Tambah Akun Mitra</button>
-      </div>
-      {error && <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>}
-      <div className="card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Nama Mitra</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Username</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Outlet</th>
-              <th className="px-4 py-3 text-left font-medium text-gray-600">Password Baru</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-600">Status</th>
-              <th className="px-4 py-3 text-center font-medium text-gray-600">Aksi</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {editingId === 'new' && (
-              <tr className="bg-yellow-50">
-                <td className="px-4 py-2"><input autoFocus className="input text-sm" placeholder="Nama mitra" value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} /></td>
-                <td className="px-4 py-2"><input className="input text-sm" placeholder="username" value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} /></td>
-                <td className="px-4 py-2">
-                  <select className="input text-sm" value={form.outlet_id} onChange={(e) => setForm((f) => ({ ...f, outlet_id: e.target.value }))}>
-                    <option value="">— pilih outlet —</option>
-                    {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                  </select>
-                </td>
-                <td className="px-4 py-2"><input type="password" className="input text-sm" placeholder="password" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></td>
-                <td />
-                <td className="px-4 py-2 text-center">
-                  <div className="flex gap-2 justify-center">
-                    <button onClick={handleSave} disabled={saving} className="btn-primary text-xs px-3 py-1">{saving ? '...' : 'Simpan'}</button>
-                    <button onClick={cancelEdit} className="btn-outline text-xs px-3 py-1">Batal</button>
-                  </div>
-                </td>
-              </tr>
-            )}
-            {accounts.map((a) =>
-              editingId === a.id ? (
-                <tr key={a.id} className="bg-yellow-50">
-                  <td className="px-4 py-2"><input autoFocus className="input text-sm" value={form.full_name} onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))} /></td>
-                  <td className="px-4 py-2 text-gray-400">{a.username}</td>
-                  <td className="px-4 py-2">
-                    <select className="input text-sm" value={form.outlet_id} onChange={(e) => setForm((f) => ({ ...f, outlet_id: e.target.value }))}>
-                      {outlets.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2"><input type="password" className="input text-sm" placeholder="(kosongkan jika tidak ganti)" value={form.password} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} /></td>
-                  <td />
-                  <td className="px-4 py-2 text-center">
-                    <div className="flex gap-2 justify-center">
-                      <button onClick={handleSave} disabled={saving} className="btn-primary text-xs px-3 py-1">{saving ? '...' : 'Simpan'}</button>
-                      <button onClick={cancelEdit} className="btn-outline text-xs px-3 py-1">Batal</button>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                <tr key={a.id} className={`hover:bg-gray-50 ${!a.is_active ? 'opacity-50' : ''}`}>
-                  <td className="px-4 py-3 font-medium text-gray-800">{a.full_name}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.username}</td>
-                  <td className="px-4 py-3 text-gray-600">{a.outlets?.name || '—'}</td>
-                  <td className="px-4 py-3 text-gray-300 italic">••••••••</td>
-                  <td className="px-4 py-3 text-center">
-                    <button onClick={() => toggleActive(a)} className={`w-10 h-5 rounded-full transition-colors ${a.is_active ? 'bg-green-500' : 'bg-gray-300'}`}>
-                      <span className={`block w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${a.is_active ? 'translate-x-5' : ''}`} />
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <button onClick={() => startEdit(a)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
-                  </td>
-                </tr>
-              )
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────────
 const TABS = [
   { id: 'suppliers', label: 'Supplier' },
   { id: 'materials', label: 'Bahan Baku' },
   { id: 'outlets', label: 'Outlet' },
   { id: 'supplier-mapping', label: 'Mapping Supplier' },
-  { id: 'mitra-accounts', label: 'Akun Mitra' },
 ];
 
 export default function MasterData() {
@@ -1874,7 +1728,6 @@ export default function MasterData() {
       {activeTab === 'materials' && <MaterialsTab />}
       {activeTab === 'outlets' && <OutletsTab />}
       {activeTab === 'supplier-mapping' && <SupplierMappingTab />}
-      {activeTab === 'mitra-accounts' && <MitraAccountsTab />}
     </div>
   );
 }

@@ -1,9 +1,15 @@
 // Endpoint transaksi Pembelian Bahan Baku oleh Mitra.
-// Dipakai BERSAMA oleh mitra (buat transaksi, lihat riwayat sendiri) dan
-// admin (lihat semua, filter, edit, batalkan) — dibedakan lewat req.actor
-// yang diisi middleware/dualActorAuth.js. Lihat juga services/posStockSync.js
-// (syncMitraPurchaseToInventory) dan supabase/migration_mitra_purchase.sql
-// (create_mitra_purchase / update_mitra_purchase, dijalankan atomik di Postgres).
+// Dipakai BERSAMA oleh investor-dashboard (server-to-server via X-Service-Key
+// — mitra login & pilih outlet di sana, TIDAK punya akun di app ini) dan
+// admin purchase_order (lihat semua, filter, edit, batalkan) — dibedakan
+// lewat req.actor yang diisi middleware/dualActorAuth.js. Untuk actor
+// 'service', outlet_id/outlet_name/actor_name dipercaya langsung dari
+// payload karena investor-dashboard sudah memvalidasi identitas & akses
+// outlet investor yang login (lihat investor-dashboard/lib/auth.ts
+// getMyOutletIds + investor_outlet_access).
+// Lihat juga services/posStockSync.js (syncMitraPurchaseToInventory) dan
+// supabase/migration_mitra_purchase*.sql (create_mitra_purchase /
+// update_mitra_purchase, dijalankan atomik di Postgres).
 const express = require('express');
 const router = express.Router();
 const supabase = require('../services/supabase');
@@ -14,11 +20,11 @@ const ITEM_SELECT = `
   materials(id, code, name, purchase_unit)
 `;
 const HEADER_SELECT = `
-  id, outlet_id, mitra_account_id, purchase_date, invoice_number, supplier_name, notes,
+  id, outlet_id, investor_profile_id, purchase_date, invoice_number, supplier_name, notes,
   grand_total, status, sync_status, sync_message, synced_at,
   created_by_name, created_at, updated_by_name, updated_at,
   cancelled_at, cancelled_by_name, cancel_reason,
-  outlets(id, name), mitra_accounts(id, full_name, username)
+  outlets(id, name)
 `;
 
 function validateItemsPayload(items) {
@@ -44,7 +50,7 @@ function mapPgError(error, res) {
   return res.status(500).json({ error: error.message });
 }
 
-// ── GET /materials — bahan baku aktif, dipakai dropdown form (mitra & admin) ─
+// ── GET /materials — bahan baku aktif, dipakai dropdown form (service & admin) ─
 router.get('/materials', async (req, res) => {
   const { data, error } = await supabase
     .from('materials')
@@ -55,27 +61,32 @@ router.get('/materials', async (req, res) => {
   res.json(data || []);
 });
 
-// ── POST / — buat transaksi baru (MITRA ONLY) ────────────────────────────────
+// ── POST / — buat transaksi baru (SERVICE ONLY — dipanggil investor-dashboard) ─
 router.post('/', async (req, res) => {
-  if (req.actor.type !== 'mitra') {
-    return res.status(403).json({ error: 'Hanya akun mitra yang dapat menambah pembelian' });
+  if (req.actor.type !== 'service') {
+    return res.status(403).json({ error: 'Endpoint ini hanya untuk integrasi server-to-server' });
   }
 
-  const { purchase_date, invoice_number, supplier_name, notes, items } = req.body;
+  const {
+    outlet_id, outlet_name, actor_name, investor_profile_id,
+    purchase_date, invoice_number, supplier_name, notes, items,
+  } = req.body;
+  if (!outlet_id) return res.status(400).json({ error: 'outlet_id wajib diisi' });
+  if (!actor_name) return res.status(400).json({ error: 'actor_name wajib diisi' });
   if (!purchase_date) return res.status(400).json({ error: 'Tanggal pembelian wajib diisi' });
   const itemError = validateItemsPayload(items);
   if (itemError) return res.status(400).json({ error: itemError });
 
   const { data: rpcData, error: rpcError } = await supabase.rpc('create_mitra_purchase', {
-    p_outlet_id:          req.actor.outletId,
-    p_mitra_account_id:   req.actor.mitraAccountId,
-    p_purchase_date:      purchase_date,
-    p_invoice_number:     invoice_number || null,
-    p_supplier_name:      supplier_name || null,
-    p_notes:              notes || null,
-    p_created_by_name:    req.actor.name,
-    p_created_ip:         req.ip,
-    p_created_user_agent: req.headers['user-agent'] || null,
+    p_outlet_id:           outlet_id,
+    p_investor_profile_id: investor_profile_id || null,
+    p_purchase_date:       purchase_date,
+    p_invoice_number:      invoice_number || null,
+    p_supplier_name:       supplier_name || null,
+    p_notes:               notes || null,
+    p_created_by_name:     actor_name,
+    p_created_ip:          req.ip,
+    p_created_user_agent:  req.headers['user-agent'] || null,
     p_items: items.map((i) => ({
       material_id: i.material_id,
       brand:       i.brand || null,
@@ -100,7 +111,7 @@ router.post('/', async (req, res) => {
     id: i.id, material_id: i.material_id, material_name: i.materials?.name, qty: i.qty, unit: i.unit,
   }));
   const posSync = await syncMitraPurchaseToInventory(
-    purchaseId, syncPayloadItems, req.actor.outletId, req.actor.outletName, req.actor.name
+    purchaseId, syncPayloadItems, outlet_id, outlet_name, actor_name
   );
 
   if (!posSync.ok) {
@@ -121,16 +132,17 @@ router.post('/', async (req, res) => {
   res.status(201).json({ ...full, items: savedItems });
 });
 
-// ── GET / — daftar transaksi (mitra: hanya miliknya; admin: semua + filter) ──
+// ── GET / — daftar transaksi (service: wajib outlet_id, hanya outlet itu; admin: semua + filter) ──
 router.get('/', async (req, res) => {
   let query = supabase.from('mitra_purchases').select(HEADER_SELECT).order('purchase_date', { ascending: false }).order('created_at', { ascending: false });
 
-  if (req.actor.type === 'mitra') {
-    query = query.eq('mitra_account_id', req.actor.mitraAccountId);
+  if (req.actor.type === 'service') {
+    if (!req.query.outlet_id) return res.status(400).json({ error: 'outlet_id wajib diisi' });
+    query = query.eq('outlet_id', req.query.outlet_id);
   } else {
-    const { outlet_id, mitra_account_id, supplier_name, date_from, date_to } = req.query;
+    const { outlet_id, created_by_name, supplier_name, date_from, date_to } = req.query;
     if (outlet_id) query = query.eq('outlet_id', outlet_id);
-    if (mitra_account_id) query = query.eq('mitra_account_id', mitra_account_id);
+    if (created_by_name) query = query.ilike('created_by_name', `%${created_by_name}%`);
     if (supplier_name) query = query.ilike('supplier_name', `%${supplier_name}%`);
     if (date_from) query = query.gte('purchase_date', date_from);
     if (date_to) query = query.lte('purchase_date', date_to);
@@ -139,8 +151,9 @@ router.get('/', async (req, res) => {
   const { data, error } = await query;
   if (error) return res.status(500).json({ error: error.message });
 
-  // Dipakai halaman Laporan admin (export Excel + rekap qty per bahan) — item
-  // ikut diambil dalam query terpisah supaya list biasa (riwayat mitra) tetap ringan.
+  // Dipakai halaman Laporan admin (export Excel + rekap qty per bahan) dan
+  // riwayat di investor-dashboard — item ikut diambil dalam query terpisah
+  // supaya list ringkas (tanpa with_items) tetap ringan.
   if (req.query.with_items === 'true' && data && data.length > 0) {
     const { data: allItems } = await supabase
       .from('mitra_purchase_items')
@@ -158,7 +171,7 @@ router.get('/', async (req, res) => {
 
 // ── GET /stock-status — stok cabang saat ini di POS ──────────────────────────
 router.get('/stock-status', async (req, res) => {
-  const outletId = req.actor.type === 'mitra' ? req.actor.outletId : req.query.outlet_id;
+  const outletId = req.query.outlet_id;
   if (!outletId) return res.status(400).json({ error: 'outlet_id wajib diisi' });
 
   const result = await getMitraBranchStock(outletId);
@@ -171,8 +184,8 @@ router.get('/:id', async (req, res) => {
   const { data: header, error } = await supabase.from('mitra_purchases').select(HEADER_SELECT).eq('id', req.params.id).maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!header) return res.status(404).json({ error: 'Transaksi tidak ditemukan' });
-  if (req.actor.type === 'mitra' && header.mitra_account_id !== req.actor.mitraAccountId) {
-    return res.status(403).json({ error: 'Anda tidak punya akses ke transaksi ini' });
+  if (req.actor.type === 'service' && header.outlet_id !== req.query.outlet_id) {
+    return res.status(403).json({ error: 'Transaksi ini bukan milik outlet yang diminta' });
   }
 
   const { data: items, error: itemsErr } = await supabase.from('mitra_purchase_items').select(ITEM_SELECT).eq('purchase_id', req.params.id).order('created_at');

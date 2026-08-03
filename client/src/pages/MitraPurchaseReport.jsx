@@ -128,11 +128,10 @@ function EditModal({ purchase, materials, onClose, onSaved, showToast }) {
 
 export default function MitraPurchaseReport() {
   const [outlets, setOutlets] = useState([]);
-  const [mitraAccounts, setMitraAccounts] = useState([]);
   const [materials, setMaterials] = useState([]);
 
   const [outletId, setOutletId] = useState('');
-  const [mitraAccountId, setMitraAccountId] = useState('');
+  const [createdByName, setCreatedByName] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [dateFrom, setDateFrom] = useState(getFirstOfMonth());
   const [dateTo, setDateTo] = useState(toInputDate());
@@ -148,7 +147,6 @@ export default function MitraPurchaseReport() {
 
   useEffect(() => {
     api.get('/api/outlets').then((res) => setOutlets(res.data || [])).catch(() => {});
-    api.get('/api/mitra-accounts').then((res) => setMitraAccounts(res.data || [])).catch(() => {});
     api.get('/api/mitra-purchases/materials').then((res) => setMaterials(res.data || [])).catch(() => {});
   }, []);
 
@@ -156,14 +154,14 @@ export default function MitraPurchaseReport() {
     const timer = setTimeout(() => { loadRecords(); }, 400);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outletId, mitraAccountId, supplierName, dateFrom, dateTo]);
+  }, [outletId, createdByName, supplierName, dateFrom, dateTo]);
 
   async function loadRecords() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ with_items: 'true' });
       if (outletId) params.set('outlet_id', outletId);
-      if (mitraAccountId) params.set('mitra_account_id', mitraAccountId);
+      if (createdByName) params.set('created_by_name', createdByName);
       if (supplierName) params.set('supplier_name', supplierName);
       if (dateFrom) params.set('date_from', dateFrom);
       if (dateTo) params.set('date_to', dateTo);
@@ -233,7 +231,7 @@ export default function MitraPurchaseReport() {
           sheet.addRow({
             date: r.purchase_date,
             outlet: r.outlets?.name || '',
-            mitra: r.mitra_accounts?.full_name || '',
+            mitra: r.created_by_name || '',
             invoice: r.invoice_number || '',
             supplier: r.supplier_name || '',
             material: it.materials?.name || it.material_id,
@@ -334,10 +332,7 @@ export default function MitraPurchaseReport() {
         </div>
         <div>
           <label className="label">Mitra</label>
-          <select className="input text-sm" value={mitraAccountId} onChange={(e) => setMitraAccountId(e.target.value)}>
-            <option value="">Semua</option>
-            {mitraAccounts.map((m) => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-          </select>
+          <input className="input text-sm" value={createdByName} onChange={(e) => setCreatedByName(e.target.value)} placeholder="cari nama..." />
         </div>
         <div>
           <label className="label">Supplier/Toko</label>
@@ -377,7 +372,7 @@ export default function MitraPurchaseReport() {
                 <tr key={r.id} className={`hover:bg-gray-50 ${r.status === 'cancelled' ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3">{formatDateID(r.purchase_date)}</td>
                   <td className="px-4 py-3">{r.outlets?.name || '—'}</td>
-                  <td className="px-4 py-3">{r.mitra_accounts?.full_name || '—'}</td>
+                  <td className="px-4 py-3">{r.created_by_name || '—'}</td>
                   <td className="px-4 py-3 text-gray-600">{r.supplier_name || '—'}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{formatRupiah(r.grand_total)}</td>
                   <td className="px-4 py-3 text-center">

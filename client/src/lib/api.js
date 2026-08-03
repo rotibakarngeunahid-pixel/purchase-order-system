@@ -14,16 +14,13 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle 401 → logout (redirect ke login mitra atau admin sesuai sesi yang aktif)
+// Handle 401 → logout
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      const isMitra = localStorage.getItem('rbn_role') === 'mitra';
       localStorage.removeItem('rbn_token');
-      localStorage.removeItem('rbn_role');
-      localStorage.removeItem('rbn_mitra');
-      window.location.href = isMitra ? '/mitra/login' : '/login';
+      window.location.href = '/login';
     }
     return Promise.reject(error);
   }
