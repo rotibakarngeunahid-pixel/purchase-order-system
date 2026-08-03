@@ -909,6 +909,8 @@ function OutletsTab() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [inventoriCabangList, setInventoriCabangList] = useState([]);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     loadOutlets();
@@ -949,10 +951,45 @@ function OutletsTab() {
     await loadOutlets();
   };
 
+  const handleDelete = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await api.delete(`/api/outlets/${confirmDelete.id}`);
+      setConfirmDelete(null);
+      await loadOutlets();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message);
+      setConfirmDelete(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (loading) return <div className="py-10 text-center text-gray-400">Memuat...</div>;
 
   return (
     <div>
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Hapus Outlet?"
+          confirmLabel="Ya, Hapus"
+          danger
+          loading={deleting}
+          loadingLabel="Menghapus..."
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(null)}
+        >
+          <p>
+            Outlet <strong>{confirmDelete.name}</strong> akan dihapus permanen.
+          </p>
+          <p className="text-red-600 mt-1">
+            Jika outlet masih terhubung dengan data order/mapping/laporan, penghapusan akan gagal
+            — nonaktifkan saja lewat toggle Status.
+          </p>
+        </ConfirmDialog>
+      )}
+
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-gray-500">{outlets.length} outlet terdaftar</p>
         <button onClick={startAdd} disabled={editingId !== null} className="btn-primary text-sm">+ Tambah Outlet</button>
@@ -1042,7 +1079,10 @@ function OutletsTab() {
                     </button>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <button onClick={() => startEdit(o)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
+                    <div className="flex gap-3 justify-center">
+                      <button onClick={() => startEdit(o)} className="text-brand-orange text-xs font-medium hover:underline">Edit</button>
+                      <button onClick={() => setConfirmDelete(o)} className="text-red-500 text-xs font-medium hover:underline">Hapus</button>
+                    </div>
                   </td>
                 </tr>
               )

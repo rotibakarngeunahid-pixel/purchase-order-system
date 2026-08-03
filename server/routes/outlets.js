@@ -50,14 +50,19 @@ router.put('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('outlets')
-    .update({ is_active: false })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+    .delete()
+    .eq('id', id);
+  if (error) {
+    if (error.code === '23503') {
+      return res.status(400).json({
+        error: 'Outlet tidak dapat dihapus karena masih terhubung dengan data order/mapping/laporan. Nonaktifkan saja lewat toggle.',
+      });
+    }
+    return res.status(500).json({ error: error.message });
+  }
+  res.json({ success: true });
 });
 
 module.exports = router;
