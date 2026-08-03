@@ -18,8 +18,11 @@
 --     cabang), tidak boleh ikut terhapus hanya karena satu outlet dihapus.
 --   - outlet_material_suppliers: mapping supplier per outlet+bahan.
 --   - mitra_purchases (+ mitra_purchase_items ikut lewat ON DELETE CASCADE
---     bawaan tabel itu) dan mitra_accounts: transaksi & akun login mitra
---     outlet ini -- akun mitra ikut TIDAK BISA LOGIN lagi setelah ini.
+--     bawaan tabel itu): transaksi pembelian mitra outlet ini. Login mitra
+--     sendiri TIDAK disimpan di database ini lagi (sudah dipindah ke
+--     investor-dashboard eksternal sejak migration_mitra_purchase_v2 --
+--     tabel mitra_accounts sudah di-drop), jadi tidak ada akun login yang
+--     perlu ikut dibersihkan di sini.
 --   - branch_holidays (semua, termasuk hari libur mingguan berulang) ikut
 --     terhapus otomatis lewat ON DELETE CASCADE saat baris outlet dihapus
 --     di langkah terakhir -- dihitung manual di sini supaya angkanya bisa
@@ -59,13 +62,12 @@ BEGIN
   GET DIAGNOSTICS v_count = ROW_COUNT;
   v_result := v_result || jsonb_build_object('outlet_material_suppliers', v_count);
 
+  -- Login mitra TIDAK disimpan di database ini lagi (sudah dipindah ke
+  -- investor-dashboard eksternal sejak migration_mitra_purchase_v2 -- tabel
+  -- mitra_accounts sudah di-drop), jadi cukup hapus transaksinya saja.
   DELETE FROM mitra_purchases WHERE outlet_id = p_outlet_id;
   GET DIAGNOSTICS v_count = ROW_COUNT;
   v_result := v_result || jsonb_build_object('mitra_purchases', v_count);
-
-  DELETE FROM mitra_accounts WHERE outlet_id = p_outlet_id;
-  GET DIAGNOSTICS v_count = ROW_COUNT;
-  v_result := v_result || jsonb_build_object('mitra_accounts', v_count);
 
   SELECT count(*) INTO v_count FROM branch_holidays WHERE outlet_id = p_outlet_id;
   v_result := v_result || jsonb_build_object('branch_holidays', v_count);

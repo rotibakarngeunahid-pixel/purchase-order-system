@@ -19,7 +19,6 @@ const CASCADE_LABELS = {
   finance_portal_access_logs: 'Log Akses Portal Keuangan',
   outlet_material_suppliers: 'Mapping Supplier per Bahan',
   mitra_purchases: 'Transaksi Pembelian Mitra',
-  mitra_accounts: 'Akun Login Mitra',
 };
 
 function isMissingCascadeFunctionError(error) {

@@ -1078,11 +1078,6 @@ function OutletsTab() {
                   ))}
                 </ul>
               )}
-              {forcePreview.counts.some((c) => c.key === 'mitra_accounts') && (
-                <p className="mt-2 text-red-600">
-                  Akun login mitra outlet ini juga akan ikut terhapus dan tidak bisa login lagi.
-                </p>
-              )}
               <p className="mt-3 text-gray-600">
                 Ketik <strong>{forceTarget.name}</strong> untuk konfirmasi:
               </p>
