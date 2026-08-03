@@ -5,7 +5,6 @@ export default function OrderEntryHeader({
   orderDate,
   onDateChange,
   onTomorrowClick,
-  isReadOnly,
   session,
   statusLabel,
   statusClass,
@@ -32,19 +31,16 @@ export default function OrderEntryHeader({
             type="date"
             value={orderDate}
             onChange={onDateChange}
-            disabled={isReadOnly}
             className="input w-auto text-sm"
           />
-          {!isReadOnly && (
-            <button
-              type="button"
-              title="Set tanggal ke besok"
-              onClick={onTomorrowClick}
-              className="px-3 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-orange-50 hover:border-brand-orange hover:text-brand-orange transition-colors"
-            >
-              Besok
-            </button>
-          )}
+          <button
+            type="button"
+            title="Set tanggal ke besok"
+            onClick={onTomorrowClick}
+            className="px-3 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-600 hover:bg-orange-50 hover:border-brand-orange hover:text-brand-orange transition-colors"
+          >
+            Besok
+          </button>
         </div>
         <button
           onClick={onReview}
