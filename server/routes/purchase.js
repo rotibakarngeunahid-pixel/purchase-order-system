@@ -332,7 +332,28 @@ async function attachLiveMapping(po) {
       qty_requested_purchase_unit: toRawPurchaseQty(row.qty, config),
     }));
 
-    return { ...item, live_mapping: liveMapping, outlet_requests: outletRequests };
+    // Outlet yang mapping-nya SEKARANG mengarah ke supplier lain (biasanya
+    // karena mapping-nya baru dibuat/diubah SETELAH PO ini sudah di-generate
+    // — bahan itu jadi "nyasar" ikut supplier lama). Dikirim sebagai info,
+    // bukan otomatis dipindah (item PO lain butuh perubahan lebih besar) —
+    // frontend menampilkannya sebagai peringatan supaya admin tahu perlu
+    // mengoreksi dropdown Supplier di baris ini saat menerima, kalau memang
+    // barangnya dibeli dari supplier yang baru.
+    const mappingDrift = resolvedCandidates
+      .filter((c) => itemSupplierId && c.effectiveSupplierId && c.effectiveSupplierId !== itemSupplierId)
+      .map((c) => ({
+        outlet_id: c.row.outlet_id,
+        supplier_id: c.effectiveSupplierId,
+        brand: c.config.brand,
+        price_per_purchase_unit: c.config.price_per_purchase_unit,
+      }));
+
+    return {
+      ...item,
+      live_mapping: liveMapping,
+      outlet_requests: outletRequests,
+      mapping_drift: mappingDrift,
+    };
   });
 
   return po;

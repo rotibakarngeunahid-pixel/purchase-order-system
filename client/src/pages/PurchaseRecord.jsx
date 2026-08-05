@@ -1199,6 +1199,19 @@ function ReceiveModal({ po, onClose, onSaved }) {
                               Selisih
                             </span>
                           )}
+                          {item.price_actual == null && item.mapping_drift?.length > 0 && (
+                            <div className="mt-1 text-[11px] text-amber-600 leading-snug max-w-[220px]">
+                              ⚠ {item.mapping_drift
+                                .map((d) => {
+                                  const outletName = outlets.find((o) => o.id === d.outlet_id)?.name || d.outlet_id;
+                                  const supplierName = suppliers.find((s) => s.id === d.supplier_id)?.name || '?';
+                                  return `${outletName} → ${supplierName}`;
+                                })
+                                .join(', ')}{' '}
+                              sekarang termapping ke supplier lain. Ubah Supplier di
+                              baris ini kalau memang diterima dari sana.
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2.5">
                           {variants.length > 0 ? (
