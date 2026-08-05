@@ -30,6 +30,9 @@ function makePO({ priceActual = null, itemSupplierId = null, itemBrand = 'Winche
     id: 'po-1',
     session_id: 'session-1',
     status: 'pending',
+    // supplier_id kolom mentah (via select('*')) — supplier objek nested cuma
+    // hasil join, keduanya sama-sama ada di respons Supabase asli.
+    supplier_id: SUPPLIER_MAPPING_ID,
     supplier: { id: SUPPLIER_MAPPING_ID, name: 'Priangan', wa_number: '0801' },
     session: { id: 'session-1', order_date: '2026-08-01' },
     items: [
@@ -122,7 +125,7 @@ function fakeRes() {
 test('GET /:po_id — item belum diterima ikut mapping outlet TERKINI (bukan snapshot lama)', async () => {
   installFakeSupabase({
     po: makePO({ priceActual: null, itemSupplierId: null }),
-    requestRows: [{ outlet_id: OUTLET_ID, material_id: MATERIAL_ID }],
+    requestRows: [{ outlet_id: OUTLET_ID, material_id: MATERIAL_ID, qty: 1 }],
     mappingRows: [
       {
         outlet_id: OUTLET_ID,
@@ -193,13 +196,22 @@ test('GET /:po_id — item yang SUDAH diterima (price_actual terisi) tidak dapat
   }
 });
 
-test('GET /:po_id — mapping ambigu antar outlet (beda konfigurasi) -> live_mapping null, fallback ke snapshot', async () => {
+test('GET /:po_id — outlet lain di sesi yang sama pesan bahan ini ke supplier BERBEDA tidak bikin live_mapping ambigu (bug utama, dilaporkan 2026-08-04)', async () => {
+  // Skenario nyata: Roti Tawar — sebagian outlet (mis. Pemogan) default ke
+  // satu supplier, sebagian lain (mis. Buduk) di-mapping ke supplier lain.
+  // Dua-duanya SELALU ada bareng di satu sesi order. Sebelum fix ini,
+  // attachLiveMapping membandingkan config SELURUH outlet di sesi yang
+  // pesan bahan yang sama (lintas PO/supplier) -> selalu "ambigu" -> live_mapping
+  // selalu null untuk PO grup manapun, walau mapping outlet-nya sendiri tidak
+  // pernah berubah. Item PO ini supplier-nya SUPPLIER_MAPPING_ID (Pemogan),
+  // OUTLET_B pesan bahan yang sama tapi ke SUPPLIER_MASTER_ID (Buduk) — harus
+  // diabaikan sepenuhnya, bukan bikin ambigu.
   const OUTLET_B = 'outlet-buduk';
   installFakeSupabase({
     po: makePO({ priceActual: null }),
     requestRows: [
-      { outlet_id: OUTLET_ID, material_id: MATERIAL_ID },
-      { outlet_id: OUTLET_B, material_id: MATERIAL_ID },
+      { outlet_id: OUTLET_ID, material_id: MATERIAL_ID, qty: 5 },
+      { outlet_id: OUTLET_B, material_id: MATERIAL_ID, qty: 3 },
     ],
     mappingRows: [
       {
@@ -228,10 +240,66 @@ test('GET /:po_id — mapping ambigu antar outlet (beda konfigurasi) -> live_map
     await handler({ params: { po_id: 'po-1' } }, res);
 
     assert.equal(res.statusCode, 200);
+    const item = res.body.items[0];
+    assert.ok(
+      item.live_mapping,
+      'outlet yang pesan bahan sama ke supplier LAIN tidak boleh bikin live_mapping ambigu'
+    );
+    assert.equal(item.live_mapping.supplier_id, SUPPLIER_MAPPING_ID);
+    assert.equal(item.live_mapping.price_per_purchase_unit, 14000);
+    assert.deepEqual(
+      item.outlet_requests.map((r) => r.outlet_id),
+      [OUTLET_ID],
+      'OUTLET_B (supplier lain) tidak boleh ikut distribusi item ini'
+    );
+  } finally {
+    restoreSupabase();
+  }
+});
+
+test('GET /:po_id — dua outlet SAMA-SAMA cocok dengan supplier item ini tapi harganya beda -> tetap ambigu, live_mapping null', async () => {
+  // Beda dari test di atas: di sini KEDUA outlet mapping-nya mengarah ke
+  // supplier yang SAMA dengan item ini (jadi lolos filter supplier), tapi
+  // harga/mereknya beda satu sama lain -- ini ambiguitas sungguhan (data
+  // tidak konsisten), live_mapping tetap harus null, bukan menebak salah satu.
+  const OUTLET_B = 'outlet-buduk';
+  installFakeSupabase({
+    po: makePO({ priceActual: null }),
+    requestRows: [
+      { outlet_id: OUTLET_ID, material_id: MATERIAL_ID, qty: 5 },
+      { outlet_id: OUTLET_B, material_id: MATERIAL_ID, qty: 3 },
+    ],
+    mappingRows: [
+      {
+        outlet_id: OUTLET_ID,
+        material_id: MATERIAL_ID,
+        supplier_id: SUPPLIER_MAPPING_ID,
+        price_per_purchase_unit: 14000,
+        brand: 'Wincheez Reguler',
+        is_active: true,
+      },
+      {
+        outlet_id: OUTLET_B,
+        material_id: MATERIAL_ID,
+        supplier_id: SUPPLIER_MAPPING_ID,
+        price_per_purchase_unit: 16000, // sama supplier, harga beda -> ambigu sungguhan
+        brand: 'Wincheez Reguler',
+        is_active: true,
+      },
+    ],
+  });
+
+  try {
+    const router = require(purchasePath);
+    const handler = getHandler(router, 'get', '/:po_id');
+    const res = fakeRes();
+    await handler({ params: { po_id: 'po-1' } }, res);
+
+    assert.equal(res.statusCode, 200);
     assert.equal(
       res.body.items[0].live_mapping,
       null,
-      'dua outlet dengan mapping berbeda untuk item PO yang sama harus ambigu -> live_mapping null'
+      'dua outlet dengan supplier sama tapi harga berbeda untuk item PO yang sama harus tetap ambigu -> live_mapping null'
     );
   } finally {
     restoreSupabase();

@@ -217,26 +217,35 @@ async function fetchPODetail(poId) {
 // diubah SETELAH PO dibuat dan itemnya belum benar-benar diterima (price_actual
 // masih kosong), Catat Penerimaan harus tetap mengikuti mapping TERKINI, bukan
 // snapshot yang sudah basi — itu sebabnya di sini kita resolve ulang mapping
-// per outlet yang memesan bahan ini di sesi yang sama, dan lampirkan sebagai
+// per outlet yang berkontribusi ke item ini, dan lampirkan sebagai
 // item.live_mapping. Begitu item pernah disimpan (price_actual terisi), nilai
 // yang tersimpan adalah transaksi aktual dan TIDAK boleh berubah sendiri lagi
 // hanya karena mapping diubah — live_mapping hanya dipakai sebagai DEFAULT,
 // prioritasnya di frontend selalu di bawah nilai yang sudah pernah disimpan.
 //
-// Kalau beberapa outlet berbeda menyumbang qty ke item PO yang sama (digabung
-// karena konfigurasinya identik saat PO dibuat) dan sekarang mapping mereka
-// sudah tidak sama lagi, hasilnya ambigu — live_mapping dibiarkan null supaya
-// fallback ke snapshot lama, bukan menebak salah satu outlet secara sepihak.
+// PENTING: outlet yang dipertimbangkan untuk item ini HANYA outlet yang
+// SUPPLIER-nya (mapping AKTIF SEKARANG) cocok dengan supplier item ini —
+// bukan seluruh outlet di sesi yang kebetulan memesan bahan yang sama ke
+// supplier LAIN. Tanpa filter ini, bahan yang rutin dipecah ke banyak
+// supplier per outlet (mis. Roti Tawar: sebagian outlet default ke satu
+// supplier, sebagian di-mapping ke supplier lain) akan SELALU dianggap
+// ambigu (live_mapping selalu null) walau mapping outlet-nya sendiri tidak
+// pernah berubah — bug yang dilaporkan user 2026-08-04. Kalau di antara
+// outlet yang SUDAH cocok itu sendiri confignya masih berbeda-beda (mis. dua
+// outlet sama-sama pindah ke supplier ini tapi harganya beda), barulah
+// live_mapping dibiarkan null (ambigu sungguhan) supaya fallback ke snapshot,
+// bukan menebak salah satu outlet secara sepihak.
 //
-// Fungsi ini SEKALIGUS merekonstruksi item.outlet_requests untuk PO LAMA yang
-// dibuat sebelum migration_purchase_item_outlet_requests_snapshot.sql —
-// tanpa snapshot itu, PurchaseRecord.jsx jatuh ke data sesi mentah (semua
-// outlet yang pernah memesan bahan ini, LINTAS SUPPLIER) yang menyebabkan
-// dobel hitung distribusi kalau bahan yang sama dipecah ke beberapa PO lewat
-// mapping. Rekonstruksi ini BEST-EFFORT: hanya menyertakan outlet yang
-// mapping AKTIF SEKARANG-nya cocok dengan supplier item ini — bukan snapshot
-// historis asli (kalau routing supplier outlet berubah sejak PO dibuat,
-// hasilnya bisa beda dari kondisi asli saat pemesanan).
+// Fungsi ini SEKALIGUS menghitung ulang item.outlet_requests (dipakai untuk
+// auto-isi Distribusi Bahan ke Cabang) dari mapping TERKINI — bukan cuma
+// untuk PO lama yang belum punya snapshot, tapi juga PO baru yang mapping
+// salah satu outlet-nya sudah berubah sejak PO dibuat: outlet yang sudah
+// "keluar" dari grup supplier ini otomatis tidak ikut disarankan lagi (qty-nya
+// akan masuk PO baru di supplier yang benar saat sesi berikutnya di-generate
+// lewat Review Order, bukan nyangkut di PO lama ini). Ini aman dipakai untuk
+// item yang SUDAH diterima juga — PurchaseRecord.jsx hanya memakai
+// outlet_requests untuk auto-isi kalau BELUM ada distribusi tersimpan;
+// transaksi yang sudah tersimpan tidak pernah ditimpa oleh ini.
 async function attachLiveMapping(po) {
   if (!po || !po.session_id || !Array.isArray(po.items)) return po;
   const orderedItems = po.items.filter((item) => (item.source || 'ordered') === 'ordered');
@@ -250,12 +259,9 @@ async function attachLiveMapping(po) {
     .in('material_id', materialIds);
   if (requestError || !requestRows || requestRows.length === 0) return po;
 
-  const outletIdsByMaterial = {};
   const requestRowsByMaterial = {};
   requestRows.forEach((row) => {
     if (!row.outlet_id || !row.material_id) return;
-    if (!outletIdsByMaterial[row.material_id]) outletIdsByMaterial[row.material_id] = new Set();
-    outletIdsByMaterial[row.material_id].add(row.outlet_id);
     if (!requestRowsByMaterial[row.material_id]) requestRowsByMaterial[row.material_id] = [];
     requestRowsByMaterial[row.material_id].push(row);
   });
@@ -280,16 +286,36 @@ async function attachLiveMapping(po) {
   po.items = po.items.map((item) => {
     if ((item.source || 'ordered') !== 'ordered') return item;
 
-    const outletIds = [...(outletIdsByMaterial[item.material_id] || [])];
-    const mappingsFound = outletIds
-      .map((outletId) => mappingByKey[`${outletId}:${item.material_id}`])
-      .filter(Boolean);
+    const itemSupplierId = item.supplier_id || po.supplier_id || null;
+
+    // Kandidat outlet yang berkontribusi ke item ini: snapshot outlet_requests
+    // asli kalau sudah ada (qty riil saat PO dibuat), atau data sesi mentah
+    // untuk PO lama yang belum punya snapshot ini.
+    const candidateRows = Array.isArray(item.outlet_requests)
+      ? item.outlet_requests
+          .filter((r) => r.outlet_id)
+          .map((r) => ({ outlet_id: r.outlet_id, qty: r.qty_requested }))
+      : (requestRowsByMaterial[item.material_id] || []).filter(
+          (row) => row.outlet_id && Number(row.qty) > 0
+        );
+
+    const resolvedCandidates = candidateRows.map((row) => {
+      const mapping = mappingByKey[`${row.outlet_id}:${item.material_id}`] || null;
+      const config = resolvePurchaseConfig(item.material, mapping);
+      const effectiveSupplierId = config.supplier_id || item.material?.supplier_id || null;
+      return { row, config, effectiveSupplierId };
+    });
+
+    // Hanya outlet yang mapping AKTIF SEKARANG-nya cocok dengan supplier item
+    // ini yang boleh ikut — outlet lain berarti bahannya sama tapi sekarang
+    // masuk PO/supplier LAIN, tidak boleh ikut terjumlah/dipertimbangkan di sini.
+    const matching = itemSupplierId
+      ? resolvedCandidates.filter((c) => c.effectiveSupplierId === itemSupplierId)
+      : [];
 
     let liveMapping = null;
-    if (mappingsFound.length > 0) {
-      const configs = outletIds.map((outletId) =>
-        resolvePurchaseConfig(item.material, mappingByKey[`${outletId}:${item.material_id}`] || null)
-      );
+    if (matching.length > 0) {
+      const configs = matching.map((c) => c.config);
       const [first, ...rest] = configs;
       if (!rest.some((c) => !sameConfig(c, first))) {
         liveMapping = {
@@ -300,37 +326,13 @@ async function attachLiveMapping(po) {
       }
     }
 
-    // PO baru sudah punya snapshot outlet_requests sendiri (lihat
-    // notifications.js) — jangan ditimpa, itu source of truth yang benar.
-    // Hanya rekonstruksi untuk PO lama yang belum punya snapshot ini.
-    let reconstructedOutletRequests;
-    if (!Array.isArray(item.outlet_requests)) {
-      const itemSupplierId = item.supplier_id || po.supplier_id || null;
-      const rows = requestRowsByMaterial[item.material_id] || [];
-      reconstructedOutletRequests = rows
-        .filter((row) => row.outlet_id && Number(row.qty) > 0)
-        .map((row) => {
-          const mapping = mappingByKey[`${row.outlet_id}:${item.material_id}`] || null;
-          const config = resolvePurchaseConfig(item.material, mapping);
-          const effectiveSupplierId = config.supplier_id || item.material?.supplier_id || null;
-          return { row, effectiveSupplierId, config };
-        })
-        // Hanya outlet yang mapping AKTIF SEKARANG-nya cocok dengan supplier item
-        // ini yang boleh ikut distribusi — outlet lain berarti bahannya sama tapi
-        // masuk PO/supplier LAIN, tidak boleh ikut terjumlah di sini.
-        .filter(({ effectiveSupplierId }) => itemSupplierId && effectiveSupplierId === itemSupplierId)
-        .map(({ row, config }) => ({
-          outlet_id: row.outlet_id,
-          qty_requested: row.qty,
-          qty_requested_purchase_unit: toRawPurchaseQty(row.qty, config),
-        }));
-    }
+    const outletRequests = matching.map(({ row, config }) => ({
+      outlet_id: row.outlet_id,
+      qty_requested: row.qty,
+      qty_requested_purchase_unit: toRawPurchaseQty(row.qty, config),
+    }));
 
-    return {
-      ...item,
-      live_mapping: liveMapping,
-      ...(reconstructedOutletRequests ? { outlet_requests: reconstructedOutletRequests } : {}),
-    };
+    return { ...item, live_mapping: liveMapping, outlet_requests: outletRequests };
   });
 
   return po;
